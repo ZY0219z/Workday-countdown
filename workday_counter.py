@@ -229,7 +229,8 @@ class WorkDayCounter:
             "start_date": "2025-07-17",
             "salary_day": 10,
             "work_start_time": "08:30",
-            "work_end_time": "18:00"
+            "work_end_time": "18:00",
+            "overtime_minutes": 0
         }
         if os.path.exists(self.config_file):
             try:
@@ -426,6 +427,20 @@ class WorkDayCounter:
             button_frame, text="发薪日", command=self.set_salary_day, **btn_style)
         btn_set_salary.pack(side=tk.LEFT, padx=(0, 5))
 
+        btn_set_overtime = tk.Button(
+            button_frame, text="加班时长", command=self.set_overtime_minutes,
+            font=("Microsoft YaHei", 10),
+            bg="#ff6666",
+            fg="white",
+            activebackground="#ff4d4d",
+            activeforeground="white",
+            bd=0,
+            padx=12,
+            pady=7,
+            cursor="hand2"
+        )
+        btn_set_overtime.pack(side=tk.LEFT, padx=(0, 5))
+
         btn_set_work_start = tk.Button(
             button_frame, text="上班时间", command=self.set_work_start_time, **btn_style2)
         btn_set_work_start.pack(side=tk.LEFT, padx=(0, 5))
@@ -450,6 +465,12 @@ class WorkDayCounter:
                 bg=self.COLORS["secondary_btn_hover"]))
             btn.bind("<Leave>", lambda e, b=btn: b.configure(
                 bg=self.COLORS["secondary_btn_bg"]))
+
+        # 加班按钮悬停效果（保持浅红色主题）
+        btn_set_overtime.bind(
+            "<Enter>", lambda e: btn_set_overtime.configure(bg="#ff4d4d"))
+        btn_set_overtime.bind(
+            "<Leave>", lambda e: btn_set_overtime.configure(bg="#ff6666"))
 
     def _update_scrollbar_visibility(self):
         """根据内容高度动态显示/隐藏滚动条"""
@@ -542,6 +563,35 @@ class WorkDayCounter:
             except ValueError:
                 messagebox.showerror("错误", "时间格式不正确，请使用 HH:MM 格式")
 
+    def set_overtime_minutes(self):
+        # 如果当前有加班时长，提供操作选项
+        current_overtime = self.config.get("overtime_minutes", 0)
+        if current_overtime > 0:
+            result = messagebox.askyesnocancel(
+                "加班时长设置",
+                f"当前加班时长: {current_overtime} 分钟\n\n选择操作:\n- 是: 保持原状\n- 否: 修改加班时长\n- 取消: 清除加班时长(设为0)"
+            )
+            if result is True:  # 用户选择"是" - 保持原状
+                return
+            elif result is False:  # 用户选择"否" - 修改
+                pass  # 继续下面的输入逻辑
+            else:  # 用户选择"取消" - 清除
+                self.config["overtime_minutes"] = 0
+                self.save_config()
+                self.update_display()
+                return
+
+        minutes = simpledialog.askinteger(
+            "设置加班时长",
+            "请输入今天加班的分钟数（0-600）\n输入0表示不加班",
+            initialvalue=self.config.get("overtime_minutes", 0),
+            minvalue=0, maxvalue=600
+        )
+        if minutes is not None:
+            self.config["overtime_minutes"] = minutes
+            self.save_config()
+            self.update_display()
+
     def update_display(self):
         now = datetime.now()
         today = now.date()
@@ -622,6 +672,11 @@ class WorkDayCounter:
             self.config["work_start_time"], "%H:%M").time()
         work_start_datetime = datetime.combine(today, work_start)
 
+        # 添加加班时间
+        overtime_minutes = self.config.get("overtime_minutes", 0)
+        if overtime_minutes > 0:
+            work_end_datetime += timedelta(minutes=overtime_minutes)
+
         if is_rest_day(today):
             self.countdown_label.config(text="今天休息！")
         elif now < work_start_datetime:
@@ -630,14 +685,26 @@ class WorkDayCounter:
             minutes = (time_diff.seconds % 3600) // 60
             self.countdown_label.config(text=f"还没上班，{hours}小时{minutes}分钟后开始")
         elif now >= work_end_datetime:
-            self.countdown_label.config(text="已经下班啦！")
+            if overtime_minutes > 0:
+                self.countdown_label.config(text="加班结束啦！")
+            else:
+                self.countdown_label.config(text="已经下班啦！")
         else:
             time_diff = work_end_datetime - now
             hours = time_diff.seconds // 3600
             minutes = (time_diff.seconds % 3600) // 60
             seconds = time_diff.seconds % 60
-            self.countdown_label.config(
-                text=f"{hours} 小时 {minutes} 分钟 {seconds} 秒")
+
+            # 只有在超过正常下班时间后才显示加班标识
+            normal_work_end = datetime.combine(today, datetime.strptime(
+                self.config["work_end_time"], "%H:%M").time())
+
+            if overtime_minutes > 0 and now > normal_work_end:
+                self.countdown_label.config(
+                    text=f"{hours} 小时 {minutes} 分钟 {seconds} 秒 (加班中)")
+            else:
+                self.countdown_label.config(
+                    text=f"{hours} 小时 {minutes} 分钟 {seconds} 秒")
 
         # 工作日进度
         total_work_seconds = (work_end_datetime -
@@ -658,6 +725,8 @@ class WorkDayCounter:
         self.progress_bar.draw(progress)
 
         # 底部信息
+        overtime_minutes = self.config.get("overtime_minutes", 0)
+        overtime_text = f"{overtime_minutes} 分钟" if overtime_minutes > 0 else "无"
         start_date_obj = datetime.strptime(
             self.config["start_date"], "%Y-%m-%d")
         self.start_date_info.config(
@@ -665,6 +734,7 @@ class WorkDayCounter:
                 f"上班开始: {start_date_obj.year}年{start_date_obj.month:02d}月{start_date_obj.day:02d}日"
                 f"  |  上班时间: {self.config['work_start_time']}"
                 f"  |  下班时间: {self.config['work_end_time']}"
+                f"  |  加班: {overtime_text}"
             )
         )
 

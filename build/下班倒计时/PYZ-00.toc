@@ -1,4 +1,4 @@
-('D:\\23267\\Desktop\\倒计时\\build\\下班倒计时\\PYZ-00.pyz',
+('E:\\倒计时\\工作日倒计时\\build\\下班倒计时\\PYZ-00.pyz',
  [('_compat_pickle',
    'C:\\Users\\23267\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\_compat_pickle.py',
    'PYMODULE'),
