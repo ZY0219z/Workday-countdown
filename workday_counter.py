@@ -5,6 +5,24 @@ import json
 import os
 import sys
 import ctypes
+import io
+try:
+    from PIL import Image, ImageTk
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+
+
+def get_resource_path(relative_path):
+    """获取资源文件路径，兼容 PyInstaller 打包模式"""
+    if getattr(sys, 'frozen', False):
+        # PyInstaller 打包后的临时目录
+        base_path = sys._MEIPASS
+    else:
+        # 开发模式：脚本所在目录
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
+
 
 # ============================================================
 # Windows DPI 感知（解决高分辨率屏幕模糊）
@@ -119,67 +137,391 @@ def get_next_work_day(target_date: date) -> date:
     return d
 
 
-class RoundProgressBar(tk.Canvas):
-    """圆角进度条"""
+class FishProgressBar(tk.Canvas):
+    """摸鱼主题进度条 - 流动光带、游动小鱼、推进水花"""
 
-    def __init__(self, parent, height=24, bg_color="#e2e8f0",
-                 fg_color="#2563eb", text_color="#ffffff", **kwargs):
+    def __init__(self, parent, height=48, **kwargs):
         super().__init__(parent, height=height,
                          bg=parent.cget("bg"), highlightthickness=0, **kwargs)
         self.height = height
-        self.bg_color = bg_color
-        self.fg_color = fg_color
-        self.text_color = text_color
-        self.progress = 0
-        self.radius = height // 2
         self.width = 1
+        self.progress = 0
+        self.target_progress = 0
+        self.flow_offset = 0  # 流动光带偏移
+        self.fish_bounce = 0  # 小鱼游动偏移
+        self.fish_direction = 1  # 小鱼游动方向
+        self.splash_particles = []  # 水花粒子
+        self.fish_image = None
+        self.wave_image = None
+        # 浪花摇摆状态
+        self.wave_sway_offsets = [0, 0, 0]
+        self.wave_sway_directions = [1, -1, 1]
+        self.load_fish_image()
+        self.load_wave_image()
         self.bind("<Configure>", self._on_resize)
         self.draw(0)
+        self.start_animation()
 
     def _on_resize(self, event=None):
         self.width = self.winfo_width()
         self.draw(self.progress)
 
+    def set_progress(self, value):
+        """设置目标进度值"""
+        target = max(0, min(100, value))
+        # 水花粒子已禁用
+        # if target > self.progress + 0.5:
+        #     self._add_splash()
+        self.target_progress = target
+        self._animate_progress()
+
+    def _animate_progress(self):
+        """平滑动画过渡到目标进度"""
+        if abs(self.progress - self.target_progress) > 0.5:
+            diff = self.target_progress - self.progress
+            self.progress += diff * 0.08
+            self.draw(self.progress)
+            self.after(40, self._animate_progress)
+        else:
+            self.progress = self.target_progress
+            self.draw(self.progress)
+
+    def _add_splash(self):
+        """添加推进水花粒子"""
+        progress_width = self.width * (self.progress / 100)
+        # 在进度末端生成多个水花粒子
+        for _ in range(5):
+            self.splash_particles.append({
+                'x': progress_width,
+                'y': self.height // 2 + (hash(str(_)) % 20 - 10),
+                'vx': (hash(str(_)+"x") % 10 - 5) * 0.5,
+                'vy': (hash(str(_)+"y") % 10 - 8) * 0.5,
+                'size': hash(str(_)+"s") % 6 + 3,
+                'life': 1.0,
+                'decay': 0.02 + (hash(str(_)+"d") % 10) * 0.005
+            })
+
+    def _add_splash_at_position(self, x, y):
+        """添加水滴溅射粒子 - 快速抛出、明显下落"""
+        # 水滴溅射：速度快、重力明显、短促有力
+        splash_configs = [
+            # (x偏移, y偏移, vx, vy, 大小)
+            (0, -2, 3.5, -4.0, 7),      # 右上飞溅
+            (2, 0, 4.5, -2.5, 6),       # 右侧飞溅
+            (1, 2, 3.0, -1.0, 8),       # 右下飞溅
+            (4, -1, 5.0, -3.5, 5),      # 更远的右侧
+            (-1, 0, 2.0, -2.0, 6),      # 原地飞溅
+        ]
+
+        for i, (dx, dy, vx, vy, size) in enumerate(splash_configs):
+            # 添加随机变化
+            rand_vx = (hash(str(i)+"vx") % 6 - 3) * 0.3
+            rand_vy = (hash(str(i)+"vy") % 6 - 3) * 0.3
+
+            self.splash_particles.append({
+                'x': x + dx,
+                'y': y + dy,
+                'vx': vx + rand_vx,      # 快速初始速度
+                'vy': vy + rand_vy,      # 向上抛出
+                'size': size,
+                'life': 1.0,
+                'decay': 0.018,          # 适中衰减，能看到完整轨迹
+            })
+
+    def start_animation(self):
+        """启动持续动画"""
+        self._animate_frame()
+
+    def _animate_frame(self):
+        """每帧动画更新"""
+        # 更新流动光带（降低速度）
+        self.flow_offset = (self.flow_offset + 1) % 60
+        # 更新小鱼游动
+        self.fish_bounce += 0.15 * self.fish_direction
+        if abs(self.fish_bounce) > 3:
+            self.fish_direction *= -1
+        # 水花粒子已禁用
+        # self._update_splash()
+        # 重绘
+        self.draw(self.progress)
+        self.after(50, self._animate_frame)
+
+    def _update_splash(self):
+        """更新水滴粒子 - 明显重力下落"""
+        new_particles = []
+        for p in self.splash_particles:
+            p['x'] += p['vx']
+            p['y'] += p['vy']
+            p['vy'] += 0.25  # 明显重力
+            p['vx'] *= 0.98  # 空气阻力
+            p['life'] -= p['decay']
+            if p['life'] > 0:
+                new_particles.append(p)
+        self.splash_particles = new_particles
+
     def draw(self, value):
         self.progress = max(0, min(100, value))
         self.delete("all")
 
-        # 背景圆角矩形
-        self._draw_round_rect(0, 0, self.width, self.height,
-                              self.radius, self.bg_color, self.bg_color)
+        bar_height = 32
+        bar_y = (self.height - bar_height) // 2
+        progress_width = self.width * (self.progress / 100)
 
-        # 填充圆角矩形
+        # 绘制水波纹背景
+        water_color = "#e3f2fd"
+        self.create_rectangle(0, bar_y, self.width, bar_y + bar_height,
+                              fill=water_color, outline="")
+
+        # 绘制进度区域
         if self.progress > 0:
-            fill_width = self.width * (self.progress / 100)
-            self._draw_round_rect(0, 0, fill_width, self.height,
-                                  self.radius, self.fg_color, self.fg_color)
+            progress_color = "#2196f3"
+            self.create_rectangle(0, bar_y, progress_width, bar_y + bar_height,
+                                  fill=progress_color, outline="")
 
-        # 百分比文字
+            # 绘制流动光带效果
+            self._draw_flow_light(progress_width, bar_y, bar_height)
+
+            # 水花粒子已禁用
+            # self._draw_splash()
+
+            # 绘制游动的小鱼
+            if self.fish_image is not None:
+                self._draw_fish_image(progress_width, bar_y, bar_height)
+            else:
+                self._draw_animated_fish(progress_width, bar_y, bar_height)
+
+        # 绘制水波纹边框
+        border_color = "#bbdefb"
+        self.create_line(0, bar_y, self.width, bar_y,
+                         fill=border_color, width=1)
+        self.create_line(0, bar_y + bar_height, self.width, bar_y + bar_height,
+                         fill=border_color, width=1)
+
+        # 百分比文字 - 根据是否被进度条覆盖切换颜色
+        text = f"{int(self.progress)}%"
+        text_x = self.width // 2
+        text_y = self.height // 2
+
+        # 检测进度条是否覆盖了文字中心
+        progress_width = self.width * (self.progress / 100)
+        is_covered = progress_width > text_x
+
+        if is_covered:
+            # 被覆盖：白色填充 + 蓝色描边
+            outline_color = "#1976d2" if self.progress > 0 else "#90a4ae"
+            fill_color = "#ffffff"
+        else:
+            # 未被覆盖：蓝色填充 + 白色描边
+            outline_color = "#ffffff"
+            fill_color = "#1976d2" if self.progress > 0 else "#90a4ae"
+
+        # 绘制描边（上下左右各偏移1像素）
+        for dx, dy in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]:
+            self.create_text(
+                text_x + dx, text_y + dy,
+                text=text,
+                fill=outline_color,
+                font=("Microsoft YaHei", 12, "bold")
+            )
+
+        # 绘制主文字
         self.create_text(
-            self.width // 2, self.height // 2,
-            text=f"{int(self.progress)}%",
-            fill=self.text_color,
-            font=("Microsoft YaHei", 10, "bold")
+            text_x, text_y,
+            text=text,
+            fill=fill_color,
+            font=("Microsoft YaHei", 12, "bold")
         )
 
-    def _draw_round_rect(self, x1, y1, x2, y2, r, outline, fill):
-        """绘制圆角矩形"""
-        points = [
-            x1 + r, y1,
-            x2 - r, y1,
-            x2, y1,
-            x2, y1 + r,
-            x2, y2 - r,
-            x2, y2,
-            x2 - r, y2,
-            x1 + r, y2,
-            x1, y2,
-            x1, y2 - r,
-            x1, y1 + r,
-            x1, y1,
-        ]
-        return self.create_polygon(points, smooth=True, outline=outline,
-                                   fill=fill)
+    def _draw_flow_light(self, progress_width, bar_y, bar_height):
+        """绘制流动光带效果 - 使用浪花图片，带摇摆动画"""
+        if progress_width < 20:
+            return
+
+        # 更新浪花摇摆状态（增大翻涌幅度）
+        for i in range(3):
+            self.wave_sway_offsets[i] += self.wave_sway_directions[i] * 0.8
+            if abs(self.wave_sway_offsets[i]) > 16:
+                self.wave_sway_directions[i] *= -1
+
+        # 创建多个流动浪花
+        for i in range(3):
+            offset = (self.flow_offset + i * 20) % 60
+            light_x = offset / 60.0 * progress_width
+            if light_x < progress_width:
+                # 使用浪花图片
+                if self.wave_image is not None:
+                    # 添加摇摆偏移
+                    sway_x = light_x + (hash(str(i)) %
+                                        6 - 3) * (self.wave_sway_offsets[i] / 8)
+                    sway_y = bar_y + bar_height // 2 + \
+                        (hash(str(i)+"y") % 8 - 4) * \
+                        (self.wave_sway_offsets[i] / 8)
+                    self.create_image(
+                        sway_x, sway_y,
+                        image=self.wave_image,
+                        anchor="center"
+                    )
+                    # 水花粒子已禁用
+                    # if light_x > progress_width - 16 and offset > 50:
+                    #     self._add_splash_at_position(light_x, sway_y)
+                else:
+                    # 备用：椭圆光斑
+                    size = 8 - abs(offset - 30) / 30 * 4
+                    alpha = 0.3 + (1 - abs(offset - 30) / 30) * 0.4
+                    light_color = f"#{int(100+155*alpha):02x}{int(150+105*alpha):02x}{int(200+55*alpha):02x}"
+                    self.create_oval(
+                        light_x - size, bar_y + 4,
+                        light_x + size, bar_y + bar_height - 4,
+                        fill=light_color, outline=""
+                    )
+
+    def _draw_splash(self):
+        """绘制水滴粒子 - 深蓝半透明水滴效果"""
+        for p in self.splash_particles:
+            alpha = p['life']
+            size = p['size'] * alpha
+
+            # 水滴主体：深蓝色半透明
+            r = int(30 + 40 * alpha)
+            g = int(100 + 60 * alpha)
+            b = int(200 + 55 * alpha)
+            body_color = f"#{r:02x}{g:02x}{b:02x}"
+
+            # 绘制水滴主体（椭圆）
+            self.create_oval(
+                p['x'] - size, p['y'] - size * 1.2,
+                p['x'] + size, p['y'] + size * 1.2,
+                fill=body_color, outline=""
+            )
+
+            # 水滴高光（白色小圆点）
+            if size > 2:
+                highlight_size = size * 0.3
+                self.create_oval(
+                    p['x'] - highlight_size, p['y'] -
+                    size * 0.8 - highlight_size,
+                    p['x'] + highlight_size, p['y'] -
+                    size * 0.8 + highlight_size,
+                    fill="#ffffff", outline=""
+                )
+
+    def _draw_animated_fish(self, progress_width, bar_y, bar_height):
+        """绘制游动动画的小鱼"""
+        if progress_width < 30:
+            return
+
+        fish_x = progress_width - 20
+        fish_y = bar_y + bar_height // 2 + self.fish_bounce
+
+        if fish_x > 10:
+            fish_color = "#ffffff"
+
+            # 鱼身体 - 随游动轻微变形
+            body_offset = abs(self.fish_bounce) * 0.5
+            self.create_oval(
+                fish_x - 10 - body_offset, fish_y - 6,
+                fish_x + 10 + body_offset, fish_y + 6,
+                outline=fish_color, fill="", width=2
+            )
+
+            # 摆动的尾巴
+            tail_wag = self.fish_bounce * 1.5
+            tail_points = [
+                fish_x - 10, fish_y - 8 + tail_wag,
+                fish_x - 20, fish_y + tail_wag * 2,
+                fish_x - 10, fish_y + 8 + tail_wag
+            ]
+            self.create_polygon(tail_points, fill=fish_color, outline="")
+
+            # 鱼鳍
+            fin_wag = self.fish_bounce * 0.8
+            self.create_line(
+                fish_x - 4, fish_y - 6,
+                fish_x + 4 + fin_wag, fish_y - 12,
+                fill=fish_color, width=1.5
+            )
+
+            # 鱼眼睛
+            self.create_oval(
+                fish_x + 4, fish_y - 3,
+                fish_x + 8, fish_y + 1,
+                fill=fish_color, outline=""
+            )
+
+    def load_fish_image(self):
+        """加载小鱼图片"""
+        if not PIL_AVAILABLE:
+            self.fish_image = None
+            return
+        try:
+            image_path = get_resource_path(
+                os.path.join("assets", "image", "fish.jpg"))
+            if os.path.exists(image_path):
+                original_image = Image.open(image_path)
+                # 保持图片原有模式（包括透明通道）
+                # 使用正方形尺寸，保持宽高比例
+                resized_image = original_image.resize(
+                    (36, 36), Image.Resampling.LANCZOS)
+                self.fish_image = ImageTk.PhotoImage(resized_image)
+            else:
+                self.fish_image = None
+        except Exception:
+            self.fish_image = None
+
+    def load_wave_image(self):
+        """加载浪花图片并转换为白色"""
+        if not PIL_AVAILABLE:
+            self.wave_image = None
+            return
+        try:
+            image_path = get_resource_path(
+                os.path.join("assets", "image", "wave-fin.png"))
+            if os.path.exists(image_path):
+                original_image = Image.open(image_path)
+                # 转换为RGBA模式确保有透明通道
+                if original_image.mode != 'RGBA':
+                    original_image = original_image.convert('RGBA')
+
+                # 创建白色版本
+                white_image = self._convert_to_white(original_image)
+
+                # 调整为32x32（增大浪花尺寸）
+                resized_image = white_image.resize(
+                    (32, 32), Image.Resampling.LANCZOS)
+                self.wave_image = ImageTk.PhotoImage(resized_image)
+            else:
+                self.wave_image = None
+        except Exception:
+            self.wave_image = None
+
+    def _convert_to_white(self, image):
+        """将图片转换为白色，保持透明度"""
+        # 获取图像数据
+        data = image.getdata()
+        new_data = []
+        for item in data:
+            if len(item) == 4:  # RGBA
+                # 保持alpha通道，RGB设为白色(255,255,255)
+                new_data.append((255, 255, 255, item[3]))
+            elif len(item) == 3:  # RGB
+                new_data.append((255, 255, 255))
+            else:
+                new_data.append(item)
+
+        # 创建新图像
+        new_image = Image.new('RGBA', image.size)
+        new_image.putdata(new_data)
+        return new_image
+
+    def _draw_fish_image(self, progress_width, bar_y, bar_height):
+        """绘制图片小鱼（带动画偏移）"""
+        if progress_width < 20 or self.fish_image is None:
+            return
+        fish_x = progress_width - 28  # 调整位置，让小鱼居中显示
+        fish_y = bar_y + (bar_height - 36) // 2 + self.fish_bounce
+        if fish_x > 0 and fish_y > 0:
+            self.create_image(
+                fish_x, fish_y, image=self.fish_image, anchor="nw")
 
 
 class WorkDayCounter:
@@ -194,8 +536,8 @@ class WorkDayCounter:
         "danger": "#dc2626",
         "text": "#1e293b",
         "text_light": "#64748b",
-        "progress_bg": "#e2e8f0",
-        "progress_fg": "#2563eb",
+        "progress_bg": "#e3f2fd",
+        "progress_fg": "#2196f3",
         "button_bg": "#2563eb",
         "button_fg": "#ffffff",
         "button_hover": "#1d4ed8",
@@ -206,7 +548,7 @@ class WorkDayCounter:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("下班倒计时")
+        self.root.title("Workday Escape")
         self.root.geometry("720x830")
         self.root.minsize(480, 400)
         self.root.configure(bg=self.COLORS["bg"])
@@ -373,10 +715,8 @@ class WorkDayCounter:
                  fg=self.COLORS["text_light"], bg=self.COLORS["card_bg"]
                  ).pack(anchor=tk.W)
 
-        self.progress_bar = RoundProgressBar(
-            progress_card, height=24,
-            bg_color=self.COLORS["progress_bg"],
-            fg_color=self.COLORS["progress_fg"]
+        self.progress_bar = FishProgressBar(
+            progress_card, height=48
         )
         self.progress_bar.pack(fill=tk.X, pady=(10, 0), expand=True)
 
@@ -722,7 +1062,7 @@ class WorkDayCounter:
         else:
             progress = 0
 
-        self.progress_bar.draw(progress)
+        self.progress_bar.set_progress(progress)
 
         # 底部信息
         overtime_minutes = self.config.get("overtime_minutes", 0)
