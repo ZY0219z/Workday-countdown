@@ -7,7 +7,7 @@ import { validateJsonDto } from '../../src/shared/validation'
 import { addDays } from '../../src/domain/local-date'
 import { annualPackagePayload, createCalendarYear, validateAnnualPackage, validateCalendarManifest,
   type AnnualCalendarPackage, type CalendarYear } from '../../src/domain/annual-calendar'
-import { createCalendar, findNextRestDay, findNextWorkDay, isRestDay, isWorkDay, overridesFromEntries,
+import { createCalendar, findNextRestDay, findNextWorkDay, findPreviousWorkDay, findCalendarDay, isRestDay, isWorkDay, overridesFromEntries,
   setDateOverride, validateDateOverrides, type Calendar, type CalendarRules } from '../../src/domain/calendar'
 import { createCalendarStore, loadBundledCalendarStore } from '../../src/main/services/calendar-store'
 
@@ -361,4 +361,19 @@ test('raw store input array is validated without invoking accessors or custom it
   const iterator = [readPackage(2024),readPackage(2025),readPackage(2026)]
   Object.defineProperty(iterator,Symbol.iterator,{ value() { called++; throw new Error('must not execute') } })
   rejected(createCalendarStore(readManifest(),iterator)); assert.equal(called,0)
+})
+test('D05 reverse workday lookup reuses makeup days and provenance',()=>{
+  const result=value(findPreviousWorkDay(baseline,'2026-05-10',{includeStart:true,maxDays:366}))
+  assert.equal(result.status,'found')
+  if(result.status==='found'){assert.equal(result.date,'2026-05-09');assert.equal(result.distanceDays,1);assert.equal(result.quality.source,'annual')}
+})
+test('D05 reverse lookup propagates missing years and rejects lower-date overflow',()=>{
+  const result=value(findPreviousWorkDay(baseline,'2027-01-03',{includeStart:true,maxDays:366}))
+  assert.equal(result.quality.approximate,true);assert.deepEqual(result.quality.incompleteYears,[2027])
+  rejected(findPreviousWorkDay(calendar({workWeek:[2],overrides:{}},[]),'0001-01-01',{includeStart:true,maxDays:366}))
+})
+test('D05 direction validation and original forward defaults remain explicit',()=>{
+  rejected(findCalendarDay(baseline,'2026-05-10','work',{includeStart:true,maxDays:366},'invalid' as never))
+  const original=value(findCalendarDay(baseline,'2026-05-10','work',{includeStart:true,maxDays:366}))
+  assert.equal(original.status,'found');if(original.status==='found')assert.equal(original.date,'2026-05-11')
 })

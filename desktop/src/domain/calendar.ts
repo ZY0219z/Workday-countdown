@@ -93,17 +93,18 @@ export type CalendarSearchResult = {
   checkedDays: number; quality: DataQuality; warnings: CalendarWarning[]
 } & ({ status: 'found'; date: LocalDate; distanceDays: number; day: CalendarDay } |
   { status: 'notFound'; lastDate: LocalDate; maxDays: number })
-export function findCalendarDay(calendar: Calendar, start: LocalDate, target: DayKind, options: CalendarSearchOptions): Result<CalendarSearchResult> {
+export function findCalendarDay(calendar: Calendar, start: LocalDate, target: DayKind, options: CalendarSearchOptions, direction: 'forward' | 'backward' = 'forward'): Result<CalendarSearchResult> {
   const parsed = parseLocalDate(start)
   if (!parsed.ok) return parsed
-  const checked = validateStructure({ target, options }, v.object<{ target: DayKind; options: CalendarSearchOptions }>({ target: kind,
+  const checked = validateStructure({ target, options, direction }, v.object<{ target: DayKind; options: CalendarSearchOptions; direction: 'forward' | 'backward' }>({ target: kind,
+    direction: v.enum(['forward', 'backward'] as const),
     options: v.object({ includeStart: v.boolean, maxDays: v.number(1, 366) }) }))
   if (!checked.ok) return checked
   const warnings = new Map<string, CalendarWarning>(), incomplete = new Set<number>()
   let checkedDays = 0, lastDate = start
   let quality: DataQuality = { approximate: false, incompleteYears: [], source: 'weekRule', annualVerification: 'notApplicable' }
   for (let distance = checked.data.options.includeStart ? 0 : 1; distance <= checked.data.options.maxDays; distance++) {
-    const date = addDays(start, distance)
+    const date = addDays(start, checked.data.direction === 'forward' ? distance : -distance)
     if (!date.ok) return date
     const day = calendar.getDay(date.data)
     if (!day.ok) return day
@@ -121,3 +122,5 @@ export function findCalendarDay(calendar: Calendar, start: LocalDate, target: Da
 }
 export const findNextWorkDay = (calendar: Calendar, start: LocalDate, options: CalendarSearchOptions): Result<CalendarSearchResult> => findCalendarDay(calendar, start, 'work', options)
 export const findNextRestDay = (calendar: Calendar, start: LocalDate, options: CalendarSearchOptions): Result<CalendarSearchResult> => findCalendarDay(calendar, start, 'rest', options)
+// D05 advance salary adjustment reuses the same bounded search and provenance.
+export const findPreviousWorkDay = (calendar: Calendar, start: LocalDate, options: CalendarSearchOptions): Result<CalendarSearchResult> => findCalendarDay(calendar, start, 'work', options, 'backward')
