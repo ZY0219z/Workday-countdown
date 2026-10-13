@@ -14,6 +14,7 @@
     "preview": "electron-vite preview",
     "package:win": "npm run build && install-electron && electron-builder --win portable --x64 --publish never",
     "test": "node scripts/test-logic.mjs",
+    "test:contracts": "node scripts/test-contracts.mjs",
     "test:desktop": "npm run build && playwright test",
     "verify:portable": "node scripts/verify-portable.mjs"
   },

@@ -1,6 +1,9 @@
+import type { LocalTime } from './contracts'
+
+// Legacy POC adapter; keep its two-field API and runtime behavior until D11.
 export interface WorkSettings {
-  workStartTime: string
-  workEndTime: string
+  workStartTime: LocalTime
+  workEndTime: LocalTime
 }
 
 export interface SettingsLoadResult {
