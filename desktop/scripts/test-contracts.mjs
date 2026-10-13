@@ -12,7 +12,7 @@ after(() => {
   assert.ok(isAbsolute(scratch) && scratch.startsWith(join(tmpdir(), 'workday-d02-')))
   rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
 })
-const files = ['contracts', 'validation', 'config-schema', 'capabilities', 'settings-draft']
+const files = ['contracts', 'validation', 'formats', 'config-schema', 'capabilities', 'settings-draft']
   .map(name => `src/shared/${name}.ts`)
 files.push('tests/unit/contracts.test.ts')
 for (const file of files) {

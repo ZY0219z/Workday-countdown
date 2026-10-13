@@ -1,10 +1,11 @@
 import { CONFIG_SCHEMA_VERSION } from './contracts'
 import type { AppConfig, CalendarDatasetMetadata, CalendarPreferences, EditableConfig, InitialConfigInput, JsonValue, Result, ValidationIssue, EditableGroup } from './contracts'
 import { issue, success, v, validateJsonDto, validateStructure, validationFailure } from './validation'
+import { LOCAL_DATE_PATTERN, LOCAL_TIME_PATTERN } from './formats'
 
 // Basic notation/range only. For example, 2026-02-31 passes D02; D03 must reject it.
-export const dateFormat = v.string(/^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/, 10)
-export const timeFormat = v.string(/^(?:[01]\d|2[0-3]):[0-5]\d$/, 5)
+export const dateFormat = v.string(LOCAL_DATE_PATTERN, 10)
+export const timeFormat = v.string(LOCAL_TIME_PATTERN, 5)
 export const timestampFormat = v.string(/^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d\.\d{3}Z$/, 24)
 export const revisionFormat = v.number(0, Number.MAX_SAFE_INTEGER)
 export const sha256Format = v.string(/^[a-f0-9]{64}$/, 64)
