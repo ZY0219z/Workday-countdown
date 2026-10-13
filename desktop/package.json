@@ -16,6 +16,7 @@
     "test": "node scripts/test-logic.mjs",
     "test:contracts": "node scripts/test-contracts.mjs",
     "test:dates": "node scripts/test-dates.mjs",
+    "test:calendar": "node scripts/test-calendar.mjs",
     "test:desktop": "npm run build && playwright test",
     "verify:portable": "node scripts/verify-portable.mjs"
   },

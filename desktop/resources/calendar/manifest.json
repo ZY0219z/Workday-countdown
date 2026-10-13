@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "region": "CN",
+  "version": "1.0.0",
+  "years": [
+    {
+      "year": 2024,
+      "file": "2024.json",
+      "version": "2024.1.0",
+      "sha256": "3fd3981cfbe24f5bea13f91092326053614da4a26251fa57c2aeeec2b6e5338f"
+    },
+    {
+      "year": 2025,
+      "file": "2025.json",
+      "version": "2025.1.0",
+      "sha256": "bf85aadca001776c4e7c332332b95140e24ed06a6ecf5e89bc1356ec0e6b3717"
+    },
+    {
+      "year": 2026,
+      "file": "2026.json",
+      "version": "2026.1.0",
+      "sha256": "02be4a165f646abc36184ac433f07444820d5f02b811503b8ba6b6ef1726fce0"
+    }
+  ]
+}
