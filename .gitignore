@@ -1,0 +1,18 @@
+# Python development output (already tracked legacy files remain tracked)
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+/build/
+/dist/
+
+# Electron POC dependencies, generated output and verification artifacts
+node_modules/
+/desktop/out/
+/desktop/release/
+/desktop/test-results/
+/desktop/playwright-report/
+*.tsbuildinfo
+*.log
+.DS_Store
+Thumbs.db
