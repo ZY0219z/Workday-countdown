@@ -34,7 +34,8 @@ const requests = {
   'data.applyImport': v.object<ContractRequests['data.applyImport']>({
     previewToken: v.string(undefined, 256), expectedRevision: revisionFormat,
     selectedFields: v.array(v.enum(IMPORT_FIELDS), 1, IMPORT_FIELDS.length, field => field),
-    undatedOvertimeShiftDate: v.nullable(dateFormat)
+    undatedOvertimeShiftDate: v.nullable(dateFormat),
+    confirmPreviouslyImported: (value, field, issues) => value === undefined ? undefined : v.boolean(value, field, issues)
   }),
   'data.export': v.object<ContractRequests['data.export']>({ kind: v.enum(['v2-config'] as const) }),
   'calendar.previewImport': nullRequest,

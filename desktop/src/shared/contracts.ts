@@ -167,6 +167,9 @@ export interface ImportPreview {
   expectedRevision: number
   choices: Array<{ field: ImportField; current: JsonValue; incoming: JsonValue; issues: ValidationIssue[] }>
   undatedOvertimeMinutes: number | null
+  alreadyProcessed?: boolean // Additive D07 DTO; reapply needs another explicit confirmation.
+  notes?: ValidationIssue[]
+  expiresAt?: IsoTimestamp
 }
 export interface CalendarImportPreview {
   previewToken: string
@@ -190,7 +193,7 @@ export interface ContractRequests {
   'window.perform': WindowCommand
   'app.quit': null
   'data.previewImport': { sourceKind: MigrationSource }
-  'data.applyImport': { previewToken: string; expectedRevision: number; selectedFields: ImportField[]; undatedOvertimeShiftDate: LocalDate | null }
+  'data.applyImport': { previewToken: string; expectedRevision: number; selectedFields: ImportField[]; undatedOvertimeShiftDate: LocalDate | null; confirmPreviouslyImported?: boolean }
   'data.export': { kind: 'v2-config' }
   'calendar.previewImport': null
   'calendar.applyImport': { previewToken: string; expectedCalendarRevision: number }

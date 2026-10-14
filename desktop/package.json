@@ -19,6 +19,7 @@
     "test:calendar": "node scripts/test-calendar.mjs",
     "test:business": "node scripts/test-business.mjs",
     "test:shifts": "node scripts/test-shifts.mjs",
+    "test:storage": "node scripts/test-storage.mjs",
     "test:desktop": "npm run build && playwright test",
     "verify:portable": "node scripts/verify-portable.mjs"
   },
