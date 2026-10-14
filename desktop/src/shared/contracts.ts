@@ -125,12 +125,14 @@ export interface DashboardSnapshot {
     excludesToday: true
     isActualAttendance: false
     quality: DataQuality
+    naturalQuality?: DataQuality // D09: exact Civil difference, independent of calendar estimates.
   }
   nextRest: { date: LocalDate; days: number; quality: DataQuality } | null
   salary: { nominalDate: LocalDate; actualDate: LocalDate; days: number; policy: SalaryPolicy; isPlanned: true; quality: DataQuality } | null
   countdown: { target: 'workStart' | 'finalWorkEnd'; targetAt: number; seconds: number; quality: DataQuality } | null
   progress: { percent: number; elapsedWorkSeconds: number; totalWorkSeconds: number; quality: DataQuality } | null
   warnings: SnapshotWarning[]
+  salaryAmbiguity?: JsonObject // D09: lossless original ambiguous D05 DTO; salary stays null.
 }
 
 export interface ConfigSnapshot { config: AppConfig; warnings: ValidationIssue[] }
@@ -157,6 +159,11 @@ export interface DraftState {
   expectedRevision: number
   save: DraftSaveState
 }
+// No invented saved defaults before the user's first explicit save.
+export interface UninitializedDraftState {
+  saved: null; draft: JsonObject; dirty: boolean; issues: ValidationIssue[]; expectedRevision: 0; save: DraftSaveState
+}
+export type SettingsDraftSession = DraftState | UninitializedDraftState
 
 export type WindowCommand = { action: 'showMain' } | { action: 'showMini' } | { action: 'hideMini' } | { action: 'setMiniTop'; enabled: boolean }
 export type MiniWindowCommand = Exclude<WindowCommand, { action: 'showMini' }>
@@ -201,9 +208,9 @@ export interface ContractRequests {
 export interface ContractResponses {
   'config.read': ConfigSnapshot
   'config.save': ConfigSnapshot
-  'settingsDraft.read': DraftState
-  'settingsDraft.update': DraftState
-  'settingsDraft.discard': DraftState
+  'settingsDraft.read': SettingsDraftSession
+  'settingsDraft.update': SettingsDraftSession
+  'settingsDraft.discard': SettingsDraftSession
   'snapshot.read': DashboardSnapshot
   'snapshot.subscribe': null
   'snapshot.unsubscribe': null
@@ -232,7 +239,7 @@ export interface MainWindowApi extends CommonApi {
   readonly role: 'main'
   window: { perform: Call<'window.perform'> }
   config: { read(): Promise<Result<ConfigSnapshot>>; save: Call<'config.save'> }
-  settingsDraft: { read(): Promise<Result<DraftState>>; update: Call<'settingsDraft.update'>; discard(): Promise<Result<DraftState>> }
+  settingsDraft: { read(): Promise<Result<SettingsDraftSession>>; update: Call<'settingsDraft.update'>; discard(): Promise<Result<SettingsDraftSession>> }
   data: { previewImport: Call<'data.previewImport'>; applyImport: Call<'data.applyImport'>; export: Call<'data.export'> }
   calendar: { previewImport(): Promise<Result<CalendarImportPreview>>; applyImport: Call<'calendar.applyImport'> }
 }

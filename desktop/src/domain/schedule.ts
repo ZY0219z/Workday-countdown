@@ -195,6 +195,14 @@ export function classifyShift(shift: ResolvedShift, instant: Instant, timeZoneId
   if (shift.breaks.some(interval => now.data >= interval.startsAt && now.data < interval.endsAt)) return success('break')
   return success('working')
 }
+// D09 reuses a validated resolved shift; classification/countdown semantics are
+// identical to calculateScheduleAt. Caller still owns candidate validity range.
+export function summarizeResolvedShift(shift:ResolvedShift,instant:Instant,timeZoneId:string):Result<Pick<ScheduleSelection,'state'|'countdown'>> {
+  const state=classifyShift(shift,instant,timeZoneId);if(!state.ok)return state
+  const targetAt=state.data==='beforeWork'?shift.startsAt:shift.finalEndsAt
+  return success({state:state.data,countdown:{target:state.data==='beforeWork'?'workStart':'finalWorkEnd',targetAt,
+    seconds:Math.ceil(Math.max(0,targetAt-instant)/1000),quality:shift.quality}})
+}
 function mayAffect(pending: PendingShift, start: number, end: number): boolean {
   if (pending.possibleEnds.length && Math.max(...pending.possibleEnds) <= start) return false
   if (pending.possibleStarts.length && Math.min(...pending.possibleStarts) >= end) return false
@@ -229,11 +237,10 @@ export function calculateScheduleAt(schedule: unknown, overtime: unknown, instan
     const selected = active[0] ?? (today?.status === 'ready' ? today.shift : null)
     if (!selected) return success({ state: 'rest', instant: now.data, localDate: local.data.date, timeZoneId: context.timeZoneId, shift: null, countdown: null,
       timeQuality: exactDateQuality(), warnings: today?.status === 'noShift' ? ['activeShift', 'countdown', 'progress'].flatMap(affects => calendarWarnings(today.day.warnings, affects === 'activeShift' ? 'activeShift' : affects === 'countdown' ? 'countdown' : 'progress')) : [], ambiguities: [], checkedShiftDates: dates.data })
-    const state = classifyShift(selected, now.data, context.timeZoneId)
+    const state = summarizeResolvedShift(selected, now.data, context.timeZoneId)
     if (!state.ok) return state
-    const targetAt = state.data === 'beforeWork' ? selected.startsAt : selected.finalEndsAt
-    return success({ state: state.data, instant: now.data, localDate: local.data.date, timeZoneId: context.timeZoneId, shift: selected,
-      countdown: { target: state.data === 'beforeWork' ? 'workStart' : 'finalWorkEnd', targetAt, seconds: Math.ceil(Math.max(0, targetAt - now.data) / 1000), quality: selected.quality },
+    return success({ state: state.data.state, instant: now.data, localDate: local.data.date, timeZoneId: context.timeZoneId, shift: selected,
+      countdown: state.data.countdown,
       timeQuality: exactDateQuality(), warnings: selected.warnings, ambiguities: [], checkedShiftDates: dates.data })
   } catch { return { ok: false, error: { code: 'UNAVAILABLE', message: '无法计算班次状态，未返回伪造倒计时。' } } }
 }

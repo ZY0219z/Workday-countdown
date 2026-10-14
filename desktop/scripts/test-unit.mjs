@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
 
-for (const name of ['logic', 'contracts', 'dates', 'calendar', 'business', 'shifts', 'storage', 'lifecycle']) {
+for (const name of ['logic', 'contracts', 'dates', 'calendar', 'business', 'shifts', 'storage', 'lifecycle','d09']) {
   const result = spawnSync(process.execPath, [`scripts/test-${name}.mjs`], { stdio: 'inherit', windowsHide: true })
   if (result.error) throw result.error
   if (result.status !== 0) process.exit(result.status ?? 1)

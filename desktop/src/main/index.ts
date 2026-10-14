@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, screen } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, screen, powerMonitor } from 'electron'
 import type { IpcMainInvokeEvent, Event } from 'electron'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -17,6 +17,14 @@ import { backgroundTestEnabled, blockInteractiveWindowOperations } from './lifec
 import { DEFAULT_SETTINGS } from '../shared/settings'
 import type { WorkSettings } from '../shared/settings'
 import { success } from '../shared/validation'
+import { createSystemClock } from '../adapters/system-clock'
+import { createIntlTimeZoneAdapter } from '../adapters/intl-time-zone'
+import { createTimeZoneCache } from '../domain/time-zone-cache'
+import { loadBundledCalendarStore } from './services/calendar-store'
+import { createConfigStore } from './services/config-store'
+import { createRuntime, combineExitDrafts } from './services/runtime'
+import { createIpcRouter } from './ipc/router'
+import type { ExitDraftAdapter } from './lifecycle/quit-coordinator'
 
 const rendererFile = join(__dirname, '../renderer/index.html')
 const devUrl = !app.isPackaged ? process.env.ELECTRON_RENDERER_URL : undefined
@@ -42,9 +50,9 @@ let windows: WindowManager | undefined
 const instance = acquireSingleInstance(app, () => { windows?.showMain() })
 if (!instance.ok) { startupError(instance.error.message); app.quit() }
 else if (instance.data.primary) {
-  app.whenReady().then(() => {
-    // POC compatibility: the old two-field handlers NEVER write the formal
-    // userData/settings.json. D07 runtime configuration remains unattached.
+  app.whenReady().then(async () => {
+    // POC handlers remain isolated. Formal configuration is loaded read-only;
+    // only an explicit V2 save can initialize it.
     const configPath = paths.data.pocSettings
     let applied: WorkSettings = { ...DEFAULT_SETTINGS }
     const writes = createOperationBarrier()
@@ -72,6 +80,22 @@ else if (instance.data.primary) {
       }
       return result
     }
+    const zones=createTimeZoneCache(createIntlTimeZoneAdapter()),clock=createSystemClock(undefined,zones),calendars=loadBundledCalendarStore()
+    if(!calendars.ok)throw new Error('离线日历资源无效。')
+    const store=createConfigStore({directory:paths.data.userData,appVersion:app.getVersion(),clock,zones,calendars:calendars.data,maxValidationDates:10000})
+    if(!store.ok)throw new Error('正式配置服务不可用。')
+    let pocAdapter:ExitDraftAdapter
+    const runtime=createRuntime({store:store.data,clock,zones,calendars:calendars.data,maxValidationDates:10000,maxHistoryDays:100000,writes,
+      confirm:async()=>pocAdapter.confirm({dirty:true,saving:false,identity:'formal-confirm'})})
+    const loadedRuntime=await runtime.start()
+    if(!loadedRuntime.ok)throw new Error('正式服务启动失败。')
+    const router=createIpcRouter(ipcMain,runtime,{
+      quit:()=>requestQuit(false),
+      window(command){
+        if(!windows)return {ok:false,error:{code:'UNAVAILABLE',message:'窗口尚未创建。'}}
+        switch(command.action){case 'showMain':return windows.showMain();case 'showMini':return windows.showMini();case 'hideMini':return windows.hideMini();case 'setMiniTop':return windows.setMiniTop(command.enabled)}
+      }
+    })
     const areas = () => screen.getAllDisplays().map(display => ({ id: display.id, workArea: display.workArea, scaleFactor: display.scaleFactor }))
     const defaults = { x: screen.getPrimaryDisplay().workArea.x, y: screen.getPrimaryDisplay().workArea.y, width: 600, height: 560 }
     const minimum = { width: 420, height: 500 }
@@ -87,6 +111,13 @@ else if (instance.data.primary) {
         webPreferences: { preload: join(__dirname, '../preload/index.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true }
       })
       if (background) interactiveAttempts = blockInteractiveWindowOperations(window)
+      const releaseWindow=router.register('main',{sender:window.webContents,frame:()=>window.webContents.mainFrame,url:()=>window.webContents.mainFrame.url,
+        destroyed:()=>window.isDestroyed()||window.webContents.isDestroyed(),visible:()=>!window.isDestroyed()&&window.isVisible()&&!window.isMinimized(),
+        push:(channel,result)=>{if(!window.isDestroyed())window.webContents.send(channel,result)}},rendererUrl)
+      window.once('closed',releaseWindow)
+      window.webContents.on('did-start-navigation',(_event,_url,_inPlace,isMainFrame)=>{if(isMainFrame)router.revokeSubscription(window.webContents)})
+      window.on('show',router.visibilityChanged);window.on('hide',router.visibilityChanged)
+      window.on('minimize',router.visibilityChanged);window.on('restore',router.visibilityChanged)
       window.setMenu(null)
       window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       window.webContents.on('will-navigate', event => event.preventDefault())
@@ -118,14 +149,14 @@ else if (instance.data.primary) {
         return { workStartTime: fields[0].value, workEndTime: fields[1].value, busy: button.disabled };
       })()`)
     }
-    quit.registerDraft(createPocDraftAdapter({ readForm, saved: () => applied, save: savePoc,
+    pocAdapter=createPocDraftAdapter({ readForm, saved: () => applied, save: savePoc,
       async confirm() {
         if (paths.data.testProfile && exitChoiceForTest !== null) return success(exitChoiceForTest)
         if (background) return { ok: false, error: { code: 'UNAVAILABLE', message: '后台测试未注入确认适配器，不打开原生提示或丢弃草稿。' } }
         const window = main()
         if (!window) return { ok: false, error: { code: 'UNAVAILABLE', message: '没有可操作窗口，退出未获许可。' } }
-        // Minimal POC safety feedback only; the actual three-choice UI and
-        // authoritative V2 draft session remain D09/D11. Injected adapters
+        // Minimal safety feedback only; the real three-choice settings UI
+        // remains D11. Injected adapters
         // exercise save/discard/continue without developing that UI early.
         await dialog.showMessageBox(window, { type: 'warning', title: APPLICATION_NAME,
           message: '时间尚未保存，退出已取消。请先保存更改，或恢复原时间后退出。', buttons: ['返回编辑'], defaultId: 0, cancelId: 0 })
@@ -141,7 +172,8 @@ else if (instance.data.primary) {
         })()`)
         return success(null)
       }
-    }))
+    })
+    quit.registerDraft(combineExitDrafts(runtime.exitAdapter,pocAdapter))
     ipcMain.handle('workday:load-settings', event => { assertSender(event); const loaded = loadSettings(configPath); applied = loaded.settings; return loaded })
     ipcMain.handle('workday:save-settings', async (event, value: unknown) => { assertSender(event); const result = await savePoc(value); if (!result.ok) throw new Error(result.error.message); return applied })
     ipcMain.handle('workday:quit', async event => { assertSender(event); const result = await requestQuit(false); if (!result.ok) throw new Error(result.error.message) })
@@ -167,11 +199,14 @@ else if (instance.data.primary) {
     const beforeQuit = (event: Event) => { if (!quit.isAuthorized()) { event.preventDefault(); void requestQuit(true) } }
     const allClosed = () => { if (!quit.isAuthorized()) windows!.showMain() }
     app.on('activate', activated); app.on('before-quit', beforeQuit); app.on('window-all-closed', allClosed)
+    const resumed=()=>{zones.clear();runtime.refresh.wake(true)}
+    powerMonitor.on('resume',resumed)
     app.once('will-quit', () => {
       for (const method of ['workday:load-settings', 'workday:save-settings', 'workday:quit']) ipcMain.removeHandler(method)
       if (boundsTimer) clearTimeout(boundsTimer)
       screen.removeListener('display-removed', displayChanged); screen.removeListener('display-metrics-changed', displayChanged); screen.removeListener('display-added', displayChanged)
       app.removeListener('activate', activated); app.removeListener('before-quit', beforeQuit); app.removeListener('window-all-closed', allClosed)
+      powerMonitor.removeListener('resume',resumed);router.dispose();runtime.dispose()
       windows!.dispose(); quit.dispose(); instance.data.dispose()
     })
     if (paths.data.testProfile) Object.defineProperty(app, '__workdayD08Test', { value: {

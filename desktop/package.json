@@ -21,6 +21,7 @@
     "test:shifts": "node scripts/test-shifts.mjs",
     "test:storage": "node scripts/test-storage.mjs",
     "test:lifecycle": "node scripts/test-lifecycle.mjs",
+    "test:d09": "node scripts/test-d09.mjs",
     "test:unit": "node scripts/test-unit.mjs",
     "test:desktop": "npm run build && playwright test",
     "test:desktop:gui": "npm run build && playwright test --config=playwright.gui.config.ts",
