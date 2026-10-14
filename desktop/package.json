@@ -20,8 +20,13 @@
     "test:business": "node scripts/test-business.mjs",
     "test:shifts": "node scripts/test-shifts.mjs",
     "test:storage": "node scripts/test-storage.mjs",
+    "test:lifecycle": "node scripts/test-lifecycle.mjs",
+    "test:unit": "node scripts/test-unit.mjs",
     "test:desktop": "npm run build && playwright test",
-    "verify:portable": "node scripts/verify-portable.mjs"
+    "test:desktop:gui": "npm run build && playwright test --config=playwright.gui.config.ts",
+    "package:win:test": "npm run build && node scripts/build-portable-test.mjs",
+    "verify:portable": "node scripts/verify-portable.mjs",
+    "verify:lifecycle:portable": "node scripts/verify-lifecycle-portable.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.64.0",

@@ -7,16 +7,21 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { execFileSync, spawn } from 'node:child_process'
 import { chromium, expect } from '@playwright/test'
 import { createRequire } from 'node:module'
+import requireIsolatedGuiEnvironment from './gui-authorization.mjs'
+import { assertPortableTestArtifact } from './portable-test-artifact.mjs'
 
+requireIsolatedGuiEnvironment('portableBase')
 if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('This verification requires a Windows x64 host.')
 // Keep the verification client's local CDP traffic out of host HTTP proxies.
 process.env.NO_PROXY = [process.env.NO_PROXY, '127.0.0.1', 'localhost'].filter(Boolean).join(',')
 const require = createRequire(import.meta.url)
 const { listPackage } = require('@electron/asar')
-const sourceExe = resolve('release/Workday-Escape-2.0.0-win-x64.exe')
+const sourceExe = resolve(process.argv[2] || 'release/d08-gui/Workday-Escape-D08-TEST-win-x64.exe')
+const artifact = assertPortableTestArtifact(sourceExe)
 const scratch = mkdtempSync(join(tmpdir(), 'Workday Escape POC 独立验证 '))
 const distribution = join(scratch, '仅单个 EXE')
 const profile = join(scratch, 'profile')
+const pocFile = join(profile, 'Workday Escape POC', 'settings.json')
 mkdirSync(distribution)
 mkdirSync(profile)
 mkdirSync('test-results', { recursive: true })
@@ -26,6 +31,9 @@ assert.deepEqual(readdirSync(distribution), ['Workday-Escape-2.0.0-win-x64.exe']
 
 const systemRoot = process.env.SystemRoot || 'C:\\Windows'
 const launchEnv = { ...process.env, PATH: `${systemRoot}\\System32;${systemRoot}`, Path: `${systemRoot}\\System32;${systemRoot}` }
+launchEnv.WORKDAY_ESCAPE_TEST_MODE = '1'
+launchEnv.WORKDAY_ESCAPE_TEST_PROFILE = profile
+launchEnv.WORKDAY_ESCAPE_D08_PORTABLE_APPDATA = profile // Test artifact bootstrap only; production never reads it.
 for (const name of Object.keys(launchEnv)) {
   if (/^(ELECTRON_|NODE_|NPM_|VITE_)/i.test(name)) delete launchEnv[name]
 }
@@ -36,7 +44,8 @@ const evidence = {
   standaloneDirectory: distribution,
   runtimePath: launchEnv.PATH,
   checks: [],
-  limitations: ['No physical network disconnection', 'No clean machine with Node/Python uninstalled', 'No signed/downloaded SmartScreen test']
+  artifact,
+  limitations: ['No physical network disconnection', 'No clean machine with Node/Python uninstalled', 'No signed/downloaded SmartScreen test', 'D08 runs use explicit disposable test profiles, including the no-arguments launch']
 }
 let child
 let browser
@@ -114,7 +123,8 @@ function closeNativeWindow(launcherPid) {
 }
 
 try {
-  const archive = listPackage(resolve('release/win-unpacked/resources/app.asar')).map(path => path.replaceAll('\\', '/'))
+  const outputRoot = resolve(sourceExe, '..')
+  const archive = listPackage(join(outputRoot, 'win-unpacked/resources/app.asar')).map(path => path.replaceAll('\\', '/'))
   assert.ok(archive.some(path => path.endsWith('/out/main/index.cjs')))
   assert.ok(archive.some(path => path.endsWith('/out/preload/index.cjs')))
   assert.ok(archive.some(path => path.endsWith('/out/renderer/index.html')))
@@ -123,7 +133,7 @@ try {
   check('ASAR contains the compiled main, preload and Vue assets without Python or external npm modules')
   const manifestPattern = /<requestedExecutionLevel\s+level="asInvoker"/i
   assert.match(readFileSync(sourceExe).toString('utf8'), manifestPattern)
-  assert.match(readFileSync('release/win-unpacked/Workday Escape.exe').toString('utf8'), manifestPattern)
+  assert.match(readFileSync(join(outputRoot, 'win-unpacked/Workday Escape.exe')).toString('utf8'), manifestPattern)
   check('Both the portable launcher and extracted application request asInvoker')
   const admin = execFileSync(join(systemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command',
     '([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)'], { encoding: 'utf8', windowsHide: true }).trim()
@@ -145,7 +155,7 @@ try {
   await page.getByLabel('下班时间').fill('23:59')
   await page.getByRole('button', { name: '保存时间' }).click()
   await expect(page.getByRole('status')).toHaveText('时间已保存。')
-  assert.deepEqual(JSON.parse(readFileSync(join(profile, 'settings.json'), 'utf8')), { workStartTime: '00:00', workEndTime: '23:59' })
+  assert.deepEqual(JSON.parse(readFileSync(pocFile, 'utf8')), { workStartTime: '00:00', workEndTime: '23:59' })
   check('Portable application saves its configuration into the isolated user data profile')
   const first = await page.getByTestId('countdown').innerText()
   assert.notEqual(first, '00:00:00', 'Live countdown check must occur before 23:59.')
@@ -178,7 +188,7 @@ try {
   assert.ok(ordinaryWindow.closed && ordinaryWindow.title.includes('Workday Escape'))
   evidence.noArgumentsWindow = ordinaryWindow
   await waitForExit()
-  check('EXE also starts with no arguments and no debugging, profile or proxy switches, then closes normally')
+  check('EXE starts with no command-line arguments or debugging/proxy switches using the explicit disposable test-profile environment, then closes normally')
   assert.deepEqual(readdirSync(distribution), ['Workday-Escape-2.0.0-win-x64.exe'])
   check('Distribution folder still contains only the single EXE after all three launches')
   evidence.status = 'verified'

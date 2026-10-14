@@ -10,7 +10,12 @@ let profile: string
 
 test.beforeEach(() => { profile = mkdtempSync(join(tmpdir(), 'workday-desktop-')) })
 test.afterEach(async () => {
-  if (application) await application.close().catch(() => {})
+  if (application) {
+    // Explicit discard ONLY in this test's owned profile; never fake a clean
+    // formal draft to bypass the lifecycle protocol.
+    await application.evaluate(({ app }) => (app as unknown as { __workdayD08Test?: { chooseExit(choice: string): void } }).__workdayD08Test?.chooseExit('discard')).catch(() => {})
+    await application.close().catch(() => {})
+  }
   application = undefined
   rmSync(profile, { recursive: true, force: true })
 })
@@ -19,6 +24,9 @@ async function launch() {
   const env = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined))
   delete env.ELECTRON_RUN_AS_NODE
   delete env.ELECTRON_RENDERER_URL
+  env.WORKDAY_ESCAPE_TEST_MODE = '1'
+  delete env.WORKDAY_ESCAPE_TEST_BACKGROUND // Explicit GUI suite only.
+  delete env.WORKDAY_ESCAPE_TEST_PROFILE
   application = await electron.launch({ args: ['.', `--user-data-dir=${profile}`], env })
   const page = await application.firstWindow()
   await expect(page.getByRole('button', { name: '保存时间' })).toBeEnabled()
