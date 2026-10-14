@@ -1,0 +1,65 @@
+/* Opt-in host: importing these files cannot restyle the existing POC. */
+.workday-ui {
+  color-scheme: light;
+  --we-bg: #f0f7fd;
+  --we-surface: #ffffff;
+  --we-subtle: #f4f8fc;
+  --we-text: #24374b;
+  --we-muted: #506178;
+  --we-border: #becddd;
+  --we-control-border: #6b819c;
+  --we-accent: #2563eb;
+  --we-accent-soft: #e5efff;
+  --we-track: #dbe9f9;
+  --we-button: #2563eb;
+  --we-button-text: #ffffff;
+  --we-positive-text: #166534;
+  --we-positive-bg: #e6f6ec;
+  --we-warning-text: #9a3412;
+  --we-warning-bg: #fff1df;
+  --we-danger-text: #b91c1c;
+  --we-danger-bg: #fff0f0;
+  --we-neutral-text: #475569;
+  --we-neutral-bg: #eef2f7;
+  --we-font: "Segoe UI", "Microsoft YaHei", sans-serif;
+  --we-font-numeric: "Segoe UI", Consolas, "Microsoft YaHei", sans-serif;
+  --we-text-small: 12px;
+  --we-text-body: 14px;
+  --we-text-title: 18px;
+  --we-text-metric: 30px;
+  --we-space-1: 4px;
+  --we-space-2: 8px;
+  --we-space-3: 12px;
+  --we-space-4: 16px;
+  --we-space-5: 20px;
+  --we-space-6: 24px;
+  --we-radius-control: 8px;
+  --we-radius-card: 12px;
+  --we-shadow: 0 6px 18px rgb(36 55 75 / 6%);
+}
+.workday-ui[data-accent="coral"] {
+  --we-bg: #fff4f1; --we-subtle: #fff7f4; --we-accent: #be123c; --we-accent-soft: #fce7ed; --we-track: #f5d6dd; --we-button: #be123c;
+}
+.workday-ui[data-theme="dark"] {
+  color-scheme: dark;
+  --we-bg: #172331; --we-surface: #213043; --we-subtle: #28394e;
+  --we-text: #f1f5f9; --we-muted: #cbd5e1; --we-border: #586e86; --we-control-border: #98abc3;
+  --we-accent: #60a5fa; --we-accent-soft: #233e5e; --we-track: #40536c;
+  --we-positive-text: #86efac; --we-positive-bg: #173929;
+  --we-warning-text: #fdba74; --we-warning-bg: #442f25;
+  --we-danger-text: #fca5a5; --we-danger-bg: #44252c;
+  --we-neutral-text: #cbd5e1; --we-neutral-bg: #313c4d;
+}
+.workday-ui[data-theme="dark"][data-accent="coral"] {
+  --we-bg: #211e29; --we-surface: #2c2938; --we-subtle: #353040; --we-border: #745e70;
+  --we-accent: #fda4af; --we-accent-soft: #49303e; --we-track: #634454;
+}
+@media (forced-colors: active) {
+  .workday-ui[data-theme][data-accent] {
+    --we-bg: Canvas; --we-surface: Canvas; --we-subtle: Canvas; --we-text: CanvasText; --we-muted: CanvasText;
+    --we-border: CanvasText; --we-control-border: ButtonText; --we-accent: LinkText; --we-track: Canvas;
+    --we-button: ButtonFace; --we-button-text: ButtonText; --we-positive-text: CanvasText; --we-positive-bg: Canvas;
+    --we-warning-text: CanvasText; --we-warning-bg: Canvas; --we-danger-text: CanvasText; --we-danger-bg: Canvas;
+    --we-neutral-text: CanvasText; --we-neutral-bg: Canvas; --we-shadow: none;
+  }
+}

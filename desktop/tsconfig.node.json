@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["electron.vite.config.ts", "playwright.config.ts", "playwright.gui.config.ts", "src/main/**/*.ts", "src/preload/**/*.ts", "src/shared/**/*.ts", "src/domain/**/*.ts", "src/adapters/**/*.ts", "src/renderer/src/env.d.ts", "tests/**/*.ts"]
+  "include": ["electron.vite.config.ts", "vite.components.config.ts", "playwright.config.ts", "playwright.gui.config.ts", "src/main/**/*.ts", "src/preload/**/*.ts", "src/shared/**/*.ts", "src/domain/**/*.ts", "src/adapters/**/*.ts", "src/renderer/src/env.d.ts", "tests/**/*.ts"]
 }
