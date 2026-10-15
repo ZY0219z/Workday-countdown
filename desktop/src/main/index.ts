@@ -25,7 +25,9 @@ import { createIpcRouter } from './ipc/router'
 
 const rendererFile = join(__dirname, '../renderer/index.html')
 const devUrl = !app.isPackaged ? process.env.ELECTRON_RENDERER_URL : undefined
-const rendererUrl = devUrl || pathToFileURL(rendererFile).href
+// electron-vite supplies a slash-less HTTP origin; Chromium canonicalizes it.
+// Canonicalize only our trusted target, never an incoming sender URL/origin.
+const rendererUrl = devUrl ? new URL(devUrl).href : pathToFileURL(rendererFile).href
 // Packaged EXEs NEVER accept test profile overrides, injected exit choices or
 // background window substitutes, regardless of environment/command-line input.
 const testMode = !app.isPackaged && process.env.WORKDAY_ESCAPE_TEST_MODE === '1'
@@ -145,7 +147,7 @@ else if (instance.data.primary) {
       window.once('ready-to-show', () => { if (!quit.isAuthorized()) { if (!background) { windows!.showMain(); void repairBounds() }; instance.data.markReady() } })
       // No tray in D08: native close still requests real exit, never orphaned hide.
       window.on('close', event => { if (!quit.isAuthorized()) { event.preventDefault(); void requestQuit(true) } })
-      const loaded = devUrl ? window.loadURL(devUrl) : window.loadFile(rendererFile)
+      const loaded = devUrl ? window.loadURL(rendererUrl) : window.loadFile(rendererFile)
       void loaded.catch(() => { if (!quit.isAuthorized() && !window.isDestroyed()) { startupError('页面加载失败，应用将退出；配置未被更改。'); app.exit(1) } })
       return window
     })

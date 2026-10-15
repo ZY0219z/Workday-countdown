@@ -8,7 +8,7 @@ import { createFixedClock } from '../../src/domain/clock.ts'
 import { createIntlTimeZoneAdapter } from '../../src/adapters/intl-time-zone.ts'
 import { loadBundledCalendarStore } from '../../src/main/services/calendar-store.ts'
 export { createSettingsController } from '../../src/renderer/src/ui/settings-controller.ts'
-export { initialEditor, editorFrom, asDraft } from '../../src/renderer/src/ui/settings-editor.ts'
+export { initialEditor, editorFrom, asDraft, fieldMessage } from '../../src/renderer/src/ui/settings-editor.ts'
 export { durationText, wallLabel, qualityText } from '../../src/renderer/src/ui/dashboard-display.ts'
 export { createSettingsDraft } from '../../src/shared/settings-draft.ts'
 export { createV2Bridge } from '../../src/shared/bridge.ts'
@@ -29,4 +29,4 @@ export function fixtures(){
   }}
 }
 export function renderDashboard(snapshot){return renderToString(createSSRApp({render:()=>h(DashboardView,{snapshot})}))}
-export function renderSettings(model,metadata){return renderToString(createSSRApp({render:()=>h(SettingsView,{model,metadata,issues:[],busy:false,dirty:false,initialized:false,canSave:true,api:{}})}))}
+export function renderSettings(model,metadata,options={}){return renderToString(createSSRApp({render:()=>h(SettingsView,{model,metadata,issues:[],busy:false,dirty:false,initialized:false,canSave:true,api:{},...options})}))}

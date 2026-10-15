@@ -13,9 +13,13 @@ export function createSettingsController(api: MainWindowApi, changed: () => void
   function accept(session: SettingsDraftSession) { state.session=session;state.editor=editorFrom(session);state.dirty=session.dirty;state.unsynced=false;state.issues=session.issues;emit() }
   return {
     state,
-    async load() { const session=await api.settingsDraft.read();if(session.ok){state.error=null;accept(session.data)}else{state.error=session.error;emit()}return session },
+    async load():Promise<Result<SettingsDraftSession>> {
+      try{const session=await api.settingsDraft.read();if(session.ok){state.error=null;accept(session.data)}else{state.error=session.error;emit()}return session}
+      catch{const result:Result<SettingsDraftSession>={ok:false,error:{code:'INTERNAL',message:'IPC 初始化失败，尚未读取 Main 草稿。请重新连接配置。'}};state.error=result.error;emit();return result}
+    },
     edit(editor: EditorSettings) {
-      if(state.busy||!state.session||disposed)return
+      if(state.busy||disposed)return
+      if(!state.session){state.error={code:'UNAVAILABLE',message:'尚未读取 Main 草稿，无法编辑或保存。请重新连接配置。'};emit();return}
       state.editor=structuredClone(editor);state.dirty=true;state.unsynced=true;state.pending++;state.error=null;state.notice=''
       const draft=asDraft(editor),expectedRevision=state.session.expectedRevision
       queue=queue.then(async()=>{
@@ -28,7 +32,8 @@ export function createSettingsController(api: MainWindowApi, changed: () => void
     },
     async flush(){await queue;return lastSync},
     async save():Promise<boolean>{
-      if(state.busy||!state.session)return false
+      if(state.busy)return false
+      if(!state.session){state.error={code:'UNAVAILABLE',message:'尚未读取 Main 草稿，无法保存。请重新连接配置。'};emit();return false}
       state.busy=true;state.notice='正在校验排班并安全保存，首次可能需要数十秒。请等待结果。';emit()
       try {
         await queue;if(!lastSync.ok){state.error=lastSync.error;return false}

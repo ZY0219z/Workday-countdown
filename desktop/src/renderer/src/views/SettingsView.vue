@@ -3,15 +3,19 @@ import { ref, watch } from 'vue'
 import type { CalendarDatasetMetadata, ValidationIssue } from '../../../shared/contracts'
 import type { EditorSettings } from '../ui/settings-editor'
 import FieldErrors from '../components/FieldErrors.vue'
+import TimeInput from '../components/TimeInput.vue'
 import DataSettings from '../settings/DataSettings.vue'
 import type { MainWindowApi } from '../../../shared/contracts'
 import { normalizeLocalDate } from '../../../domain/local-date'
-const props=defineProps<{model:EditorSettings;issues:ValidationIssue[];busy:boolean;dirty:boolean;initialized:boolean;canSave:boolean;metadata:CalendarDatasetMetadata[];api:MainWindowApi}>()
+const props=withDefaults(defineProps<{model:EditorSettings;issues:ValidationIssue[];busy:boolean;dirty:boolean;initialized:boolean;canSave:boolean;sessionReady?:boolean;validationAttempt?:number;metadata:CalendarDatasetMetadata[];api:MainWindowApi}>(),{sessionReady:true,validationAttempt:0})
 const emit=defineEmits<{change:[value:EditorSettings];save:[];cancel:[];imported:[];dataBusy:[value:boolean]}>()
 const form=ref<EditorSettings>(JSON.parse(JSON.stringify(props.model)))
-watch(()=>props.model,value=>{form.value=JSON.parse(JSON.stringify(value))})
+// Main acknowledgements must not replace equal local input on every keystroke.
+watch(()=>props.model,value=>{if(JSON.stringify(value)!==JSON.stringify(form.value))form.value=JSON.parse(JSON.stringify(value))})
 const active=ref('schedule'), date=ref(''),kind=ref<'work'|'rest'>('rest'),dateError=ref('')
 const groups=[['schedule','时间与日程'],['employee','入职日期'],['salary','发薪日'],['overtime','加班记录'],['calendar','工作日历'],['appearance','外观主题'],['desktop','窗口与托盘'],['data','数据与恢复']]
+// Jump only on explicit failed Save, never during typing/group navigation.
+watch(()=>props.validationAttempt,()=>{const field=props.issues[0]?.field.split('.')[1];if(groups.some(group=>group[0]===field))active.value=field})
 const days=['周一','周二','周三','周四','周五','周六','周日']
 function update(){emit('change',JSON.parse(JSON.stringify(form.value)))}
 function addOverride(){const valid=normalizeLocalDate(date.value);if(!valid.ok){dateError.value='请选择真实有效的日期。';return}form.value.calendar.overrides[valid.data]=kind.value;dateError.value='';update()}
@@ -19,16 +23,17 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
 </script>
 <template>
   <section class="settings" aria-label="设置中心">
-    <h2>{{ initialized?'设置中心':canSave?'首次设置':'配置恢复' }}</h2>
+    <h2>{{ !sessionReady?'设置暂不可用':initialized?'设置中心':canSave?'首次设置':'配置恢复' }}</h2>
+    <p v-if="!sessionReady" role="alert">尚未读取 Main 草稿，请先重新连接配置；当前不能编辑或保存。</p>
     <p v-if="!initialized && canSave" class="we-muted">填写上下班时间和发薪日，确认后保存。入职日期可暂不设置；不会自动导入或写入正式配置。</p>
-    <label class="settings-group-label">设置分组 <select v-model="active" :disabled="busy" class="we-control"><option v-for="group in groups" :key="group[0]" :value="group[0]">{{ group[1] }}</option></select></label>
+    <label class="settings-group-label">设置分组 <select v-model="active" :disabled="busy||!sessionReady" class="we-control"><option v-for="group in groups" :key="group[0]" :value="group[0]">{{ group[1] }}</option></select></label>
     <form @submit.prevent="emit('save')">
-      <fieldset :disabled="busy" class="settings-fields">
+      <fieldset :disabled="busy||!sessionReady" class="settings-fields">
         <section v-if="active==='schedule'" class="settings-panel" aria-label="时间与日程">
           <h3>时间与日程</h3>
-          <label>上班时间<input v-model="form.schedule.startTime" class="we-control" type="time" @input="update" /></label>
+          <TimeInput v-model="form.schedule.startTime" label="上班时间" @update:model-value="update" />
           <FieldErrors :issues="issues" path="$.schedule.startTime" />
-          <label>下班时间<input v-model="form.schedule.endTime" class="we-control" type="time" @input="update" /></label>
+          <TimeInput v-model="form.schedule.endTime" label="下班时间" @update:model-value="update" />
           <FieldErrors :issues="issues" path="$.schedule.endTime" />
           <label class="we-check"><input v-model="form.schedule.crossMidnight" type="checkbox" @change="update" /> 跨夜班次（下班在次日）</label>
           <fieldset><legend>每周工作日</legend><div class="settings-checks"><label v-for="(day,i) in days" :key="day" class="we-check"><input v-model="form.schedule.workWeek" type="checkbox" :value="i+1" @change="update" />{{ day }}</label></div></fieldset>
@@ -36,9 +41,9 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
           <button class="we-button" type="button" @click="form.schedule.breaks.push({startTime:'',endTime:'',startDayOffset:0,endDayOffset:0});update()">添加午休 / 休息区间</button>
           <div v-for="(interval,i) in form.schedule.breaks" :key="i" class="settings-record">
             <template v-if="interval && typeof interval==='object'">
-              <label>休息开始<input v-model="interval.startTime" class="we-control" type="time" @input="update" /></label>
+              <TimeInput v-model="interval.startTime" label="休息开始" @update:model-value="update" />
               <label>开始日期<select v-model="interval.startDayOffset" class="we-control" @change="update"><option :value="0">班次开始日</option><option :value="1">次日</option></select></label>
-              <label>休息结束<input v-model="interval.endTime" class="we-control" type="time" @input="update" /></label>
+              <TimeInput v-model="interval.endTime" label="休息结束" @update:model-value="update" />
               <label>结束日期<select v-model="interval.endDayOffset" class="we-control" @change="update"><option :value="0">班次开始日</option><option :value="1">次日</option></select></label>
             </template>
             <button class="we-button" type="button" @click="form.schedule.breaks.splice(i,1);update()">移除此休息区间</button>
@@ -80,8 +85,8 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
         </section>
         <section v-if="active==='data'" class="settings-panel"><DataSettings :api="api" :blocked="dirty||busy" @applied="emit('imported')" @busy="value=>emit('dataBusy',value)" /></section>
       </fieldset>
-      <div class="settings-actions"><button type="submit" class="we-button we-button--primary" :disabled="busy||!canSave">{{ busy?'正在保存…':'保存设置' }}</button><button type="button" class="we-button" :disabled="busy" @click="emit('cancel')">取消 / 返回仪表盘</button><span class="we-muted">{{ dirty?'有未保存修改':'没有未保存修改' }}</span></div>
-      <p v-if="!canSave" class="settings-deferred">当前正式配置不可写，请到“数据与恢复”预览完整V2配置或有效备份；不会覆盖损坏或较新版本。</p>
+      <div class="settings-actions"><button type="submit" class="we-button we-button--primary" :disabled="busy||!canSave">{{ busy?'正在保存…':'保存设置' }}</button><button type="button" class="we-button" :disabled="busy||!sessionReady" @click="emit('cancel')">取消 / 返回仪表盘</button><span class="we-muted">{{ !sessionReady?'草稿状态未知，尚未读取':dirty?'有未保存修改':'没有未保存修改' }}</span></div>
+      <p v-if="sessionReady&&!canSave" class="settings-deferred">当前正式配置不可写，请到“数据与恢复”预览完整V2配置或有效备份；不会覆盖损坏或较新版本。</p>
     </form>
   </section>
 </template>

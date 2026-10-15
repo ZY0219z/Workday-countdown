@@ -171,18 +171,18 @@ test('dirty formal continue editing preserves input and cancels native close',as
 test('dirty formal save commits before true exit; launcher/main and captured children stop',async()=>{
   const path=profile(),{app,page}=await launch(path),processHandle=app.process(),tree=trackTree(processHandle.pid!);await tree.live()
   await page.getByLabel('设置分组').selectOption('appearance');await page.getByLabel('配色',{exact:true}).selectOption('coral');await expect(page.locator('[data-workday-root]')).toHaveAttribute('data-pending','false');await app.evaluate(({app})=>(app as TestApp).__workdayD08Test.chooseExit('save'))
-  const ended=app.waitForEvent('close');await page.getByRole('button',{name:'退出',exact:true}).click();await ended
+  const ended=app.waitForEvent('close');await page.getByRole('button',{name:'退出程序',exact:true}).click();await ended
   expect(JSON.parse(readFileSync(join(path,'lifecycle','settings.json'),'utf8')).appearance.accent).toBe('coral');await expect.poll(()=>processHandle.exitCode).toBe(0)
   await expect.poll(()=>tree.live(),{timeout:10000}).toEqual([])
 })
 test('explicit discard exits without writing edited formal time',async()=>{
   const path=profile(),{app,page}=await launch(path);const before=readFileSync(join(path,'lifecycle','settings.json'),'utf8')
   await page.getByLabel('下班时间').fill('19:00');await expect(page.locator('[data-workday-root]')).toHaveAttribute('data-pending','false');await app.evaluate(({app})=>(app as TestApp).__workdayD08Test.chooseExit('discard'))
-  const ended=app.waitForEvent('close');await page.getByRole('button',{name:'退出',exact:true}).click();await ended;expect(readFileSync(join(path,'lifecycle','settings.json'),'utf8')).toBe(before)
+  const ended=app.waitForEvent('close');await page.getByRole('button',{name:'退出程序',exact:true}).click();await ended;expect(readFileSync(join(path,'lifecycle','settings.json'),'utf8')).toBe(before)
 })
 test('invalid unsaved formal save cancels exit and preserves values',async()=>{
   const {app,page}=await launch(profile());await page.getByLabel('上班时间').fill('22:00');await page.getByLabel('下班时间').fill('06:00');await expect(page.locator('[data-workday-root]')).toHaveAttribute('data-pending','false');await app.evaluate(({app})=>(app as TestApp).__workdayD08Test.chooseExit('save'))
-  await page.getByRole('button',{name:'退出',exact:true}).click();await expect(page.locator('.app-error')).toBeVisible();expect(app.process().exitCode).toBe(null);await expect(page.getByLabel('上班时间')).toHaveValue('22:00')
+  await page.getByRole('button',{name:'退出程序',exact:true}).click();await expect(page.locator('.app-error')).toBeVisible();expect(app.process().exitCode).toBe(null);await expect(page.getByLabel('上班时间')).toHaveValue('22:00')
 })
 test('normal formal dirty close offers save/discard/continue and continues editing',async()=>{
   const {app,page}=await launch(profile());await page.getByLabel('下班时间').fill('19:00')
@@ -204,7 +204,7 @@ test('screen workArea repairs off-screen bounds, small native window keeps contr
   await app.evaluate(({BrowserWindow})=>{const w=BrowserWindow.getAllWindows()[0];w.setMinimumSize(320,280);w.setBounds({width:320,height:280})})
   await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollHeight>innerHeight)).toBe(true)
   await page.getByRole('button',{name:'保存设置'}).scrollIntoViewIfNeeded();await expect(page.getByRole('button',{name:'保存设置'})).toBeVisible()
-  await page.getByRole('button',{name:'退出',exact:true}).scrollIntoViewIfNeeded();await expect(page.getByRole('button',{name:'退出',exact:true})).toBeVisible()
+  await page.getByRole('button',{name:'退出程序',exact:true}).scrollIntoViewIfNeeded();await expect(page.getByRole('button',{name:'退出程序',exact:true})).toBeVisible()
 })
 test('abnormal termination can restart with the same profile and a usable main',async()=>{
   const path=profile(),first=await launch(path),processHandle=first.app.process(),pid=processHandle.pid!
