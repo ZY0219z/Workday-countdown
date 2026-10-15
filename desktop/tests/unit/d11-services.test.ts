@@ -13,7 +13,11 @@ import {createQuitCoordinator,type ExitChoice} from '../../src/main/lifecycle/qu
 import {createIpcRouter,type IpcEvent} from '../../src/main/ipc/router'
 import {createV2Bridge} from '../../src/shared/bridge'
 import {V2_CHANNELS} from '../../src/shared/ipc'
-import type {Result,ContractRequests} from '../../src/shared/contracts'
+import type {Result,ContractRequests,AppConfig} from '../../src/shared/contracts'
+import {createDefaultAppConfig} from '../../src/shared/config-schema'
+import {createCalendar} from '../../src/domain/calendar'
+import {calculateNextSalary} from '../../src/domain/salary'
+import {validateConfigSettings,validateConfigSettingsAsync,editableConfig} from '../../src/main/services/config-validation'
 import {success} from '../../src/shared/validation'
 import {createSettingsController} from '../../src/renderer/src/ui/settings-controller'
 import {nodeConfigFiles} from '../../src/main/services/config-files'
@@ -102,4 +106,51 @@ for(const choice of ['continueEditing','discard','save'] as const)test(`actual D
 test('exit save failure cancels exit and retains draft; annual imports remain honestly unavailable',async()=>{
   const a=await setup();a.fail();const edit=structuredClone(a.controller.state.editor);edit.schedule.endTime='19:00';a.controller.edit(edit);value(await a.controller.flush());a.choose('save');rejected(await a.api.app.quit(),'IO_DENIED');assert.equal(a.quits(),0)
   rejected(await a.api.calendar.previewImport(),'UNAVAILABLE');rejected(await a.api.calendar.applyImport({previewToken:'not-real',expectedCalendarRevision:0}),'UNAVAILABLE')
+})
+
+async function defaultSession(options:{primary?:string;backup?:string;failWrite?:boolean}={}){
+  const directory=await mkdtemp(join(tmpdir(),'workday-d11-defaults-'));directories.push(directory)
+  if(options.primary!==undefined)await writeFile(join(directory,'settings.json'),options.primary)
+  if(options.backup!==undefined)await writeFile(join(directory,'settings.backup.json'),options.backup)
+  const ctx=context(),writes=createOperationBarrier()
+  const store=value(createConfigStore({...ctx,directory,appVersion:'2.0.0',files:options.failWrite?{...nodeConfigFiles,async writeExclusiveFlush(){throw Object.assign(Error('fixture denied'),{code:'EACCES'})}}:undefined}))
+  const runtime=createRuntime({...ctx,store,writes,initializeDefaults:{appVersion:'2.0.0'},confirm:async()=>success('continueEditing'),maxHistoryDays:100000})
+  value(await runtime.start());after(()=>runtime.dispose())
+  return {runtime,store,ctx,directory,async settled(){const end=performance.now()+5000;while(value(runtime.readDraft()).defaultPersistence?.status==='pending'){assert.ok(performance.now()<end,'bounded default save');await new Promise<void>(resolve=>setImmediate(resolve))}return value(runtime.readDraft())}}
+}
+test('approved defaults show a Snapshot before disk save, then persist once and survive restart',async()=>{
+  const a=await defaultSession(),initial=value(a.runtime.readDraft())
+  assert.equal(initial.saved,null);assert.equal(initial.defaultPersistence?.status,'pending')
+  const snapshot=value(await a.runtime.snapshots.read());assert.ok(snapshot.countdown);assert.equal(snapshot.configRevision,0)
+  assert.equal(initial.draft.employee&&typeof initial.draft.employee==='object'&&(initial.draft.employee as {startDate:string}).startDate,'2025-07-17')
+  const settled=await a.settled();assert.equal(settled.saved!.revision,1);assert.equal(settled.defaultPersistence,undefined)
+  const text=await readFile(join(a.directory,'settings.json'),'utf8'),config=JSON.parse(text) as AppConfig
+  assert.deepEqual(config.schedule,{startTime:'08:30',endTime:'18:00',crossMidnight:false,workWeek:[1,2,3,4,5],breaks:[]});assert.equal(config.salary.day,10);assert.equal(config.salary.nonWorkingPolicy,'delay');assert.deepEqual(config.overtime.entries,[]);assert.deepEqual(config.calendar.enabledYears,[2024,2025,2026])
+  a.runtime.dispose();const restarted=value(createConfigStore({...a.ctx,directory:a.directory,appVersion:'2.0.0'}));assert.equal(value(await restarted.load()).status,'ready');assert.equal(await readFile(join(a.directory,'settings.json'),'utf8'),text)
+})
+test('failed automatic default save retains usable Snapshot and never calls defaults persisted',async()=>{
+  const a=await defaultSession({failWrite:true}),draft=await a.settled();assert.equal(draft.saved,null);assert.equal(draft.defaultPersistence?.status,'failed');assert.equal(draft.dirty,false);assert.ok(value(await a.runtime.snapshots.read()).countdown);await assert.rejects(readFile(join(a.directory,'settings.json')))
+  const edited={...draft.draft,salary:{day:15,nonWorkingPolicy:'delay',missingDayPolicy:'monthEnd',showPaydayAsToday:true}};value(a.runtime.updateDraft({draft:edited,expectedRevision:0}));value(a.runtime.discardDraft());assert.equal((value(a.runtime.readDraft()).draft.salary as {day:number}).day,10)
+})
+for(const scenario of ['existing','backup','broken','future','brokenBackup'] as const)test(`automatic defaults never replace ${scenario} data`,async()=>{
+  const config=value(createDefaultAppConfig({updatedAt:'2026-10-15T00:00:00.000Z',appVersion:'2.0.0'},context().calendars.listMetadata()));config.schedule.startTime='10:00';config.revision=7
+  const text=JSON.stringify(config),options=scenario==='existing'?{primary:text}:scenario==='backup'?{primary:'broken',backup:text}:scenario==='broken'?{primary:'broken'}:scenario==='future'?{primary:'{"schemaVersion":99}'}:{backup:'broken backup'}
+  const a=await defaultSession(options),draft=value(a.runtime.readDraft());assert.equal(draft.defaultPersistence,undefined)
+  assert.equal(draft.configurationStatus,scenario==='existing'?'ready':scenario==='backup'?'recoverable':scenario==='future'?'future':'invalid')
+  if(options.primary!==undefined)assert.equal(await readFile(join(a.directory,'settings.json'),'utf8'),options.primary)
+  else await assert.rejects(readFile(join(a.directory,'settings.json')))
+  if(options.backup!==undefined)assert.equal(await readFile(join(a.directory,'settings.backup.json'),'utf8'),options.backup)
+})
+test('cooperative and synchronous checks cover the same full horizon and reject the same invalid schedule',async()=>{
+  const ctx=context(),config=value(createDefaultAppConfig({updatedAt:'2026-10-15T00:00:00.000Z',appVersion:'2.0.0'},ctx.calendars.listMetadata())),settings=value(editableConfig(config))
+  const synchronous=validateConfigSettings(settings,null,ctx),cooperative=await validateConfigSettingsAsync(settings,null,ctx)
+  assert.deepEqual(cooperative,synchronous);assert.ok(value(cooperative).checkedShiftDates.length>=367)
+  settings.schedule.endTime='08:00';assert.deepEqual(await validateConfigSettingsAsync(settings,config,ctx),validateConfigSettings(settings,config,ctx));rejected(await validateConfigSettingsAsync(settings,config,ctx))
+})
+test('default payroll delays a rest-day tenth but respects an official Saturday makeup day',()=>{
+  const ctx=context(),config=value(createDefaultAppConfig({updatedAt:'2026-10-15T00:00:00.000Z',appVersion:'2.0.0'},ctx.calendars.listMetadata()))
+  const calendar=value(createCalendar({workWeek:config.schedule.workWeek,overrides:{}},[2024,2025,2026].map(year=>value(ctx.calendars.readYear(year))!)))
+  const rest=value(calculateNextSalary(calendar,'2026-05-09',10,'delay')),makeup=value(calculateNextSalary(calendar,'2026-10-10',10,'delay'))
+  assert.equal(rest.status,'found');if(rest.status==='found')assert.equal(rest.actualDate,'2026-05-11')
+  assert.equal(makeup.status,'found');if(makeup.status==='found'){assert.equal(makeup.actualDate,'2026-10-10');assert.equal(makeup.days,0)}
 })

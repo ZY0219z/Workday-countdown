@@ -316,3 +316,17 @@ test('a failing injected zone adapter does not partially update the fixed clock'
   rejected(clock.setInstant(1), 'UNAVAILABLE')
   assert.deepEqual(value(clock.read()), previous)
 })
+
+test('offset day cache preserves warm gap and repeated-hour results on different minute phases',()=>{
+  const adapter=createIntlTimeZoneAdapter();value(adapter.resolve(local('2026-11-01','12:00'),'America/New_York'))
+  const input=local('2026-11-01','01:30');input.time.second=17;input.time.millisecond=123
+  assert.deepEqual(value(adapter.resolve(input,'America/New_York')),{kind:'ambiguous',candidates:[Date.parse('2026-11-01T05:30:17.123Z'),Date.parse('2026-11-01T06:30:17.123Z')]})
+  value(adapter.resolve(local('2026-03-08','12:00'),'America/New_York'));assert.equal(value(adapter.resolve(local('2026-03-08','02:30'),'America/New_York')).kind,'nonexistent')
+  assert.deepEqual(value(adapter.resolve(local('2026-03-08','03:00'),'America/New_York')),{kind:'unique',instant:Date.parse('2026-03-08T07:00:00Z')})
+})
+test('cached half-hour transitions and a skipped civil day retain all original ambiguity',()=>{
+  const adapter=createIntlTimeZoneAdapter();value(adapter.resolve(local('2026-04-05','12:00'),'Australia/Lord_Howe'))
+  assert.deepEqual(value(adapter.resolve(local('2026-04-05','01:45'),'Australia/Lord_Howe')),{kind:'ambiguous',candidates:[Date.parse('2026-04-04T14:45:00Z'),Date.parse('2026-04-04T15:15:00Z')]})
+  assert.equal(value(adapter.resolve(local('2026-10-04','02:15'),'Australia/Lord_Howe')).kind,'nonexistent')
+  assert.equal(value(adapter.resolve(local('2011-12-30','12:00'),'Pacific/Apia')).kind,'nonexistent')
+})

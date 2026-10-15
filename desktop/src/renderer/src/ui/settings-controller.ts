@@ -34,7 +34,7 @@ export function createSettingsController(api: MainWindowApi, changed: () => void
     async save():Promise<boolean>{
       if(state.busy)return false
       if(!state.session){state.error={code:'UNAVAILABLE',message:'尚未读取 Main 草稿，无法保存。请重新连接配置。'};emit();return false}
-      state.busy=true;state.notice='正在校验排班并安全保存，首次可能需要数十秒。请等待结果。';emit()
+      state.busy=true;state.notice='正在校验并保存…';emit()
       try {
         await queue;if(!lastSync.ok){state.error=lastSync.error;return false}
         const checked=validateStructure(asDraft(state.editor),editableConfigValidator)

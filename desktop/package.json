@@ -25,6 +25,7 @@
     "test:d11": "node scripts/test-d11.mjs",
     "test:d11:visual": "npm run build && node scripts/test-d11-visual.mjs",
     "test:d11:services": "node scripts/test-d11-services.mjs",
+    "profile:d11": "node scripts/test-lifecycle.mjs d11-performance",
     "test:d10": "node scripts/test-d10.mjs",
     "test:d10:visual": "node scripts/test-d10-visual.mjs",
     "preview:components": "vite --config vite.components.config.ts",

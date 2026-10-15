@@ -98,7 +98,7 @@ else if (instance.data.primary) {
           return selected.canceled?null:selected.filePath??null
         }
       })})
-    const runtime=createRuntime({store:store.data,migration,clock,zones,calendars:calendars.data,maxValidationDates:10000,maxHistoryDays:100000,writes,
+    const runtime=createRuntime({store:store.data,migration,clock,zones,calendars:calendars.data,maxValidationDates:10000,maxHistoryDays:100000,writes,initializeDefaults:{appVersion:app.getVersion()},
       async confirm(){
         if(paths.data.testProfile && exitChoiceForTest!==null)return success(exitChoiceForTest)
         if(background)return {ok:false,error:{code:'UNAVAILABLE',message:'后台退出需要显式测试选择，不弹出原生对话框。'}}

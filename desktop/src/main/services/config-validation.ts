@@ -35,8 +35,8 @@ export function datasetMetadata(settings: EditableConfig, context: ConfigValidat
 }
 // No time-zone policy is inferred. Ambiguous or missing relevant endpoints fail
 // the save; the finite inspection scope is returned and never means all future.
-export function validateConfigSettings(input: unknown, previous: AppConfig | null, context: ConfigValidationContext,
-  allowImportedHistory = false): Result<ConfigValidation> {
+function* validationSteps(input: unknown, previous: AppConfig | null, context: ConfigValidationContext,
+  allowImportedHistory = false): Generator<void,Result<ConfigValidation>> {
   try {
     const parsed = validateStructure(input, editableConfigValidator)
     if (!parsed.ok) return parsed
@@ -122,8 +122,11 @@ export function validateConfigSettings(input: unknown, previous: AppConfig | nul
       const valid = validateShiftConflicts(settings.schedule, settings.overtime, entry.shiftDate, shiftContext)
       if (!valid.ok) return valid
     }
-    const checked = validateScheduleForDates(settings.schedule, settings.overtime, dates, shiftContext)
-    if (!checked.ok) return checked
+    for(let index=0;index<dates.length;index+=8){
+      yield // Async storage caller lets Main process IPC/window events here.
+      const checked=validateScheduleForDates(settings.schedule,settings.overtime,dates.slice(index,index+8),shiftContext)
+      if(!checked.ok)return checked
+    }
     const warnings: ValidationIssue[] = []
     if (globalChange) warnings.push(issue('$.schedule', 'LIMIT', `已检查当前邻班、未来366天及明确未来记录/覆盖；未证明无限未来（时区${now.data.timeZoneId}）。运行接入必须在新日期/时区重新校验，失败停止生成班次。`))
     const missing = settings.calendar.enabledYears.filter(year => !years.some(item => item.data.year === year))
@@ -131,7 +134,19 @@ export function validateConfigSettings(input: unknown, previous: AppConfig | nul
     return success({ settings, checkedShiftDates: dates, warnings, checkedClock: { instant: now.data.instant, localDate: now.data.date, timeZoneId: now.data.timeZoneId } })
   } catch { return { ok: false, error: { code: 'UNAVAILABLE', message: '无法完成配置语义校验，原配置保留。' } } }
 }
-export function validateStoredConfig(input: unknown, context: ConfigValidationContext): Result<AppConfig> {
+export function validateConfigSettings(input:unknown,previous:AppConfig|null,context:ConfigValidationContext,allowImportedHistory=false):Result<ConfigValidation>{
+  const steps=validationSteps(input,previous,context,allowImportedHistory)
+  let step=steps.next();while(!step.done)step=steps.next();return step.value
+}
+export async function validateConfigSettingsAsync(input:unknown,previous:AppConfig|null,context:ConfigValidationContext,allowImportedHistory=false):Promise<Result<ConfigValidation>>{
+  const steps=validationSteps(input,previous,context,allowImportedHistory)
+  let step=steps.next()
+  while(!step.done){await new Promise<void>(resolve=>setImmediate(resolve));step=steps.next()}
+  return step.value
+}
+// Candidate metadata still receives full structural/trusted-source checks.
+// Only freshly semantically validated candidates may omit a redundant pass.
+export function validateConfigEnvelope(input: unknown, context: ConfigValidationContext): Result<AppConfig> {
   const parsed = validateAppConfig(input)
   if (!parsed.ok) return parsed
   const config = parsed.data
@@ -145,7 +160,14 @@ export function validateStoredConfig(input: unknown, context: ConfigValidationCo
   if (JSON.stringify(config.calendar.datasets) !== JSON.stringify(approved)) {
     return { ok: false, error: { code: 'FORBIDDEN', message: '年度元数据不匹配主进程可信资源，不能采信用户核验声明。' } }
   }
-  // Loading keeps historical settings and only checks current/future applicability.
+  return success(config)
+}
+export function validateStoredConfig(input: unknown, context: ConfigValidationContext): Result<AppConfig> {
+  const record=validateConfigEnvelope(input,context)
+  if(!record.ok)return record
+  const config=record.data,editable=editableConfig(config)
+  if(!editable.ok)return editable
+  // Untrusted disk loads always retain their semantic checks.
   const semantic = validateConfigSettings(editable.data, config, context, true)
   return semantic.ok ? success(config) : semantic
 }

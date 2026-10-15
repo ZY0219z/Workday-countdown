@@ -131,6 +131,15 @@ const initialValidator = v.object<InitialConfigInput>({
   updatedAt: timestampFormat, appVersion, startDate: v.nullable(dateFormat), startTime: timeFormat, endTime: timeFormat,
   salaryDay: v.number(1, 31), themeMode: v.enum(['system', 'light', 'dark'] as const), themeAccent: v.enum(['ocean', 'coral'] as const)
 })
+// User-approved D11 UX defaults (2026-10-15). Existing files are never merged
+// with this template; only Main's confirmed missing+no-backup startup uses it.
+export function createDefaultAppConfig(metadata:Pick<InitialConfigInput,'updatedAt'|'appVersion'>,datasets:AppConfig['calendar']['datasets']):Result<AppConfig>{
+  const created=createAppConfig({startDate:'2025-07-17',startTime:'08:30',endTime:'18:00',salaryDay:10,themeMode:'system',themeAccent:'ocean',...metadata})
+  if(!created.ok)return created
+  created.data.calendar.enabledYears=[2024,2025,2026]
+  created.data.calendar.datasets=datasets.filter(item=>created.data.calendar.enabledYears.includes(item.year))
+  return validateAppConfig(created.data)
+}
 export function createAppConfig(input: InitialConfigInput): Result<AppConfig> {
   const checked = validateStructure(input, initialValidator)
   if (!checked.ok) return checked

@@ -26,6 +26,7 @@ async function launch(){
   return page
 }
 async function settings(page:Awaited<ReturnType<typeof launch>>){const open=page.getByRole('button',{name:'设置',exact:true});if(await open.count())await open.click()}
+
 test('visible formal window, renderer sandbox and limited V2 preload',async()=>{
   const page=await launch();await expect(page.getByRole('heading',{name:'Workday Escape',exact:true})).toBeVisible()
   const prefs=await application!.evaluate(({BrowserWindow})=>(BrowserWindow.getAllWindows()[0].webContents as unknown as {getLastWebPreferences():WebPreferences}).getLastWebPreferences())
@@ -36,7 +37,7 @@ test('visible formal window, renderer sandbox and limited V2 preload',async()=>{
 test('formal save, authoritative one-second snapshot updates, offline reload and reopening',async()=>{
   let page=await launch();await settings(page);await page.getByLabel('下班时间',{exact:true}).fill('19:00');await page.getByRole('button',{name:'保存设置',exact:true}).click();await expect(page.locator('.app-notice[role=status]')).toHaveText('设置已保存。',{timeout:30000})
   expect(JSON.parse(readFileSync(join(profile,'lifecycle','settings.json'),'utf8')).schedule.endTime).toBe('19:00')
-  await page.getByRole('button',{name:'取消 / 返回仪表盘',exact:true}).click()
+  await expect(page.getByRole('region',{name:'工作日仪表盘'})).toBeVisible()
   await page.evaluate(async()=>{const samples:number[]=[];(window as unknown as {__guiSequences:number[]}).__guiSequences=samples;await window.workdayV2.snapshot.subscribe(result=>{if(result.ok)samples.push(result.data.sequence)})})
   await expect.poll(()=>page.evaluate(()=>(window as unknown as {__guiSequences:number[]}).__guiSequences.length),{timeout:2500}).toBeGreaterThan(1)
   await page.context().setOffline(true);await page.reload();await expect(page.locator('[data-workday-root]')).toHaveAttribute('data-pending','false');await settings(page);await expect(page.getByLabel('下班时间',{exact:true})).toHaveValue('19:00')
@@ -58,5 +59,5 @@ test('save obstruction preserves editor and last applied authoritative values',a
   expect(await page.evaluate(async()=>{const saved=await window.workdayV2.config.read();return saved.ok?saved.data.config.schedule.endTime:null})).toBe('18:00')
 })
 for(const native of [false,true])test(native?'native clean close terminates process':'explicit clean exit terminates process',async()=>{
-  const page=await launch(),process=application!.process(),closed=application!.waitForEvent('close');if(native)await application!.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].close());else await page.getByRole('button',{name:'退出程序',exact:true}).click();await closed;await expect.poll(()=>process.exitCode).toBe(0);application=undefined
+  const page=await launch();await settings(page);const process=application!.process(),closed=application!.waitForEvent('close');if(native)await application!.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].close());else await page.getByRole('button',{name:'退出程序',exact:true}).click();await closed;await expect.poll(()=>process.exitCode).toBe(0);application=undefined
 })

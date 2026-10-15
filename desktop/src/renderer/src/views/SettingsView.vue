@@ -7,15 +7,15 @@ import TimeInput from '../components/TimeInput.vue'
 import DataSettings from '../settings/DataSettings.vue'
 import type { MainWindowApi } from '../../../shared/contracts'
 import { normalizeLocalDate } from '../../../domain/local-date'
-const props=withDefaults(defineProps<{model:EditorSettings;issues:ValidationIssue[];busy:boolean;dirty:boolean;initialized:boolean;canSave:boolean;sessionReady?:boolean;validationAttempt?:number;metadata:CalendarDatasetMetadata[];api:MainWindowApi}>(),{sessionReady:true,validationAttempt:0})
-const emit=defineEmits<{change:[value:EditorSettings];save:[];cancel:[];imported:[];dataBusy:[value:boolean]}>()
+const props=withDefaults(defineProps<{model:EditorSettings;issues:ValidationIssue[];busy:boolean;dirty:boolean;initialized:boolean;canSave:boolean;sessionReady?:boolean;quitDisabled?:boolean;defaultUnpersisted?:boolean;validationAttempt?:number;metadata:CalendarDatasetMetadata[];api:MainWindowApi}>(),{sessionReady:true,defaultUnpersisted:false,validationAttempt:0})
+const emit=defineEmits<{change:[value:EditorSettings];save:[];cancel:[];quit:[];imported:[];dataBusy:[value:boolean]}>()
 const form=ref<EditorSettings>(JSON.parse(JSON.stringify(props.model)))
 // Main acknowledgements must not replace equal local input on every keystroke.
 watch(()=>props.model,value=>{if(JSON.stringify(value)!==JSON.stringify(form.value))form.value=JSON.parse(JSON.stringify(value))})
-const active=ref('schedule'), date=ref(''),kind=ref<'work'|'rest'>('rest'),dateError=ref('')
-const groups=[['schedule','时间与日程'],['employee','入职日期'],['salary','发薪日'],['overtime','加班记录'],['calendar','工作日历'],['appearance','外观主题'],['desktop','窗口与托盘'],['data','数据与恢复']]
+const moreOpen=ref(false),active=ref('overtime'), date=ref(''),kind=ref<'work'|'rest'>('rest'),dateError=ref('')
+const groups=[['overtime','加班记录'],['calendar','工作日历'],['appearance','外观主题'],['desktop','窗口与托盘'],['data','数据与恢复']]
 // Jump only on explicit failed Save, never during typing/group navigation.
-watch(()=>props.validationAttempt,()=>{const field=props.issues[0]?.field.split('.')[1];if(groups.some(group=>group[0]===field))active.value=field})
+watch(()=>props.validationAttempt,()=>{const field=props.issues[0]?.field.split('.')[1];if(groups.some(group=>group[0]===field)){active.value=field;moreOpen.value=true}})
 const days=['周一','周二','周三','周四','周五','周六','周日']
 function update(){emit('change',JSON.parse(JSON.stringify(form.value)))}
 function addOverride(){const valid=normalizeLocalDate(date.value);if(!valid.ok){dateError.value='请选择真实有效的日期。';return}form.value.calendar.overrides[valid.data]=kind.value;dateError.value='';update()}
@@ -23,21 +23,20 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
 </script>
 <template>
   <section class="settings" aria-label="设置中心">
-    <h2>{{ !sessionReady?'设置暂不可用':initialized?'设置中心':canSave?'首次设置':'配置恢复' }}</h2>
+    <h2>{{ !sessionReady?'设置暂不可用':canSave?'设置中心':'配置恢复' }}</h2>
     <p v-if="!sessionReady" role="alert">尚未读取 Main 草稿，请先重新连接配置；当前不能编辑或保存。</p>
-    <p v-if="!initialized && canSave" class="we-muted">填写上下班时间和发薪日，确认后保存。入职日期可暂不设置；不会自动导入或写入正式配置。</p>
-    <label class="settings-group-label">设置分组 <select v-model="active" :disabled="busy||!sessionReady" class="we-control"><option v-for="group in groups" :key="group[0]" :value="group[0]">{{ group[1] }}</option></select></label>
     <form @submit.prevent="emit('save')">
       <fieldset :disabled="busy||!sessionReady" class="settings-fields">
-        <section v-if="active==='schedule'" class="settings-panel" aria-label="时间与日程">
+        <div class="settings-common">
+        <section class="settings-panel settings-schedule" aria-label="时间与日程">
           <h3>时间与日程</h3>
-          <TimeInput v-model="form.schedule.startTime" label="上班时间" @update:model-value="update" />
-          <FieldErrors :issues="issues" path="$.schedule.startTime" />
+          <div class="settings-time-pair"><div><TimeInput v-model="form.schedule.startTime" label="上班时间" @update:model-value="update" />
+          <FieldErrors :issues="issues" path="$.schedule.startTime" /></div><div>
           <TimeInput v-model="form.schedule.endTime" label="下班时间" @update:model-value="update" />
-          <FieldErrors :issues="issues" path="$.schedule.endTime" />
+          <FieldErrors :issues="issues" path="$.schedule.endTime" /></div></div>
           <label class="we-check"><input v-model="form.schedule.crossMidnight" type="checkbox" @change="update" /> 跨夜班次（下班在次日）</label>
           <fieldset><legend>每周工作日</legend><div class="settings-checks"><label v-for="(day,i) in days" :key="day" class="we-check"><input v-model="form.schedule.workWeek" type="checkbox" :value="i+1" @change="update" />{{ day }}</label></div></fieldset>
-          <p class="we-muted">午休默认关闭。下班倒计时包含午休，工作进度排除午休；跨夜班次归属于开始日期。</p>
+          <p class="we-muted">午休可选：倒计时包含午休，工作进度不含午休。</p>
           <button class="we-button" type="button" @click="form.schedule.breaks.push({startTime:'',endTime:'',startDayOffset:0,endDayOffset:0});update()">添加午休 / 休息区间</button>
           <div v-for="(interval,i) in form.schedule.breaks" :key="i" class="settings-record">
             <template v-if="interval && typeof interval==='object'">
@@ -50,15 +49,18 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
           </div>
           <FieldErrors :issues="issues" path="$.schedule" />
         </section>
-        <section v-if="active==='employee'" class="settings-panel">
+        <section class="settings-panel">
           <h3>入职日期</h3><label>入职日期<input :value="form.employee.startDate||''" type="date" class="we-control" @input="form.employee.startDate=($event.target as HTMLInputElement).value||null;update()" /></label>
-          <p class="we-muted">可留空或设为未来日期。自然日和计划工作日均不包含今天；入职当天为 0。计划工作日按当前规则推算，不代表实际出勤。</p><FieldErrors :issues="issues" path="$.employee" />
+          <p class="we-muted">可留空。不含今天，入职当天为 0；计划工作日并非实际出勤。</p><FieldErrors :issues="issues" path="$.employee" />
         </section>
-        <section v-if="active==='salary'" class="settings-panel">
+        <section class="settings-panel">
           <h3>计划发薪</h3><label>每月发薪日<input :value="form.salary.day??''" type="number" min="1" max="31" step="1" class="we-control" @input="form.salary.day=numeric($event);update()" /></label>
           <label>遇休息日<select v-model="form.salary.nonWorkingPolicy" class="we-control" @change="update"><option value="delay">顺延下一个工作日</option><option value="advance">提前上一个工作日</option><option value="none">不调整</option></select></label>
-          <p class="we-muted">短月取月末，实际计划日期当天显示 0 天。不代表工资已到账；多个周期重合时明确提示歧义。</p><FieldErrors :issues="issues" path="$.salary" />
+          <p class="we-muted">每月发上月工资，按所选休息日规则调整。仅为计划日期。</p><FieldErrors :issues="issues" path="$.salary" />
         </section>
+        </div>
+        <details class="settings-more" :open="moreOpen" @toggle="moreOpen=($event.target as HTMLDetailsElement).open"><summary>更多设置</summary>
+    <label class="settings-group-label">设置分组 <select v-model="active" :disabled="busy||!sessionReady" class="we-control"><option v-for="group in groups" :key="group[0]" :value="group[0]">{{ group[1] }}</option></select></label>
         <section v-if="active==='overtime'" class="settings-panel">
           <h3>按班次日期设置加班</h3><p class="we-muted">0–600 分钟；跨午夜仍归原班，历史不自动删除。清除仅影响所选条目，保存后生效；休息日不新建临时班次。</p>
           <button type="button" class="we-button" @click="form.overtime.entries.push({shiftDate:'',minutes:null});update()">添加加班记录</button>
@@ -84,8 +86,9 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
           <p class="settings-deferred">当前仅保存偏好，尚未创建托盘或迷你窗。此阶段点击关闭仍真正退出并保护草稿，不隐藏成无法恢复的进程；首次启动仍打开主窗口。</p><FieldErrors :issues="issues" path="$.desktop" />
         </section>
         <section v-if="active==='data'" class="settings-panel"><DataSettings :api="api" :blocked="dirty||busy" @applied="emit('imported')" @busy="value=>emit('dataBusy',value)" /></section>
+        </details>
       </fieldset>
-      <div class="settings-actions"><button type="submit" class="we-button we-button--primary" :disabled="busy||!canSave">{{ busy?'正在保存…':'保存设置' }}</button><button type="button" class="we-button" :disabled="busy||!sessionReady" @click="emit('cancel')">取消 / 返回仪表盘</button><span class="we-muted">{{ !sessionReady?'草稿状态未知，尚未读取':dirty?'有未保存修改':'没有未保存修改' }}</span></div>
+      <div class="settings-actions"><button type="submit" class="we-button we-button--primary" :disabled="busy||!canSave">{{ busy?'正在保存…':'保存设置' }}</button><button type="button" class="we-button" :disabled="busy||!sessionReady" @click="emit('cancel')">取消 / 返回仪表盘</button><button type="button" class="we-button" :disabled="busy||quitDisabled" @click="emit('quit')">退出程序</button><span class="we-muted">{{ !sessionReady?'草稿状态未知，尚未读取':dirty?'有未保存修改':defaultUnpersisted?'默认设置尚未保存':'没有未保存修改' }}</span></div>
       <p v-if="sessionReady&&!canSave" class="settings-deferred">当前正式配置不可写，请到“数据与恢复”预览完整V2配置或有效备份；不会覆盖损坏或较新版本。</p>
     </form>
   </section>
@@ -94,7 +97,8 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
 .settings { display:grid;gap:var(--we-space-4); }
 h2 { font-size:22px; } h3 { font-size:var(--we-text-title); }
 .settings-group-label { display:flex;align-items:center;gap:var(--we-space-2);flex-wrap:wrap; }
-.settings-fields { border:0;padding:0;margin:0;min-width:0; }
+.settings-fields { border:0;padding:0;margin:0;min-width:0;display:grid;gap:var(--we-space-4); }
+.settings-common { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--we-space-4);align-items:start; }.settings-schedule { grid-column:1 / -1; }.settings-time-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--we-space-2);}.settings-more{border-top:1px solid var(--we-border);padding-top:var(--we-space-3)}summary{cursor:pointer;min-height:36px;line-height:36px;font-weight:600}.settings-more[open]{display:grid;gap:var(--we-space-3)}
 .settings-panel { display:grid;gap:var(--we-space-3); }
 .settings-panel > label:not(.we-check), .settings-record > label { display:grid;gap:var(--we-space-1); }
 .settings-panel .we-control { max-width:100%;width:100%; }
@@ -105,5 +109,5 @@ fieldset { border:1px solid var(--we-border);border-radius:var(--we-radius-contr
 .settings-deferred { color:var(--we-warning-text);font-size:var(--we-text-small); }
 .settings-override { display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--we-space-2); }
 .calendar-year { align-items:flex-start; }.calendar-year small { display:block;font-size:var(--we-text-small);color:var(--we-muted);overflow-wrap:anywhere; }
-@media(max-width:520px){.settings-record{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:520px){.settings-record,.settings-common,.settings-time-pair{grid-template-columns:minmax(0,1fr)}}
 </style>

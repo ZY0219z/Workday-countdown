@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { ConfigSnapshot, ContractRequests, JsonObject, Result, SettingsDraftSession, SnapshotWarning } from '../../shared/contracts'
+import type { AppConfig, ConfigSnapshot, ContractRequests, JsonObject, Result, SettingsDraftSession, SnapshotWarning } from '../../shared/contracts'
 import { success } from '../../shared/validation'
 import { validateDraftFields } from '../../shared/config-schema'
 import { checkExpectedRevision, validateContractRequest } from '../../shared/capabilities'
@@ -14,6 +14,8 @@ import type { ExitDraftAdapter, ExitChoice } from '../lifecycle/quit-coordinator
 import type { createOperationBarrier } from '../lifecycle/operation-barrier'
 import type { SnapshotService } from './snapshot-service'
 import type { RefreshCoordinator } from './clock'
+import { createDefaultAppConfig } from '../../shared/config-schema'
+import { editableConfig } from './config-validation'
 export interface Runtime {
   snapshots:SnapshotService;refresh:RefreshCoordinator
   start():Promise<Result<null>>;readConfig():Result<ConfigSnapshot>;readDraft():Result<SettingsDraftSession>
@@ -30,8 +32,10 @@ export interface Runtime {
 const unavailable=<T>(message='正式配置尚未初始化或不可用。'):Result<T>=>({ok:false,error:{code:'UNAVAILABLE',message}})
 const empty=():SettingsDraftSession=>({saved:null,draft:{},dirty:false,issues:[],expectedRevision:0,save:{status:'idle'}})
 const clone=<T>(value:T):T=>structuredClone(value)
-export function createRuntime(options:ConfigValidationContext & {store:ConfigStore;migration?:MigrationService;writes:ReturnType<typeof createOperationBarrier>;timers?:TimerPort;confirm:()=>Promise<Result<ExitChoice>>;maxHistoryDays:number}) {
+export function createRuntime(options:ConfigValidationContext & {store:ConfigStore;migration?:MigrationService;writes:ReturnType<typeof createOperationBarrier>;timers?:TimerPort;confirm:()=>Promise<Result<ExitChoice>>;maxHistoryDays:number;initializeDefaults?:{appVersion:string}}) {
   let config:ConfigSnapshot|null=null,state:ConfigLoadState|null=null,draft:SettingsDraftSession=empty(),busy=false,disposed=false,calendarRevision=0,calendarKey=''
+  let defaultSettings:import('../../shared/contracts').EditableConfig|null=null,defaultPersistence:SettingsDraftSession['defaultPersistence']|null=null
+  let defaultTask:ReturnType<typeof setImmediate>|null=null
   const snapshots=createSnapshotService(options.clock,c=>{
     const engine=createDashboardEngine(c,options.calendars,options.zones,options.maxHistoryDays)
     if(!engine.ok)return engine
@@ -43,12 +47,17 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
   })
   const refresh=createRefreshCoordinator(snapshots,options.timers)
   const identity=()=>createHash('sha256').update(JSON.stringify([draft.saved?.revision??0,draft.draft,draft.save.status])).digest('hex')
+  function setSnapshot(value:AppConfig):Result<null>{
+    const key=JSON.stringify([value.calendar,value.schedule.workWeek])
+    if(key!==calendarKey){calendarRevision++;calendarKey=key}
+    return snapshots.setConfig(value,calendarRevision)
+  }
+  function initialDraft():SettingsDraftSession{return defaultSettings?{...empty(),draft:clone(defaultSettings) as unknown as JsonObject}:empty()}
   function accept(value:ConfigSnapshot):Result<null>{
     const next=createSettingsDraft(value.config);if(!next.ok)return next
-    const key=JSON.stringify([value.config.calendar,value.config.schedule.workWeek])
-    if(key!==calendarKey){calendarRevision++;calendarKey=key}
-    const changed=snapshots.setConfig(value.config,calendarRevision)
+    const changed=setSnapshot(value.config)
     config=clone(value);draft=next.data
+    defaultSettings=null;defaultPersistence=null
     if(!changed.ok)config.warnings.push({field:'$.snapshot',reason:'FORMAT',message:'配置已保存，但快照准备不可用；没有保留旧有效快照。'})
     return success(null)
   }
@@ -57,10 +66,28 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
     async start():Promise<Result<null>>{
       const loaded=await options.store.load();if(!loaded.ok)return loaded;state=loaded.data
       if(state.config){const read=await options.store.read();if(!read.ok)return read;const applied=accept(read.data);if(!applied.ok)return applied}
+      else if(state.status==='missing'&&options.initializeDefaults){
+        const now=options.clock.read();if(!now.ok)return now
+        const defaults=createDefaultAppConfig({updatedAt:new Date(now.data.instant).toISOString(),appVersion:options.initializeDefaults.appVersion},options.calendars.listMetadata())
+        if(!defaults.ok)return defaults
+        const settings=editableConfig(defaults.data);if(!settings.ok)return settings
+        defaultSettings=settings.data;draft=initialDraft();defaultPersistence={status:'pending'}
+        const prepared=setSnapshot(defaults.data);if(!prepared.ok)return prepared
+        busy=true
+        defaultTask=setImmediate(async()=>{
+          defaultTask=null;if(disposed)return
+          try{
+            const saved=await options.writes.run(()=>options.store.initializeSettings(settings.data))
+            if(saved.ok){state={status:'ready',config:saved.data.config};const applied=accept(saved.data);if(!applied.ok)defaultPersistence={status:'failed',error:applied.error}}
+            else defaultPersistence={status:'failed',error:saved.error}
+          }catch{defaultPersistence={status:'failed',error:{code:'INTERNAL',message:'默认设置未保存，本次仍可使用；请到设置中重试。'}}}
+          finally{busy=false;refresh.wake(true)}
+        })
+      }
       refresh.start();return success(null)
     },
     readConfig():Result<ConfigSnapshot>{return config?success(clone(config)):state?.status==='future'?{ok:false,error:state.error}:unavailable(state?.status==='missing'?'正式配置尚未初始化；必须显式提供完整设置并保存。':'正式配置无效或未加载，未自动覆盖。')},
-    readDraft():Result<SettingsDraftSession>{return disposed?unavailable():success(clone({...draft,configurationStatus:state?.status??'unloaded'}))},
+    readDraft():Result<SettingsDraftSession>{return disposed?unavailable():success(clone({...draft,configurationStatus:state?.status??'unloaded',...(defaultPersistence?{defaultPersistence}:{})}))},
     updateDraft(request:ContractRequests['settingsDraft.update']):Result<SettingsDraftSession>{
       if(busy||disposed)return unavailable('设置正在保存或服务已退出。')
       const revision=checkExpectedRevision(request.expectedRevision,config?.config.revision??0);if(!revision.ok)return revision
@@ -74,7 +101,7 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
     },
     discardDraft():Result<SettingsDraftSession>{
       if(busy||disposed)return unavailable('保存未结束，不能放弃。')
-      const next=config?createSettingsDraft(config.config):success(empty());if(!next.ok)return next;draft=next.data;return methods.readDraft()
+      const next=config?createSettingsDraft(config.config):success(initialDraft());if(!next.ok)return next;draft=next.data;return methods.readDraft()
     },
     async save(request:ContractRequests['config.save']):Promise<Result<ConfigSnapshot>>{
       const valid=validateContractRequest('main','config.save',request);if(!valid.ok)return valid
@@ -118,7 +145,7 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
       },
       async discard(expected:string){if(identity()!==expected)return unavailable<null>('草稿已改变，未放弃。');const discarded=methods.discardDraft();return discarded.ok?success(null):discarded}
     } satisfies ExitDraftAdapter,
-    dispose(){disposed=true;refresh.dispose();snapshots.dispose()}
+    dispose(){disposed=true;if(defaultTask)clearImmediate(defaultTask);refresh.dispose();snapshots.dispose()}
   }
   return methods
 }

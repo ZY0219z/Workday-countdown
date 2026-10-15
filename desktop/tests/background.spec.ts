@@ -68,6 +68,7 @@ async function launch(seed=true,rendererUrl?:string){
   await expect(page.locator('[data-workday-root]')).toHaveAttribute('data-pending','false');await hidden();return page
 }
 async function settings(page:Awaited<ReturnType<typeof launch>>){const button=page.getByRole('button',{name:'设置',exact:true});if(await button.count())await activate(button)}
+async function group(page:Awaited<ReturnType<typeof launch>>,name:string){await settings(page);if(['schedule','employee','salary'].includes(name))return;const details=page.locator('details.settings-more');if(!await details.evaluate(element=>(element as HTMLDetailsElement).open))await activate(details.locator('summary'));await page.getByLabel('设置分组').selectOption(name)}
 async function settled(page:Awaited<ReturnType<typeof launch>>){await expect(page.locator('[data-workday-root]')).toHaveAttribute('data-pending','false')}
 async function choose(choice:ExitChoice|null){await application!.evaluate(({app},choice)=>(app as TestApp).__workdayD08Test.chooseExit(choice),choice)}
 async function file(kind:'import'|'export',name:string){await application!.evaluate(({app},data)=>(app as TestApp).__workdayD08Test.selectFile(data.kind,data.name),{kind,name})}
@@ -78,15 +79,40 @@ test('formal main stays hidden; real Preload and renderer sandbox deny legacy/No
   expect(await page.evaluate(()=>({legacy:typeof window.workday,require:typeof globalThis.require,process:typeof globalThis.process,generic:'invoke'in window.workdayV2}))).toEqual({legacy:'undefined',require:'undefined',process:'undefined',generic:false})
   value(await page.evaluate(()=>window.workdayV2.snapshot.read()))
 })
-test('missing configuration shows explicit empty first setup and preserves POC sentinel',async()=>{
+test('first launch shows default dashboard, persists safely, restarts and preserves POC sentinel',async()=>{
   const sentinel='{"workStartTime":"08:30","workEndTime":"18:00"}';writeFileSync(join(profile,'settings.json'),sentinel)
-  const page=await launch(false);await expect(page.getByRole('heading',{name:'首次设置'})).toBeVisible();await expect(page.getByLabel('上班时间',{exact:true})).toHaveValue('');expect(existsSync(formal())).toBe(false);expect(readFileSync(join(profile,'settings.json'),'utf8')).toBe(sentinel)
+  const started=performance.now(),page=await launch(false)
+  await expect(page.getByRole('region',{name:'工作日仪表盘'})).toBeVisible()
+  const firstDashboardMs=performance.now()-started
+  await expect(page.getByRole('heading',{name:'首次设置'})).toHaveCount(0)
+  await expect.poll(()=>page.evaluate(async()=>{const result=await window.workdayV2.config.read();return result.ok?result.data.config.revision:0})).toBe(1)
+  const persistedFromLaunchMs=performance.now()-started
+  await settings(page)
+  await expect(page.getByLabel('上班时间',{exact:true})).toHaveValue('08:30');await expect(page.getByLabel('下班时间',{exact:true})).toHaveValue('18:00')
+  await expect(page.getByLabel('入职日期',{exact:true})).toHaveValue('2025-07-17');await expect(page.getByLabel('每月发薪日',{exact:true})).toHaveValue('10')
+  await expect(page.locator('details.settings-more')).not.toHaveAttribute('open','')
+  const saved=readFileSync(formal(),'utf8');expect(JSON.parse(saved).salary).toEqual({day:10,nonWorkingPolicy:'delay',missingDayPolicy:'monthEnd',showPaydayAsToday:true})
+  expect(readFileSync(join(profile,'settings.json'),'utf8')).toBe(sentinel)
+  const child=application!.process(),closed=application!.waitForEvent('close');await activate(page.getByRole('button',{name:'退出程序',exact:true}));await closed;await expect.poll(()=>child.exitCode).toBe(0);application=undefined
+  const reopened=await launch(false);await settings(reopened);await expect(reopened.getByLabel('上班时间',{exact:true})).toHaveValue('08:30');expect(readFileSync(formal(),'utf8')).toBe(saved)
+  writeFileSync('test-results/d11-ux-electron-startup.json',JSON.stringify({firstDashboardMs,persistedFromLaunchMs,hidden:true},null,2))
 })
-test('explicit first UI save initializes only formal config and produces a real dashboard',async()=>{
-  const page=await launch(false);await page.getByLabel('上班时间',{exact:true}).fill('09:00');await page.getByLabel('下班时间',{exact:true}).fill('18:00');await page.getByLabel('设置分组').selectOption('salary');await page.getByLabel('每月发薪日',{exact:true}).fill('10');await activate(page.getByRole('button',{name:'保存设置',exact:true}));await expect(page.locator('.app-notice[role=status]')).toHaveText('设置已保存。',{timeout:40000})
-  expect(JSON.parse(readFileSync(formal(),'utf8')).revision).toBe(1);expect(existsSync(join(profile,'settings.json'))).toBe(false)
-  await expect(page.getByRole('region',{name:'工作日仪表盘'})).toBeVisible();expect(value(await page.evaluate(()=>window.workdayV2.snapshot.read())).configRevision).toBe(1)
+
+test('ordinary time save returns dashboard and Main remains responsive during full validation',async()=>{
+  const page=await launch();await settings(page);await page.getByLabel('下班时间',{exact:true}).fill('18:30');await settled(page)
+  await application!.evaluate(()=>{let previous=performance.now();const state={maxStallMs:0,ticks:0,timer:undefined as ReturnType<typeof setInterval>|undefined};state.timer=setInterval(()=>{const now=performance.now();state.maxStallMs=Math.max(state.maxStallMs,now-previous-10);state.ticks++;previous=now},10);(globalThis as any).__d11Heartbeat=state})
+  const started=performance.now()
+  try{
+    await activate(page.getByRole('button',{name:'保存设置',exact:true}));await expect(page.locator('.app-notice[role=status]')).toHaveText('设置已保存。')
+    const saveMs=performance.now()-started
+    await expect(page.getByRole('region',{name:'工作日仪表盘'})).toBeVisible()
+    const heartbeat=await application!.evaluate(()=>{const state=(globalThis as any).__d11Heartbeat;return {maxStallMs:state.maxStallMs,ticks:state.ticks}})
+    expect(heartbeat.ticks).toBeGreaterThan(0);expect(heartbeat.maxStallMs).toBeLessThan(500);expect(saveMs).toBeLessThan(5000)
+    expect(JSON.parse(readFileSync(formal(),'utf8')).schedule.endTime).toBe('18:30')
+    writeFileSync('test-results/d11-ux-electron-save.json',JSON.stringify({saveMs,...heartbeat,hidden:true},null,2))
+  }finally{await application!.evaluate(()=>{clearInterval((globalThis as any).__d11Heartbeat?.timer);delete (globalThis as any).__d11Heartbeat})}
 })
+
 test('actual form saves schedule, survives offline reload and never touches old POC file',async()=>{
   const sentinel='legacy-preserve';writeFileSync(join(profile,'settings.json'),sentinel);let page=await launch();await settings(page)
   await page.getByLabel('下班时间',{exact:true}).fill('19:00');await activate(page.getByRole('button',{name:'保存设置',exact:true}));await expect(page.locator('.app-notice[role=status]')).toHaveText('设置已保存。',{timeout:40000})
@@ -106,7 +132,7 @@ test('external revision conflict is visible and never overwrites external conten
   await expect(page.getByLabel('下班时间',{exact:true})).toHaveValue('19:00');expect(JSON.parse(readFileSync(formal(),'utf8')).appearance.accent).toBe('coral')
 })
 test('Main dirty draft survives renderer reload and group switching; leave continues or explicitly discards',async()=>{
-  const page=await launch();await settings(page);await page.getByLabel('下班时间',{exact:true}).fill('19:00');await settled(page);await page.getByLabel('设置分组').selectOption('appearance');await page.getByLabel('设置分组').selectOption('schedule');await expect(page.getByLabel('下班时间',{exact:true})).toHaveValue('19:00')
+  const page=await launch();await settings(page);await page.getByLabel('下班时间',{exact:true}).fill('19:00');await settled(page);await group(page,'appearance');await group(page,'schedule');await expect(page.getByLabel('下班时间',{exact:true})).toHaveValue('19:00')
   await page.reload();await settled(page);await expect(page.getByLabel('下班时间',{exact:true})).toHaveValue('19:00');await activate(page.getByRole('button',{name:'取消 / 返回仪表盘',exact:true}));await activate(page.getByRole('dialog').getByRole('button',{name:'继续编辑',exact:true}));await expect(page.getByLabel('下班时间',{exact:true})).toHaveValue('19:00')
   await activate(page.getByRole('button',{name:'取消 / 返回仪表盘',exact:true}));await activate(page.getByRole('dialog').getByRole('button',{name:'放弃',exact:true}));await settings(page);await expect(page.getByLabel('下班时间',{exact:true})).toHaveValue('18:00')
 })
@@ -115,13 +141,13 @@ test('leave save keeps dialog and input on failure, then saves only after correc
   await activate(page.getByRole('dialog').getByRole('button',{name:'继续编辑',exact:true}));await page.getByLabel('下班时间',{exact:true}).fill('19:00');await settled(page);await activate(page.getByRole('button',{name:'取消 / 返回仪表盘',exact:true}));await activate(page.getByRole('dialog').getByRole('button',{name:'保存',exact:true}));await expect(page.getByRole('region',{name:'工作日仪表盘'})).toBeVisible({timeout:40000});expect(JSON.parse(readFileSync(formal(),'utf8')).schedule.endTime).toBe('19:00')
 })
 for(const action of ['explicit','close'] as const)test('real clean '+action+' ends the actual Electron process',async()=>{
-  const page=await launch(),handle=application!.process(),closed=application!.waitForEvent('close');if(action==='explicit')await activate(page.getByRole('button',{name:'退出程序',exact:true}));else await application!.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].close());await closed;await expect.poll(()=>handle.exitCode).toBe(0);application=undefined
+  const page=await launch();await settings(page);const handle=application!.process(),closed=application!.waitForEvent('close');if(action==='explicit')await activate(page.getByRole('button',{name:'退出程序',exact:true}));else await application!.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].close());await closed;await expect.poll(()=>handle.exitCode).toBe(0);application=undefined
 })
 test('dirty exit without test choice refuses native prompts, keeps Main draft and process alive',async()=>{
   const page=await launch();await settings(page);await page.getByLabel('下班时间',{exact:true}).fill('19:00');await settled(page);await choose(null);await activate(page.getByRole('button',{name:'退出程序',exact:true}));await expect(page.locator('.app-error')).toBeVisible();expect(application!.process().exitCode).toBe(null);expect(value(await page.evaluate(()=>window.workdayV2.settingsDraft.read())).dirty).toBe(true);await hidden()
 })
 for(const choice of ['save','discard','continueEditing'] as const)test('formal native exit protocol with injected choice '+choice,async()=>{
-  const page=await launch();await settings(page);await page.getByLabel('设置分组').selectOption('appearance');await page.getByLabel('配色',{exact:true}).selectOption('coral');await settled(page);await choose(choice);const handle=application!.process()
+  const page=await launch();await settings(page);await group(page,'appearance');await page.getByLabel('配色',{exact:true}).selectOption('coral');await settled(page);await choose(choice);const handle=application!.process()
   if(choice==='continueEditing'){await activate(page.getByRole('button',{name:'退出程序',exact:true}));expect(handle.exitCode).toBe(null);expect(value(await page.evaluate(()=>window.workdayV2.settingsDraft.read())).dirty).toBe(true);await hidden()}
   else{const closed=application!.waitForEvent('close');await activate(page.getByRole('button',{name:'退出程序',exact:true}));await closed;await expect.poll(()=>handle.exitCode).toBe(0);application=undefined;expect(JSON.parse(readFileSync(formal(),'utf8')).appearance.accent).toBe(choice==='save'?'coral':'ocean')}
 })
@@ -132,16 +158,16 @@ test('pending-local-edit marker vetoes clean native close instead of discarding 
   const page=await launch();await page.evaluate(()=>document.querySelector('[data-workday-root]')!.setAttribute('data-pending','true'));const result=await application!.evaluate(async({app,BrowserWindow})=>{BrowserWindow.getAllWindows()[0].close();return (app as TestApp).__workdayD08Test.quit.requestQuit()});expect(result).toMatchObject({ok:false,error:{code:'IO_BUSY'}});expect(application!.process().exitCode).toBe(null);await hidden()
 })
 test('native source adapter uses owned fixture; actual preview selection applies only confirmed fields',async()=>{
-  const page=await launch(),source='{"workStartTime":"08:30","workEndTime":"19:00"}';writeFileSync(join(profile,'source.json'),source);await file('import','source.json');await settings(page);await page.getByLabel('设置分组').selectOption('data');await page.getByLabel('导入来源').selectOption('electron-poc');await activate(page.getByRole('button',{name:'选择配置并预览',exact:true}))
+  const page=await launch(),source='{"workStartTime":"08:30","workEndTime":"19:00"}';writeFileSync(join(profile,'source.json'),source);await file('import','source.json');await settings(page);await group(page,'data');await page.getByLabel('导入来源').selectOption('electron-poc');await activate(page.getByRole('button',{name:'选择配置并预览',exact:true}))
   await expect(page.getByRole('region',{name:'导入预览'})).toBeVisible();expect(JSON.parse(readFileSync(formal(),'utf8')).schedule.endTime).toBe('18:00');await page.getByRole('region',{name:'导入预览'}).getByLabel('上班时间',{exact:true}).uncheck();await activate(page.getByRole('button',{name:'确认备份并应用所选字段',exact:true}));await expect(page.getByText('导入 / 恢复成功，源文件保持不变。')).toBeVisible({timeout:40000})
   const saved=JSON.parse(readFileSync(formal(),'utf8'));expect(saved.schedule.startTime).toBe('09:00');expect(saved.schedule.endTime).toBe('19:00');expect(readFileSync(join(profile,'source.json'),'utf8')).toBe(source)
 })
 test('real export chooser writes only selected new destination and history remains; annual endpoints unavailable',async()=>{
-  const page=await launch();await file('export','export.json');await settings(page);await page.getByLabel('设置分组').selectOption('data');await activate(page.getByRole('button',{name:'导出已保存配置',exact:true}));await expect(page.getByText('已导出保存的V2配置（含历史加班，不含缓存和私有路径）。')).toBeVisible();expect(JSON.parse(readFileSync(join(profile,'export.json'),'utf8')).schemaVersion).toBe(2)
+  const page=await launch();await file('export','export.json');await settings(page);await group(page,'data');await activate(page.getByRole('button',{name:'导出已保存配置',exact:true}));await expect(page.getByText('已导出保存的V2配置（含历史加班，不含缓存和私有路径）。')).toBeVisible();expect(JSON.parse(readFileSync(join(profile,'export.json'),'utf8')).schemaVersion).toBe(2)
   const results=await page.evaluate(async()=>[await window.workdayV2.calendar.previewImport(),await window.workdayV2.calendar.applyImport({previewToken:'invalid',expectedCalendarRevision:0})]);expect(results.every(x=>!x.ok&&x.error.code==='UNAVAILABLE')).toBe(true)
 })
 test('real backup restore UI previews first and preserves corrupt primary in archive',async()=>{
-  const page=await launch();await settings(page);await page.getByLabel('下班时间',{exact:true}).fill('19:00');await activate(page.getByRole('button',{name:'保存设置',exact:true}));await expect(page.locator('.app-notice[role=status]')).toHaveText('设置已保存。',{timeout:40000});writeFileSync(formal(),'{broken');await page.getByLabel('设置分组').selectOption('data');await activate(page.getByRole('button',{name:'预览最近有效备份',exact:true}));await expect(page.getByRole('region',{name:'导入预览'})).toBeVisible();expect(readFileSync(formal(),'utf8')).toBe('{broken')
+  const page=await launch();await settings(page);await page.getByLabel('下班时间',{exact:true}).fill('19:00');await activate(page.getByRole('button',{name:'保存设置',exact:true}));await expect(page.locator('.app-notice[role=status]')).toHaveText('设置已保存。',{timeout:40000});writeFileSync(formal(),'{broken');await group(page,'data');await activate(page.getByRole('button',{name:'预览最近有效备份',exact:true}));await expect(page.getByRole('region',{name:'导入预览'})).toBeVisible();expect(readFileSync(formal(),'utf8')).toBe('{broken')
   await activate(page.getByRole('button',{name:'确认备份并应用所选字段',exact:true}));await expect(page.getByText('导入 / 恢复成功，源文件保持不变。')).toBeVisible({timeout:40000});expect(JSON.parse(readFileSync(formal(),'utf8')).schedule.endTime).toBe('18:00');expect(readdirSync(join(profile,'lifecycle')).some(name=>name.startsWith('settings.corrupt.'))).toBe(true)
 })
 test('future schema remains untouched and is not treated as new user initialization',async()=>{
@@ -172,7 +198,8 @@ test('development Vite main-frame identity and URL permit real IPC, not arbitrar
   console.log('D11 development IPC source:',JSON.stringify({expectedRawUrl:url,...observation,resultCode:result.ok?'OK':result.error.code}))
   expect(observation).toEqual({senderMatches:true,frameMatches:true,actualUrl:new URL(url).href,windowUrl:new URL(url).href})
   value(result)
-  await expect(page.getByRole('heading',{name:'首次设置'})).toBeVisible()
+  await expect(page.getByRole('button',{name:'设置',exact:true})).toBeEnabled()
+  await expect(page.getByRole('region',{name:'工作日仪表盘'})).toBeVisible()
   await page.evaluate(()=>{const frame=document.createElement('iframe');frame.src='/index.html?iframe=1';document.body.append(frame)})
   await expect.poll(()=>page.frames().length).toBe(2)
   const iframe=page.frames().find(frame=>frame!==page.mainFrame())!
@@ -204,17 +231,18 @@ test('development Vite main-frame identity and URL permit real IPC, not arbitrar
   await hidden()
 })
 
-test('development Vite first save shows busy, initializes real store and exits the actual process',async()=>{
+test('development Vite defaults and common fields save through real store; missing salary is explicit',async()=>{
   const page=await launch(false,await developmentUrl()),sentinel='old POC unchanged';writeFileSync(join(profile,'settings.json'),sentinel)
-  await page.getByLabel('上班时间',{exact:true}).fill('08:30');await page.getByLabel('下班时间',{exact:true}).fill('18:00')
-  await activate(page.getByRole('button',{name:'保存设置',exact:true}))
-  await expect(page.getByLabel('设置分组')).toHaveValue('salary');await expect(page.locator('.field-error')).toContainText('请填写每月发薪日')
-  expect(existsSync(formal())).toBe(false);await page.getByLabel('每月发薪日',{exact:true}).fill('10')
-  await activate(page.getByRole('button',{name:'保存设置',exact:true}));await expect(page.locator('.app-notice[role=status]')).toContainText('正在校验排班并安全保存')
+  await expect(page.getByRole('region',{name:'工作日仪表盘'})).toBeVisible();await settings(page)
+  await page.getByLabel('每月发薪日',{exact:true}).fill('');await activate(page.getByRole('button',{name:'保存设置',exact:true}))
+  await expect(page.locator('.field-error')).toContainText('请填写每月发薪日')
+  expect(JSON.parse(readFileSync(formal(),'utf8')).revision).toBe(1)
+  await page.getByLabel('每月发薪日',{exact:true}).fill('10');await page.getByLabel('下班时间',{exact:true}).fill('18:30')
+  await activate(page.getByRole('button',{name:'保存设置',exact:true}));await expect(page.locator('.app-notice[role=status]')).toContainText('正在校验并保存')
   await expect(page.getByRole('button',{name:'正在保存…',exact:true})).toBeDisabled()
-  await expect(page.locator('.app-notice[role=status]')).toHaveText('设置已保存。',{timeout:40000});await expect(page.getByRole('region',{name:'工作日仪表盘'})).toBeVisible()
-  expect(JSON.parse(readFileSync(formal(),'utf8')).schedule.startTime).toBe('08:30');expect(readFileSync(join(profile,'settings.json'),'utf8')).toBe(sentinel)
-  const child=application!.process(),closed=application!.waitForEvent('close');await activate(page.getByRole('button',{name:'退出程序',exact:true}));await closed;await expect.poll(()=>child.exitCode).toBe(0);application=undefined
+  await expect(page.locator('.app-notice[role=status]')).toHaveText('设置已保存。');await expect(page.getByRole('region',{name:'工作日仪表盘'})).toBeVisible()
+  expect(JSON.parse(readFileSync(formal(),'utf8')).schedule.endTime).toBe('18:30');expect(readFileSync(join(profile,'settings.json'),'utf8')).toBe(sentinel)
+  await settings(page);const child=application!.process(),closed=application!.waitForEvent('close');await activate(page.getByRole('button',{name:'退出程序',exact:true}));await closed;await expect.poll(()=>child.exitCode).toBe(0);application=undefined
 })
 
 test('text time partial edits survive Main reload; invalid HH:MM is rejected without changing saved file',async()=>{
@@ -241,6 +269,6 @@ test('failed IPC initialization disables save; a later exit error is visible and
   await expect(page.getByText('草稿状态未知，尚未读取',{exact:true})).toBeVisible();await expect(page.getByText('没有未保存修改',{exact:true})).toHaveCount(0)
   await activate(page.getByRole('button',{name:'退出程序',exact:true}));await expect(page.locator('.app-error')).toHaveText('退出程序失败：退出诊断：操作尚未完成')
   await application!.evaluate(({ipcMain})=>{const handlers=(ipcMain as unknown as {_invokeHandlers:Map<string,unknown>})._invokeHandlers;for(const [channel,handler]of (globalThis as any).__d11OriginalHandlers)handlers.set(channel,handler)})
-  await activate(page.getByRole('button',{name:'重新连接配置',exact:true}));await expect(page.getByRole('button',{name:'设置',exact:true})).toBeVisible();await expect(page.locator('.app-error')).toHaveCount(0)
+  await activate(page.getByRole('button',{name:'重新连接配置',exact:true}));await expect(page.getByRole('button',{name:'设置',exact:true})).toBeVisible();await expect(page.locator('.app-error')).toHaveCount(0);await settings(page)
   const child=application!.process(),closed=application!.waitForEvent('close');await activate(page.getByRole('button',{name:'退出程序',exact:true}));await closed;await expect.poll(()=>child.exitCode).toBe(0);application=undefined
 })

@@ -5,7 +5,7 @@ import { CONFIG_SCHEMA_VERSION } from '../../shared/contracts'
 import { createAppConfig, sha256Format } from '../../shared/config-schema'
 import { validateContractRequest, checkExpectedRevision } from '../../shared/capabilities'
 import { issue, success, v, validateStructure, validationFailure, MAX_DTO_BYTES } from '../../shared/validation'
-import { editableConfig, datasetMetadata, validateConfigSettings, validateStoredConfig, type ConfigValidation, type ConfigValidationContext } from './config-validation'
+import { editableConfig, datasetMetadata, validateConfigSettingsAsync, validateConfigEnvelope, validateStoredConfig, type ConfigValidation, type ConfigValidationContext } from './config-validation'
 import { fileFailure, nodeConfigFiles, configDirectory, type ConfigFiles } from './config-files'
 
 export const contentHash = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex')
@@ -186,14 +186,14 @@ export function createConfigStore(options: ConfigStoreOptions): Result<ConfigSto
     const state = await ready()
     if (!state.ok) return state
     if (state.data.status !== 'missing') return blocked(state.data)
-    const validated = validateConfigSettings(input, null, options)
+    const validated = await validateConfigSettingsAsync(input, null, options)
     if (!validated.ok) return validated
     const time = timestamp()
     if (!time.ok) return time
     const settings = validated.data.settings
     const candidate = { schemaVersion: CONFIG_SCHEMA_VERSION, revision: 1, updatedAt: time.data, appVersion: options.appVersion,
       ...settings, calendar: { ...settings.calendar, datasets: datasetMetadata(settings, options) }, migration: { completed: [] } }
-    const valid = validateStoredConfig(candidate, options)
+    const valid = validateConfigEnvelope(candidate, options)
     return valid.ok ? write(valid.data, validated.data) : valid
   }
   async function commit(input: unknown, proof?: MigrationCommit): Promise<Result<ConfigSnapshot>> {
@@ -220,7 +220,7 @@ export function createConfigStore(options: ConfigStoreOptions): Result<ConfigSto
       if (contentHash(JSON.stringify(base)) !== proof.baseHash) return { ok: false, error: { code: 'REVISION_CONFLICT', message: '预览基底已变化，即使修订号相同也必须重新预览。', expectedRevision: request.data.expectedRevision, actualRevision: base.revision } }
       if (Buffer.byteLength(proof.sourceText) > MAX_DTO_BYTES || contentHash(proof.sourceText) !== proof.sourceHash) return validationFailure([issue('$', 'FORMAT', '迁移来源内容与摘要不一致。')])
     }
-    const validated = validateConfigSettings(request.data.settings, fullRecovery ? null : base, options, proof?.sourceKind === 'v2')
+    const validated = await validateConfigSettingsAsync(request.data.settings, fullRecovery ? null : base, options, proof?.sourceKind === 'v2')
     if (!validated.ok) return validated
     const time = timestamp()
     if (!time.ok) return time
@@ -230,7 +230,7 @@ export function createConfigStore(options: ConfigStoreOptions): Result<ConfigSto
     // Only already validated settings are copied. System metadata is host-owned.
     const candidate = { schemaVersion: CONFIG_SCHEMA_VERSION, revision: base.revision + 1, updatedAt: time.data, appVersion: options.appVersion,
       ...settings, calendar: { ...settings.calendar, datasets: datasetMetadata(settings, options) }, migration: { completed: records } }
-    const valid = validateStoredConfig(candidate, options)
+    const valid = validateConfigEnvelope(candidate, options)
     return valid.ok ? write(valid.data, validated.data, proof) : valid
   }
   return success({
@@ -276,12 +276,12 @@ export function createConfigStore(options: ConfigStoreOptions): Result<ConfigSto
       const state = await ready()
       if (!state.ok) return state
       if (!['missing', 'invalid'].includes(state.data.status)) return blocked(state.data)
-      const checked = validateConfigSettings(settings, null, options, true)
+      const checked = await validateConfigSettingsAsync(settings, null, options, true)
       if (!checked.ok) return checked
       const time = timestamp()
       if (!time.ok) return time
       const data = checked.data.settings
-      const canonical = validateStoredConfig({ schemaVersion: CONFIG_SCHEMA_VERSION, revision: 0, updatedAt: time.data, appVersion: options.appVersion, ...data,
+      const canonical = validateConfigEnvelope({ schemaVersion: CONFIG_SCHEMA_VERSION, revision: 0, updatedAt: time.data, appVersion: options.appVersion, ...data,
         calendar: { ...data.calendar, datasets: datasetMetadata(data, options) }, migration: { completed: [] } }, options)
       if (!canonical.ok) return canonical
       return success({ config: canonical.data,

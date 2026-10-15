@@ -95,6 +95,8 @@ test.afterEach(async()=>{
   applications=[];children=[];profiles=[]
 })
 
+async function group(page:import('@playwright/test').Page,name:string){const open=page.getByRole('button',{name:'设置',exact:true});if(await open.count())await open.click();if(['schedule','employee','salary'].includes(name))return;const details=page.locator('details.settings-more');if(!await details.evaluate(element=>(element as HTMLDetailsElement).open))await details.locator('summary').click();await page.getByLabel('设置分组').selectOption(name)}
+
 test('runtime userData is stable, POC settings cannot overwrite formal V2 sentinel',async()=>{
   const path=profile(),formal=join(path,'lifecycle','settings.json'),original='{"schemaVersion":3,"revision":99,"sentinel":"must remain unchanged"}'
   const pocSentinel='legacy unchanged';writeFileSync(join(path,'settings.json'),pocSentinel);mkdirSync(join(path,'lifecycle'));writeFileSync(formal,original)
@@ -170,7 +172,7 @@ test('dirty formal continue editing preserves input and cancels native close',as
 })
 test('dirty formal save commits before true exit; launcher/main and captured children stop',async()=>{
   const path=profile(),{app,page}=await launch(path),processHandle=app.process(),tree=trackTree(processHandle.pid!);await tree.live()
-  await page.getByLabel('设置分组').selectOption('appearance');await page.getByLabel('配色',{exact:true}).selectOption('coral');await expect(page.locator('[data-workday-root]')).toHaveAttribute('data-pending','false');await app.evaluate(({app})=>(app as TestApp).__workdayD08Test.chooseExit('save'))
+  await group(page,'appearance');await page.getByLabel('配色',{exact:true}).selectOption('coral');await expect(page.locator('[data-workday-root]')).toHaveAttribute('data-pending','false');await app.evaluate(({app})=>(app as TestApp).__workdayD08Test.chooseExit('save'))
   const ended=app.waitForEvent('close');await page.getByRole('button',{name:'退出程序',exact:true}).click();await ended
   expect(JSON.parse(readFileSync(join(path,'lifecycle','settings.json'),'utf8')).appearance.accent).toBe('coral');await expect.poll(()=>processHandle.exitCode).toBe(0)
   await expect.poll(()=>tree.live(),{timeout:10000}).toEqual([])

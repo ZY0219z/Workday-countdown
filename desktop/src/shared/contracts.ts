@@ -165,6 +165,7 @@ export interface UninitializedDraftState {
 }
 export type SettingsDraftSession = (DraftState | UninitializedDraftState) & {
   configurationStatus?: 'unloaded' | 'missing' | 'ready' | 'recoverable' | 'invalid' | 'future'
+  defaultPersistence?: {status:'pending'} | {status:'failed';error:ContractError}
 }
 
 export type WindowCommand = { action: 'showMain' } | { action: 'showMini' } | { action: 'hideMini' } | { action: 'setMiniTop'; enabled: boolean }

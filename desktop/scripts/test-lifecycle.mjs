@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 
 const suite=process.argv[2]??'lifecycle'
-assert.ok(['lifecycle','d09','d11-services'].includes(suite))
+assert.ok(['lifecycle','d09','d11-services','d11-performance'].includes(suite))
 const scratch = mkdtempSync(join(tmpdir(), 'workday-d08-'))
 after(() => {
   assert.ok(isAbsolute(scratch) && scratch.startsWith(join(tmpdir(), 'workday-d08-')))

@@ -21,8 +21,11 @@ function wallEncoding(local: LocalDateTime): Result<number> {
 }
 
 export function createIntlTimeZoneAdapter(): TimeZoneAdapter {
-  // Bounded formatter reuse only. No business result, clock, or subscription cache.
+  // Bounded ICU formatter/offset reuse. No business or clock/subscription cache.
   const formatters = new Map<string, Intl.DateTimeFormat>()
+  type OffsetRun = { start: number; end: number; offset: number | null }
+  const offsetFormatters = new Map<string, Intl.DateTimeFormat>()
+  const sampledDays = new Map<string, OffsetRun[]>()
   function formatter(zone: string): Result<Intl.DateTimeFormat> {
     if (typeof zone !== 'string' || !zone.length || zone.length > 128 || zone.trim() !== zone) return invalidZone()
     try {
@@ -55,6 +58,39 @@ export function createIntlTimeZoneAdapter(): TimeZoneAdapter {
       return success({ date: date.data, time: time.data, timeZoneId: value.resolvedOptions().timeZone, offsetMilliseconds })
     } catch { return { ok: false, error: { code: 'UNAVAILABLE', message: '无法将瞬时时间投影到本地时间。' } } }
   }
+  // Same one-minute probe grid as resolve's original loop. Cache its UTC-day
+  // runs, including the sub-minute phase; never infer an offset from sparse
+  // probes or assume a country has no DST. Round-trip matching remains below.
+  function sampleDay(day: number, phase: number, value: Intl.DateTimeFormat): Result<OffsetRun[]> {
+    try{
+    const zone=value.resolvedOptions().timeZone,key=JSON.stringify([zone,day,phase]),cached=sampledDays.get(key)
+    if(cached)return success(cached)
+    let offsets=offsetFormatters.get(zone)
+    if(!offsets){
+      offsets=new Intl.DateTimeFormat('en-US',{timeZone:zone,hour:'2-digit',timeZoneName:'longOffset'})
+      if(offsetFormatters.size>=4)offsetFormatters.delete(offsetFormatters.keys().next().value!)
+      offsetFormatters.set(zone,offsets)
+    }
+    const runs:OffsetRun[]=[],end=Math.min(MAX_INSTANT,day+MILLISECONDS_PER_DAY-1)
+    for(let probe=Math.max(MIN_INSTANT,day+phase);probe<=end;probe+=MILLISECONDS_PER_MINUTE){
+      let offset:number|null
+      const name=offsets.formatToParts(probe).find(part=>part.type==='timeZoneName')?.value??''
+      const parsed=/^GMT([+-])(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(name)
+      if(probe>=MIN_INSTANT+2*MILLISECONDS_PER_DAY&&probe<=MAX_INSTANT-2*MILLISECONDS_PER_DAY&&(name==='GMT'||parsed)){
+        offset=parsed?(parsed[1]==='-'?-1:1)*(Number(parsed[2])*3600+Number(parsed[3])*60+Number(parsed[4]??0))*1000:0
+        if(Math.abs(offset)>=MAX_OFFSET)return {ok:false,error:{code:'UNAVAILABLE',message:'时区偏移超出可解析范围。'}}
+      }else{
+        const projected=projectWith(probe,value)
+        if(!projected.ok){if(outsideLocalRange(projected))offset=null;else return projected}
+        else offset=projected.data.offsetMilliseconds
+      }
+      const last=runs[runs.length-1]
+      if(last&&last.offset===offset)last.end=probe;else runs.push({start:probe,end:probe,offset})
+    }
+    if(sampledDays.size>=512)sampledDays.delete(sampledDays.keys().next().value!)
+    sampledDays.set(key,runs);return success(runs)
+    }catch{return {ok:false,error:{code:'UNAVAILABLE',message:'无法读取时区偏移，未生成本地时间边界。'}}}
+  }
   return {
     project(instant, zone) {
       const checked = validateInstant(instant)
@@ -83,15 +119,11 @@ export function createIntlTimeZoneAdapter(): TimeZoneAdapter {
       const offsets = new Set<number>()
       const lower = Math.max(MIN_INSTANT, encoded.data - MAX_OFFSET)
       const upper = Math.min(MAX_INSTANT, encoded.data + MAX_OFFSET)
-      for (let probe = lower; probe <= upper; probe += MILLISECONDS_PER_MINUTE) {
-        const projected = projectWith(probe, value.data)
-        if (!projected.ok) {
-          // Probes can cross the supported local calendar's ends. They are not
-          // the requested wall time; other in-range probes still expose offsets.
-          if (outsideLocalRange(projected)) continue
-          return projected
-        }
-        offsets.add(projected.data.offsetMilliseconds)
+      const phase=((lower%MILLISECONDS_PER_MINUTE)+MILLISECONDS_PER_MINUTE)%MILLISECONDS_PER_MINUTE
+      for(let day=Math.floor(lower/MILLISECONDS_PER_DAY)*MILLISECONDS_PER_DAY;day<=upper;day+=MILLISECONDS_PER_DAY){
+        const sampled=sampleDay(day,phase,value.data)
+        if(!sampled.ok)return sampled
+        for(const run of sampled.data)if(run.end>=lower&&run.start<=upper&&run.offset!==null)offsets.add(run.offset)
       }
       const candidates: number[] = []
       let outOfRange: Result<never> | undefined

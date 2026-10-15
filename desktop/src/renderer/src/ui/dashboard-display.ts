@@ -1,4 +1,17 @@
 import type { DashboardSnapshot, DataQuality } from '../../../shared/contracts'
+import { addDays, normalizeLocalDate } from '../../../domain/local-date'
+
+// Display attribution uses the nominal payroll month, never its adjusted date.
+export function salaryMonthLabel(nominalDate:string):string{
+  const date=normalizeLocalDate(nominalDate);if(!date.ok)return ''
+  const previous=addDays(date.data.slice(0,7)+'-01',-1)
+  return previous.ok?`${previous.data.slice(0,4)}年${Number(previous.data.slice(5,7))}月工资`:''
+}
+export function calendarSourceText(quality:DataQuality|undefined):string{
+  if(!quality)return ''
+  if(quality.approximate)return qualityText(quality)
+  return quality.source==='userOverride'?'自定义安排':quality.source==='annual'?'官方假期及调休':'按工作日历'
+}
 
 export function durationText(seconds: number | null | undefined): string | null {
   if(typeof seconds!=='number'||!Number.isSafeInteger(seconds)||seconds<0)return null
