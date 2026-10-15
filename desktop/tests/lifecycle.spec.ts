@@ -1,3 +1,4 @@
+import { seedFormalProfile } from './helpers/formal-fixture'
 import { _electron as electron, test, expect } from '@playwright/test'
 import type { ElectronApplication } from '@playwright/test'
 import type { App } from 'electron'
@@ -46,8 +47,9 @@ test.beforeAll(async()=>{
 test.afterAll(async()=>{if(observer&&observer.exitCode===null){observer.stdin!.end();await new Promise<void>(done=>{const timer=setTimeout(()=>{observer.kill();done()},3000);observer.once('exit',()=>{clearTimeout(timer);done()})})}})
 const profile = () => { const path=mkdtempSync(join(tmpdir(),'workday-d08-desktop-'));profiles.push(path);return path }
 async function launch(path: string) {
+  seedFormalProfile(path)
   const app=await electron.launch({args:['.',`--user-data-dir=${path}`],env});applications.push(app)
-  const page=await app.firstWindow();await expect(page.getByRole('button',{name:'保存时间'})).toBeEnabled()
+  const page=await app.firstWindow();await expect(page.locator('[data-workday-root]')).toHaveAttribute('data-pending','false');const open=page.getByRole('button',{name:'设置',exact:true});if(await open.count())await open.click()
   return {app,page}
 }
 async function processes(): Promise<ProcessInfo[]> {
@@ -95,12 +97,11 @@ test.afterEach(async()=>{
 
 test('runtime userData is stable, POC settings cannot overwrite formal V2 sentinel',async()=>{
   const path=profile(),formal=join(path,'lifecycle','settings.json'),original='{"schemaVersion":3,"revision":99,"sentinel":"must remain unchanged"}'
-  mkdirSync(join(path,'lifecycle'));writeFileSync(formal,original)
+  const pocSentinel='legacy unchanged';writeFileSync(join(path,'settings.json'),pocSentinel);mkdirSync(join(path,'lifecycle'));writeFileSync(formal,original)
   const {app,page}=await launch(path)
   const identity=await app.evaluate(({app})=>({name:app.getName(),userData:app.getPath('userData'),sessionData:app.getPath('sessionData'),paths:(app as TestApp).__workdayD08Test.paths}))
   expect(identity.name).toBe('Workday Escape');expect(identity.userData).toBe(join(path,'lifecycle'));expect(identity.sessionData).toBe(join(path,'lifecycle','runtime'));expect(identity.paths.pocSettings).toBe(join(path,'settings.json'))
-  await page.getByLabel('下班时间').fill('19:00');await page.getByRole('button',{name:'保存时间'}).click();await expect(page.getByRole('status')).toHaveText('时间已保存。')
-  expect(readFileSync(formal,'utf8')).toBe(original);expect(JSON.parse(readFileSync(join(path,'settings.json'),'utf8'))).toEqual({workStartTime:'08:30',workEndTime:'19:00'})
+  await expect(page.getByRole('button',{name:'保存设置'})).toBeDisabled();expect(readFileSync(formal,'utf8')).toBe(original);expect(readFileSync(join(path,'settings.json'),'utf8')).toBe(pocSentinel)
 })
 test('sequential secondary starts ignore arbitrary commands and retain exactly one window',async()=>{
   focusDiagnostic={status:'FAIL',identity:null,windows:null,journal:[]}
@@ -161,38 +162,39 @@ test('no recovery capability refuses hide and keeps real main accessible',async(
   const {app}=await launch(profile());const result=await app.evaluate(({app})=>(app as TestApp).__workdayD08Test.windows.hideMain())
   expect(result.ok).toBe(false);expect(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isVisible())).toBe(true)
 })
-test('dirty POC continue editing preserves input and cancels native close',async()=>{
+test('dirty formal continue editing preserves input and cancels native close',async()=>{
   const {app,page}=await launch(profile());await page.getByLabel('下班时间').fill('19:00')
   await app.evaluate(({app,BrowserWindow})=>{(app as TestApp).__workdayD08Test.chooseExit('continueEditing');BrowserWindow.getAllWindows()[0].close()})
   await expect(page.getByLabel('下班时间')).toHaveValue('19:00');expect(app.process().exitCode).toBe(null)
   await expect.poll(()=>app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isVisible())).toBe(true)
 })
-test('dirty POC save commits before true exit; launcher/main and captured children stop',async()=>{
+test('dirty formal save commits before true exit; launcher/main and captured children stop',async()=>{
   const path=profile(),{app,page}=await launch(path),processHandle=app.process(),tree=trackTree(processHandle.pid!);await tree.live()
-  await page.getByLabel('下班时间').fill('19:00');await app.evaluate(({app})=>(app as TestApp).__workdayD08Test.chooseExit('save'))
+  await page.getByLabel('设置分组').selectOption('appearance');await page.getByLabel('配色',{exact:true}).selectOption('coral');await expect(page.locator('[data-workday-root]')).toHaveAttribute('data-pending','false');await app.evaluate(({app})=>(app as TestApp).__workdayD08Test.chooseExit('save'))
   const ended=app.waitForEvent('close');await page.getByRole('button',{name:'退出',exact:true}).click();await ended
-  expect(JSON.parse(readFileSync(join(path,'settings.json'),'utf8')).workEndTime).toBe('19:00');await expect.poll(()=>processHandle.exitCode).toBe(0)
+  expect(JSON.parse(readFileSync(join(path,'lifecycle','settings.json'),'utf8')).appearance.accent).toBe('coral');await expect.poll(()=>processHandle.exitCode).toBe(0)
   await expect.poll(()=>tree.live(),{timeout:10000}).toEqual([])
 })
-test('explicit discard exits without writing edited POC time',async()=>{
-  const path=profile(),{app,page}=await launch(path);writeFileSync(join(path,'settings.json'),JSON.stringify({workStartTime:'08:30',workEndTime:'18:00'}));const before=readFileSync(join(path,'settings.json'),'utf8')
-  await page.getByLabel('下班时间').fill('19:00');await app.evaluate(({app})=>(app as TestApp).__workdayD08Test.chooseExit('discard'))
-  const ended=app.waitForEvent('close');await page.getByRole('button',{name:'退出',exact:true}).click();await ended;expect(readFileSync(join(path,'settings.json'),'utf8')).toBe(before)
+test('explicit discard exits without writing edited formal time',async()=>{
+  const path=profile(),{app,page}=await launch(path);const before=readFileSync(join(path,'lifecycle','settings.json'),'utf8')
+  await page.getByLabel('下班时间').fill('19:00');await expect(page.locator('[data-workday-root]')).toHaveAttribute('data-pending','false');await app.evaluate(({app})=>(app as TestApp).__workdayD08Test.chooseExit('discard'))
+  const ended=app.waitForEvent('close');await page.getByRole('button',{name:'退出',exact:true}).click();await ended;expect(readFileSync(join(path,'lifecycle','settings.json'),'utf8')).toBe(before)
 })
-test('invalid unsaved POC save cancels exit and preserves values',async()=>{
-  const {app,page}=await launch(profile());await page.getByLabel('上班时间').fill('22:00');await page.getByLabel('下班时间').fill('06:00');await app.evaluate(({app})=>(app as TestApp).__workdayD08Test.chooseExit('save'))
-  await page.getByRole('button',{name:'退出',exact:true}).click();await expect(page.getByRole('status')).toContainText('退出失败');expect(app.process().exitCode).toBe(null);await expect(page.getByLabel('上班时间')).toHaveValue('22:00')
+test('invalid unsaved formal save cancels exit and preserves values',async()=>{
+  const {app,page}=await launch(profile());await page.getByLabel('上班时间').fill('22:00');await page.getByLabel('下班时间').fill('06:00');await expect(page.locator('[data-workday-root]')).toHaveAttribute('data-pending','false');await app.evaluate(({app})=>(app as TestApp).__workdayD08Test.chooseExit('save'))
+  await page.getByRole('button',{name:'退出',exact:true}).click();await expect(page.locator('.app-error')).toBeVisible();expect(app.process().exitCode).toBe(null);await expect(page.getByLabel('上班时间')).toHaveValue('22:00')
 })
-test('normal POC dirty close requests return-to-edit feedback, without developing the formal three-choice UI',async()=>{
+test('normal formal dirty close offers save/discard/continue and continues editing',async()=>{
   const {app,page}=await launch(profile());await page.getByLabel('下班时间').fill('19:00')
+  await expect(page.locator('[data-workday-root]')).toHaveAttribute('data-pending','false')
   const feedback=await app.evaluate(async({BrowserWindow,dialog})=>{
     const previous=dialog.showMessageBox;let offered:unknown=null
     // Controlled native-dialog adapter; real window/form/close path remains active.
-    dialog.showMessageBox=(async(...args:unknown[])=>{offered=args[1];return {response:0,checkboxChecked:false}}) as typeof dialog.showMessageBox
+    dialog.showMessageBox=(async(...args:unknown[])=>{offered=args[1];return {response:2,checkboxChecked:false}}) as typeof dialog.showMessageBox
     try {BrowserWindow.getAllWindows()[0].close();const deadline=Date.now()+5000;while(!offered&&Date.now()<deadline)await new Promise(done=>setTimeout(done,20));return offered}
     finally {dialog.showMessageBox=previous}
   }) as {buttons:string[]}
-  expect(feedback.buttons).toEqual(['返回编辑']);await expect(page.getByLabel('下班时间')).toHaveValue('19:00');expect(app.process().exitCode).toBe(null)
+  expect(feedback.buttons).toEqual(['保存并退出','放弃并退出','继续编辑']);await expect(page.getByLabel('下班时间')).toHaveValue('19:00');expect(app.process().exitCode).toBe(null)
   await expect.poll(()=>app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isVisible())).toBe(true)
 })
 test('screen workArea repairs off-screen bounds, small native window keeps controls scrollable',async()=>{
@@ -201,7 +203,7 @@ test('screen workArea repairs off-screen bounds, small native window keeps contr
   expect(result.areas.some(a=>result.bounds.x>=a.x&&result.bounds.y>=a.y&&result.bounds.x+result.bounds.width<=a.x+a.width&&result.bounds.y+result.bounds.height<=a.y+a.height),JSON.stringify(result)).toBe(true)
   await app.evaluate(({BrowserWindow})=>{const w=BrowserWindow.getAllWindows()[0];w.setMinimumSize(320,280);w.setBounds({width:320,height:280})})
   await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollHeight>innerHeight)).toBe(true)
-  await page.getByRole('button',{name:'保存时间'}).scrollIntoViewIfNeeded();await expect(page.getByRole('button',{name:'保存时间'})).toBeVisible()
+  await page.getByRole('button',{name:'保存设置'}).scrollIntoViewIfNeeded();await expect(page.getByRole('button',{name:'保存设置'})).toBeVisible()
   await page.getByRole('button',{name:'退出',exact:true}).scrollIntoViewIfNeeded();await expect(page.getByRole('button',{name:'退出',exact:true})).toBeVisible()
 })
 test('abnormal termination can restart with the same profile and a usable main',async()=>{

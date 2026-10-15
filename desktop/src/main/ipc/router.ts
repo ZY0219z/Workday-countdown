@@ -29,6 +29,9 @@ export function createIpcRouter(ipc:IpcPort,runtime:Runtime,operations:{window:(
         case 'app.quit':result=await operations.quit();break
         case 'data.previewImport':result=await runtime.previewImport(request.data as ContractRequests['data.previewImport']);break
         case 'data.applyImport':result=await runtime.applyImport(request.data as ContractRequests['data.applyImport']);break
+        case 'data.previewRecovery':result=await runtime.previewRecovery();break
+        case 'data.cancelImport':result=runtime.cancelImport((request.data as ContractRequests['data.cancelImport']).previewToken);break
+        case 'calendar.readMetadata':result=runtime.calendarMetadata();break
         case 'data.export':result=await runtime.exportConfig();break
         default:result={ok:false,error:{code:'UNAVAILABLE',message:'年度导入底层尚未实现。'}}
       }

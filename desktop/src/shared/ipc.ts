@@ -7,6 +7,7 @@ export const V2_CHANNELS=Object.freeze({
   'snapshot.read':'workday-v2:snapshot-read','snapshot.subscribe':'workday-v2:snapshot-subscribe','snapshot.unsubscribe':'workday-v2:snapshot-unsubscribe',
   'window.perform':'workday-v2:window-perform','app.quit':'workday-v2:quit',
   'data.previewImport':'workday-v2:import-preview','data.applyImport':'workday-v2:import-apply','data.export':'workday-v2:export',
+  'data.previewRecovery':'workday-v2:recovery-preview','data.cancelImport':'workday-v2:import-cancel','calendar.readMetadata':'workday-v2:calendar-metadata',
   'calendar.previewImport':'workday-v2:calendar-preview','calendar.applyImport':'workday-v2:calendar-apply'
 } as const satisfies Record<Capability,string>)
 export const SNAPSHOT_PUSH='workday-v2:snapshot-changed'

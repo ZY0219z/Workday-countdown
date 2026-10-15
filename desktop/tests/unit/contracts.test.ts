@@ -227,6 +227,8 @@ test('all response DTO examples and failure results are JSON round-trip data', (
     'data.previewImport': { previewToken: 'token', sourceKind: 'python-v1', sourceHash: 'a'.repeat(64), expectedRevision: 0,
       choices: [{ field: 'schedule.startTime', current: '09:00', incoming: '08:30', issues: [] }], undatedOvertimeMinutes: 80 },
     'data.applyImport': { config: saved, warnings: [] }, 'data.export': null,
+    'data.previewRecovery': { previewToken: 'recovery', sourceKind:'v2', sourceHash:'b'.repeat(64), expectedRevision:0, choices:[], undatedOvertimeMinutes:null },
+    'data.cancelImport':null, 'calendar.readMetadata':[],
     'calendar.previewImport': { previewToken: 'token', expectedCalendarRevision: 0, metadata: {
       year: 2026, version: '1', source: 'fixture', publishedOn: '2025-11-04', sha256: 'a'.repeat(64), verification: 'unverified'
     }, restDateCount: 0, makeupDateCount: 0, issues: [] }, 'calendar.applyImport': { calendarRevision: 1 }

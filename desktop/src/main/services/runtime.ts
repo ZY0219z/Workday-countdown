@@ -21,6 +21,9 @@ export interface Runtime {
   discardDraft():Result<SettingsDraftSession>;save(request:ContractRequests['config.save']):Promise<Result<ConfigSnapshot>>
   applyImport(request:ContractRequests['data.applyImport']):Promise<Result<ConfigSnapshot>>
   previewImport(request:ContractRequests['data.previewImport']):Promise<Result<import('../../shared/contracts').ImportPreview>>
+  previewRecovery():Promise<Result<import('../../shared/contracts').ImportPreview>>
+  cancelImport(token:string):Result<null>
+  calendarMetadata():Result<import('../../shared/contracts').CalendarDatasetMetadata[]>
   exportConfig():Promise<Result<null>>;exitAdapter:ExitDraftAdapter;dispose():void
 }
 
@@ -57,7 +60,7 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
       refresh.start();return success(null)
     },
     readConfig():Result<ConfigSnapshot>{return config?success(clone(config)):state?.status==='future'?{ok:false,error:state.error}:unavailable(state?.status==='missing'?'正式配置尚未初始化；必须显式提供完整设置并保存。':'正式配置无效或未加载，未自动覆盖。')},
-    readDraft():Result<SettingsDraftSession>{return disposed?unavailable():success(clone(draft))},
+    readDraft():Result<SettingsDraftSession>{return disposed?unavailable():success(clone({...draft,configurationStatus:state?.status??'unloaded'}))},
     updateDraft(request:ContractRequests['settingsDraft.update']):Result<SettingsDraftSession>{
       if(busy||disposed)return unavailable('设置正在保存或服务已退出。')
       const revision=checkExpectedRevision(request.expectedRevision,config?.config.revision??0);if(!revision.ok)return revision
@@ -67,11 +70,11 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
         const fields=validateContractRequest('main','config.save',{settings:parsed.data,expectedRevision:0})
         draft={...empty(),draft:parsed.data,dirty:Object.keys(parsed.data).length>0,issues:!fields.ok&&fields.error.code==='VALIDATION'?fields.error.issues:[]}
       }
-      return success(clone(draft))
+      return methods.readDraft()
     },
     discardDraft():Result<SettingsDraftSession>{
       if(busy||disposed)return unavailable('保存未结束，不能放弃。')
-      const next=config?createSettingsDraft(config.config):success(empty());if(!next.ok)return next;draft=next.data;return success(clone(draft))
+      const next=config?createSettingsDraft(config.config):success(empty());if(!next.ok)return next;draft=next.data;return methods.readDraft()
     },
     async save(request:ContractRequests['config.save']):Promise<Result<ConfigSnapshot>>{
       const valid=validateContractRequest('main','config.save',request);if(!valid.ok)return valid
@@ -99,6 +102,9 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
       busy=true;try{const result=await options.writes.run(()=>options.migration!.apply(request));if(result.ok){state={status:'ready',config:result.data.config};const applied=accept(result.data);if(!applied.ok)return applied;refresh.wake(true);return methods.readConfig()}return result}finally{busy=false}
     },
     previewImport:(request:ContractRequests['data.previewImport'])=>options.migration?options.migration.preview(request):Promise.resolve(unavailable<import('../../shared/contracts').ImportPreview>('可信文件选择尚未接入；未读取或导入任何来源。')),
+    previewRecovery:()=>options.migration?options.migration.previewRecovery():Promise.resolve(unavailable('备份恢复服务未接入。')),
+    cancelImport:token=>options.migration?options.migration.cancel(token):unavailable(),
+    calendarMetadata:()=>success(options.calendars.listMetadata()),
     exportConfig:()=>options.migration?options.migration.exportConfig():Promise.resolve(unavailable<null>('可信导出目标选择尚未接入。')),
     exitAdapter: {
       async read(){return success({dirty:draft.dirty,saving:busy||draft.save.status==='saving',identity:identity()})},

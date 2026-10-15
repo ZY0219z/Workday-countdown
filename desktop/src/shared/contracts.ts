@@ -163,7 +163,9 @@ export interface DraftState {
 export interface UninitializedDraftState {
   saved: null; draft: JsonObject; dirty: boolean; issues: ValidationIssue[]; expectedRevision: 0; save: DraftSaveState
 }
-export type SettingsDraftSession = DraftState | UninitializedDraftState
+export type SettingsDraftSession = (DraftState | UninitializedDraftState) & {
+  configurationStatus?: 'unloaded' | 'missing' | 'ready' | 'recoverable' | 'invalid' | 'future'
+}
 
 export type WindowCommand = { action: 'showMain' } | { action: 'showMini' } | { action: 'hideMini' } | { action: 'setMiniTop'; enabled: boolean }
 export type MiniWindowCommand = Exclude<WindowCommand, { action: 'showMini' }>
@@ -201,6 +203,9 @@ export interface ContractRequests {
   'app.quit': null
   'data.previewImport': { sourceKind: MigrationSource }
   'data.applyImport': { previewToken: string; expectedRevision: number; selectedFields: ImportField[]; undatedOvertimeShiftDate: LocalDate | null; confirmPreviouslyImported?: boolean }
+  'data.previewRecovery': null
+  'data.cancelImport': { previewToken: string }
+  'calendar.readMetadata': null
   'data.export': { kind: 'v2-config' }
   'calendar.previewImport': null
   'calendar.applyImport': { previewToken: string; expectedCalendarRevision: number }
@@ -218,6 +223,9 @@ export interface ContractResponses {
   'app.quit': null
   'data.previewImport': ImportPreview
   'data.applyImport': ConfigSnapshot
+  'data.previewRecovery': ImportPreview
+  'data.cancelImport': null
+  'calendar.readMetadata': CalendarDatasetMetadata[]
   'data.export': null
   'calendar.previewImport': CalendarImportPreview
   'calendar.applyImport': { calendarRevision: number }
@@ -240,8 +248,8 @@ export interface MainWindowApi extends CommonApi {
   window: { perform: Call<'window.perform'> }
   config: { read(): Promise<Result<ConfigSnapshot>>; save: Call<'config.save'> }
   settingsDraft: { read(): Promise<Result<SettingsDraftSession>>; update: Call<'settingsDraft.update'>; discard(): Promise<Result<SettingsDraftSession>> }
-  data: { previewImport: Call<'data.previewImport'>; applyImport: Call<'data.applyImport'>; export: Call<'data.export'> }
-  calendar: { previewImport(): Promise<Result<CalendarImportPreview>>; applyImport: Call<'calendar.applyImport'> }
+  data: { previewRecovery(): Promise<Result<ImportPreview>>; cancelImport: Call<'data.cancelImport'>; previewImport: Call<'data.previewImport'>; applyImport: Call<'data.applyImport'>; export: Call<'data.export'> }
+  calendar: { readMetadata(): Promise<Result<CalendarDatasetMetadata[]>>; previewImport(): Promise<Result<CalendarImportPreview>>; applyImport: Call<'calendar.applyImport'> }
 }
 export interface MiniWindowApi extends CommonApi {
   readonly role: 'mini'

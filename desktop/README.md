@@ -1,3 +1,24 @@
+# Workday Escape V2.0.0 · D11 开发版
+
+2026-10-15：当前默认页面已切换为正式仪表盘与设置中心。所有业务显示来自 Main 的统一 Snapshot，首次未配置时明确填写上下班时间及发薪日，点击保存后才初始化 `%APPDATA%\Workday Escape\settings.json`。不自动读取、合并或覆盖旧 Python / POC 配置；在设置的数据页主动选择来源、预览字段并确认。旧版源码/配置/资源保留。
+
+开发者手动体验（会显示真实窗口，仅由用户主动启动）：
+
+```powershell
+cd D:\Workday-countdown\desktop
+npm run dev
+```
+
+已安装依赖时直接运行；或 `npm run build` 后手动 `npm run preview`。首次设置可留空入职日，必须明确上下班时间和发薪日。已有正式配置直接进入仪表盘；设置采用草稿、显式保存/取消、离开三选，真正退出由 Main 三选保护。首轮排班完整校验可能需要数十秒，忙碌期间保留窗口与输入；性能预算尚待D15实测，未因本轮放宽。
+
+海蓝默认，珊瑚可选，支持亮/深/系统。原始蓝猫抱灰鱼暂为静态；托盘/真实迷你和动画尚未实施，点击关闭当前仍真正退出，不隐藏成不可恢复进程。窗口/托盘设置仅保存相应偏好。内置2024–2026、周规则与日期覆盖可用；外部年度包导入暂未开放，F11及V2最终发布要求仍保留。
+
+验证：`npm run typecheck`、`npm run test:unit`、`npm run test:desktop`（隐藏、不抢焦点）、`npm run test:d11:visual`（真正Headless）。测试使用隔离TEMP，不写真实配置；GUI/Portable验证必须另获授权。测试所用Edge是开发工具，不是软件运行依赖。组件/截图和具体结果见版本TASKS/UI_PLAN/TEST_PLAN；旧 `release/` EXE是历史产物，不能当作D11新版体验入口，本轮没有重新打包或发布。
+
+---
+
+以下为阶段1 POC历史说明，不代表当前默认页面/API。POC页面/样式另保留于 `src/renderer/src/legacy/`，相关历史测试在 `tests/legacy/`，不加载进正式生产入口。
+
 # Workday Escape V2.0 阶段 1 POC
 
 此目录是当前仓库内的 Vue 3 + TypeScript + Electron 工程。根目录的 Python 程序、`config.json`、资源和原 PyInstaller 产物均保留。

@@ -7,7 +7,7 @@ import type { Validator } from './validation'
 const mainCapabilities = [
   'config.read', 'config.save', 'settingsDraft.read', 'settingsDraft.update', 'settingsDraft.discard',
   'snapshot.read', 'snapshot.subscribe', 'snapshot.unsubscribe', 'window.perform', 'app.quit',
-  'data.previewImport', 'data.applyImport', 'data.export', 'calendar.previewImport', 'calendar.applyImport'
+  'data.previewImport', 'data.applyImport', 'data.export', 'data.previewRecovery', 'data.cancelImport', 'calendar.readMetadata', 'calendar.previewImport', 'calendar.applyImport'
 ] as const satisfies readonly Capability[]
 const miniCapabilities = ['snapshot.read', 'snapshot.subscribe', 'snapshot.unsubscribe', 'window.perform', 'app.quit'] as const satisfies readonly Capability[]
 export const WINDOW_CAPABILITIES = Object.freeze({ main: Object.freeze(mainCapabilities), mini: Object.freeze(miniCapabilities) })
@@ -37,6 +37,9 @@ const requests = {
     undatedOvertimeShiftDate: v.nullable(dateFormat),
     confirmPreviouslyImported: (value, field, issues) => value === undefined ? undefined : v.boolean(value, field, issues)
   }),
+  'data.previewRecovery': nullRequest,
+  'data.cancelImport': v.object<ContractRequests['data.cancelImport']>({ previewToken: v.string(undefined, 256) }),
+  'calendar.readMetadata': nullRequest,
   'data.export': v.object<ContractRequests['data.export']>({ kind: v.enum(['v2-config'] as const) }),
   'calendar.previewImport': nullRequest,
   'calendar.applyImport': v.object<ContractRequests['calendar.applyImport']>({ previewToken: v.string(undefined, 256), expectedCalendarRevision: revisionFormat })

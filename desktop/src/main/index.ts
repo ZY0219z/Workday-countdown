@@ -1,9 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, screen, powerMonitor } from 'electron'
-import type { IpcMainInvokeEvent, Event } from 'electron'
+import type { Event } from 'electron'
 import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { loadSettings, saveSettings } from './settings-store'
 import { APPLICATION_ID, APPLICATION_NAME, resolveApplicationPaths } from './app-identity'
 import { acquireSingleInstance } from './single-instance'
 import { createWindowManager } from './windows/window-manager'
@@ -12,19 +11,17 @@ import { restoreWindowBounds, applyRestoredBounds } from './windows/window-bound
 import { createOperationBarrier } from './lifecycle/operation-barrier'
 import { createQuitCoordinator } from './lifecycle/quit-coordinator'
 import type { ExitChoice } from './lifecycle/quit-coordinator'
-import { createPocDraftAdapter } from './lifecycle/poc-draft'
 import { backgroundTestEnabled, blockInteractiveWindowOperations } from './lifecycle/background-testing'
-import { DEFAULT_SETTINGS } from '../shared/settings'
-import type { WorkSettings } from '../shared/settings'
 import { success } from '../shared/validation'
 import { createSystemClock } from '../adapters/system-clock'
 import { createIntlTimeZoneAdapter } from '../adapters/intl-time-zone'
 import { createTimeZoneCache } from '../domain/time-zone-cache'
 import { loadBundledCalendarStore } from './services/calendar-store'
 import { createConfigStore } from './services/config-store'
-import { createRuntime, combineExitDrafts } from './services/runtime'
+import { createRuntime } from './services/runtime'
+import { createMigrationService } from './services/migration-service'
+import { createMigrationFiles } from './services/migration-files'
 import { createIpcRouter } from './ipc/router'
-import type { ExitDraftAdapter } from './lifecycle/quit-coordinator'
 
 const rendererFile = join(__dirname, '../renderer/index.html')
 const devUrl = !app.isPackaged ? process.env.ELECTRON_RENDERER_URL : undefined
@@ -51,17 +48,15 @@ const instance = acquireSingleInstance(app, () => { windows?.showMain() })
 if (!instance.ok) { startupError(instance.error.message); app.quit() }
 else if (instance.data.primary) {
   app.whenReady().then(async () => {
-    // POC handlers remain isolated. Formal configuration is loaded read-only;
-    // only an explicit V2 save can initialize it.
-    const configPath = paths.data.pocSettings
-    let applied: WorkSettings = { ...DEFAULT_SETTINGS }
+    // Formal page uses only V2 configuration. Legacy POC files remain untouched.
     const writes = createOperationBarrier()
+    let importFileForTest: string | null = null, exportFileForTest: string | null = null
     let exitChoiceForTest: ExitChoice | null = null
     let feedbackOpen = false
     let interactiveAttempts: string[] = []
     const main = () => windows?.getMain() as BrowserWindow | null
     const quit = createQuitCoordinator({ waitMilliseconds: 3000, confirmationMilliseconds: 120000,
-      waitForWrites: writes.drain, restoreMain: () => { windows?.showMain() },
+      waitForWrites: writes.drain, restoreMain: () => { if (!background) windows?.showMain() },
       commitQuit() {
         writes.seal(); windows!.beginQuit(); instance.data.beginQuit()
         setImmediate(() => app.quit()) // Permit the existing IPC reply to settle.
@@ -84,9 +79,31 @@ else if (instance.data.primary) {
     if(!calendars.ok)throw new Error('离线日历资源无效。')
     const store=createConfigStore({directory:paths.data.userData,appVersion:app.getVersion(),clock,zones,calendars:calendars.data,maxValidationDates:10000})
     if(!store.ok)throw new Error('正式配置服务不可用。')
-    let pocAdapter:ExitDraftAdapter
-    const runtime=createRuntime({store:store.data,clock,zones,calendars:calendars.data,maxValidationDates:10000,maxHistoryDays:100000,writes,
-      confirm:async()=>pocAdapter.confirm({dirty:true,saving:false,identity:'formal-confirm'})})
+    const migration=createMigrationService({store:store.data,clock,zones,calendars:calendars.data,maxValidationDates:10000,
+      sources:createMigrationFiles({
+        async selectImport(kind) {
+          if(paths.data.testProfile && importFileForTest){const selected=importFileForTest;importFileForTest=null;return join(dirname(paths.data.pocSettings),selected)}
+          if(background)return null
+          const window=main();if(!window)return null
+          const selected=await dialog.showOpenDialog(window,{title:`选择${kind==='python-v1'?'Python V1':kind==='electron-poc'?'Electron POC':'V2'}配置（只读预览）`,properties:['openFile'],filters:[{name:'JSON配置',extensions:['json']}]})
+          return selected.canceled?null:selected.filePaths[0]??null
+        },
+        async selectExport() {
+          if(paths.data.testProfile && exportFileForTest){const selected=exportFileForTest;exportFileForTest=null;return join(dirname(paths.data.pocSettings),selected)}
+          if(background)return null
+          const window=main();if(!window)return null
+          const selected=await dialog.showSaveDialog(window,{title:'导出V2配置（请选择新文件名）',defaultPath:'Workday-Escape-config.json',filters:[{name:'JSON配置',extensions:['json']}]})
+          return selected.canceled?null:selected.filePath??null
+        }
+      })})
+    const runtime=createRuntime({store:store.data,migration,clock,zones,calendars:calendars.data,maxValidationDates:10000,maxHistoryDays:100000,writes,
+      async confirm(){
+        if(paths.data.testProfile && exitChoiceForTest!==null)return success(exitChoiceForTest)
+        if(background)return {ok:false,error:{code:'UNAVAILABLE',message:'后台退出需要显式测试选择，不弹出原生对话框。'}}
+        const window=main();if(!window)return {ok:false,error:{code:'UNAVAILABLE',message:'没有可确认的窗口，退出取消。'}}
+        const result=await dialog.showMessageBox(window,{type:'question',title:APPLICATION_NAME,message:'设置尚未保存，是否保存后退出？',buttons:['保存并退出','放弃并退出','继续编辑'],defaultId:2,cancelId:2,noLink:true})
+        return success(result.response===0?'save':result.response===1?'discard':'continueEditing')
+      }})
     const loadedRuntime=await runtime.start()
     if(!loadedRuntime.ok)throw new Error('正式服务启动失败。')
     const router=createIpcRouter(ipcMain,runtime,{
@@ -97,17 +114,18 @@ else if (instance.data.primary) {
       }
     })
     const areas = () => screen.getAllDisplays().map(display => ({ id: display.id, workArea: display.workArea, scaleFactor: display.scaleFactor }))
-    const defaults = { x: screen.getPrimaryDisplay().workArea.x, y: screen.getPrimaryDisplay().workArea.y, width: 600, height: 560 }
-    const minimum = { width: 420, height: 500 }
+    const defaults = { x: screen.getPrimaryDisplay().workArea.x, y: screen.getPrimaryDisplay().workArea.y, width: 720, height: 780 }
+    const minimum = { width: 480, height: 560 }
     const bounds = (saved: unknown) => {
       const result = restoreWindowBounds(saved, areas(), screen.getPrimaryDisplay().id, defaults, minimum)
       if (!result.ok) throw new Error(result.error.message)
       return result.data
     }
     windows = createWindowManager(() => {
-      const initial = bounds(null)
+      const savedConfig = runtime.readConfig()
+      const initial = bounds(savedConfig.ok ? savedConfig.data.config.desktop.bounds.main : null)
       const window = new BrowserWindow({ ...initial.bounds, minWidth: initial.minimum.width, minHeight: initial.minimum.height,
-        title: 'Workday Escape — V2.0 POC', show: false, focusable: !background, autoHideMenuBar: true,
+        title: 'Workday Escape', show: false, focusable: !background, autoHideMenuBar: true,
         webPreferences: { preload: join(__dirname, '../preload/index.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true }
       })
       if (background) interactiveAttempts = blockInteractiveWindowOperations(window)
@@ -131,52 +149,16 @@ else if (instance.data.primary) {
       void loaded.catch(() => { if (!quit.isAuthorized() && !window.isDestroyed()) { startupError('页面加载失败，应用将退出；配置未被更改。'); app.exit(1) } })
       return window
     })
-    function assertSender(event: IpcMainInvokeEvent): void {
-      const window = main()
-      if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== rendererUrl) throw new Error('不允许的请求来源。')
-    }
-    const savePoc = (value: unknown) => writes.run(async () => {
-      try { applied = saveSettings(configPath, value); return success(null) }
-      catch { return { ok: false as const, error: { code: 'UNAVAILABLE' as const, message: '无法保存时间，请检查POC配置目录权限或占用后重试。' } } }
-    })
-    const readForm = async (): Promise<unknown> => {
-      const window = main()
-      if (!window || window.isDestroyed() || window.webContents.isLoading()) return null
-      return window.webContents.executeJavaScript(`(() => {
-        const fields = document.querySelectorAll('input[type="time"]');
-        const button = document.querySelector('button[type="submit"]');
-        if (fields.length !== 2 || !button) return null;
-        return { workStartTime: fields[0].value, workEndTime: fields[1].value, busy: button.disabled };
-      })()`)
-    }
-    pocAdapter=createPocDraftAdapter({ readForm, saved: () => applied, save: savePoc,
-      async confirm() {
-        if (paths.data.testProfile && exitChoiceForTest !== null) return success(exitChoiceForTest)
-        if (background) return { ok: false, error: { code: 'UNAVAILABLE', message: '后台测试未注入确认适配器，不打开原生提示或丢弃草稿。' } }
-        const window = main()
-        if (!window) return { ok: false, error: { code: 'UNAVAILABLE', message: '没有可操作窗口，退出未获许可。' } }
-        // Minimal safety feedback only; the real three-choice settings UI
-        // remains D11. Injected adapters
-        // exercise save/discard/continue without developing that UI early.
-        await dialog.showMessageBox(window, { type: 'warning', title: APPLICATION_NAME,
-          message: '时间尚未保存，退出已取消。请先保存更改，或恢复原时间后退出。', buttons: ['返回编辑'], defaultId: 0, cancelId: 0 })
-        return success('continueEditing')
-      },
-      async discardForm() {
-        const window = main()
-        if (!window) return { ok: false, error: { code: 'UNAVAILABLE', message: '无法恢复表单，退出未获许可。' } }
-        await window.webContents.executeJavaScript(`(() => {
-          const fields = document.querySelectorAll('input[type="time"]');
-          const values = ${JSON.stringify([applied.workStartTime, applied.workEndTime])};
-          fields.forEach((field, index) => { field.value = values[index]; field.dispatchEvent(new Event('input', { bubbles: true })); });
-        })()`)
-        return success(null)
+    quit.registerDraft({...runtime.exitAdapter,
+      async read(){
+        const window=main()
+        if(!window||window.isDestroyed()||window.webContents.isLoading())return {ok:false,error:{code:'UNAVAILABLE',message:'页面尚未完成草稿同步，退出取消。'}}
+        // This can only veto exit; the authoritative dirty state is still Main.
+        const pending=await window.webContents.executeJavaScript(`document.querySelector('[data-workday-root]')?.getAttribute('data-pending')`)
+        if(pending!=='false')return {ok:false,error:{code:'IO_BUSY',message:'设置正在同步或保存，请稍后再退出。'}}
+        return runtime.exitAdapter.read()
       }
     })
-    quit.registerDraft(combineExitDrafts(runtime.exitAdapter,pocAdapter))
-    ipcMain.handle('workday:load-settings', event => { assertSender(event); const loaded = loadSettings(configPath); applied = loaded.settings; return loaded })
-    ipcMain.handle('workday:save-settings', async (event, value: unknown) => { assertSender(event); const result = await savePoc(value); if (!result.ok) throw new Error(result.error.message); return applied })
-    ipcMain.handle('workday:quit', async event => { assertSender(event); const result = await requestQuit(false); if (!result.ok) throw new Error(result.error.message) })
     let repairing: Promise<unknown> | null = null
     let boundsTimer: ReturnType<typeof setTimeout> | null = null
     const repairBounds = (): Promise<unknown> => {
@@ -202,7 +184,6 @@ else if (instance.data.primary) {
     const resumed=()=>{zones.clear();runtime.refresh.wake(true)}
     powerMonitor.on('resume',resumed)
     app.once('will-quit', () => {
-      for (const method of ['workday:load-settings', 'workday:save-settings', 'workday:quit']) ipcMain.removeHandler(method)
       if (boundsTimer) clearTimeout(boundsTimer)
       screen.removeListener('display-removed', displayChanged); screen.removeListener('display-metrics-changed', displayChanged); screen.removeListener('display-added', displayChanged)
       app.removeListener('activate', activated); app.removeListener('before-quit', beforeQuit); app.removeListener('window-all-closed', allClosed)
@@ -212,7 +193,11 @@ else if (instance.data.primary) {
     if (paths.data.testProfile) Object.defineProperty(app, '__workdayD08Test', { value: {
       windows, quit, paths: paths.data, repairBounds, background,
       interactiveAttempts: () => interactiveAttempts.slice(),
-      chooseExit(choice: ExitChoice | null) { exitChoiceForTest = choice }
+      chooseExit(choice: ExitChoice | null) { exitChoiceForTest = choice },
+      selectFile(kind:'import'|'export',name:string){
+        if(!/^[A-Za-z0-9_-]+\.json$/.test(name))throw Error('Test fixture basename only')
+        if(kind==='import')importFileForTest=name;else exportFileForTest=name
+      }
     } }) // Main-only and disposable test profile, never renderer/IPC.
     const created = windows.ensureMain()
     if (!created.ok) { startupError(created.error.message); app.exit(1) }
