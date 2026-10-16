@@ -9,11 +9,19 @@ test('compact default bounds share one source, preserve saved bounds and clamp t
   const saved={x:20,y:30,width:900,height:700};assert.deepEqual(restoreWindowBounds(saved,displays,1,defaults,MAIN_WINDOW_MINIMUM_SIZE).data.bounds,saved)
   const small=restoreWindowBounds(null,[{id:1,workArea:{x:0,y:0,width:400,height:300},scaleFactor:2}],1,defaults,MAIN_WINDOW_MINIMUM_SIZE).data;assert.equal(small.bounds.height,300);assert.equal(small.minimum.height,300)
 })
-test('progress uses one original cat on the track, static waves and only necessary copy',async()=>{
+test('progress uses one original cat on the track, gated waves and only necessary copy',async()=>{
   const html=await render(f.snapshots.working)
   assert.equal((html.match(/原始蓝色摸鱼猫抱灰鱼/g)||[]).length,1);assert.ok(html.includes('fish-mascot--floating'));assert.ok(html.includes('fish-waves'));assert.ok(!html.includes('fish-body'));assert.ok(!html.includes('we-countdown-illustration'))
   assert.ok(!html.includes('有效工作进度 · 不含午休'));assert.ok(html.includes('摸鱼一小步，下班一大步'));assert.ok(html.includes('下班时间：2026-10-15 18:00'));assert.ok(!html.includes('最终下班：'))
   const stopped=await render(f.snapshots.break);assert.ok(!stopped.includes('fish-mascot--floating'));assert.ok(stopped.includes('（静态）'))
+})
+test('waves use the existing work/overtime gate and remain static for all stopped states',async()=>{
+  for(const state of ['working','overtime','beforeWork','break','finished','rest','incomplete']){
+    const snapshot=state==='incomplete'?{...f.snapshots.working,state}:f.snapshots[state]
+    const original=JSON.stringify(snapshot)
+    for(const allowed of [true,false]){const html=await render(snapshot,allowed);assert.equal(html.includes('fish-waves--flowing'),allowed&&['working','overtime'].includes(state));assert.equal(JSON.stringify(snapshot),original)}
+  }
+  assert.ok(!(await render({...f.snapshots.working,progress:null})).includes('fish-waves--flowing'))
 })
 for(const state of [{visible:true,minimized:false,destroyed:false,expected:true},{visible:false,minimized:false,destroyed:false,expected:false},{visible:true,minimized:true,destroyed:false,expected:false},{visible:true,minimized:false,destroyed:true,expected:false}])test(`native presentation ${JSON.stringify(state)} ignores document visibility`,()=>{
   assert.equal(windowPresentationVisible({isVisible:()=>state.visible,isMinimized:()=>state.minimized,isDestroyed:()=>state.destroyed}),state.expected)
