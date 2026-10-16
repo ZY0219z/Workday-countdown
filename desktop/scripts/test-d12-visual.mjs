@@ -17,19 +17,44 @@ export async function installD12Instrumentation(page){await page.addInitScript((
   window.__d12Resources=()=>({targets:[...observers.values()].reduce((n,set)=>n+set.size,0),visibilityListeners:visibility.size,rafCalls,draws})
 })}
 
-export async function runD12Visual({page,browser,check,goto,group,screenshot,directory,fixture}){
+export async function runD12Visual({page,browser,check,goto,group,screenshot,directory,fixture,defaultSize}){
+  const viewport={width:defaultSize.width,height:defaultSize.height-60}
   const animated=page.locator('img.moyu-animated'),marker=page.locator('.fish-marker'),track=page.locator('.fish-track'),progress=page.locator('progress')
   const push=name=>page.evaluate(name=>window.__d11.push(name),name)
   const percent=value=>page.evaluate(value=>window.__d12.progress(value),value)
-  async function stopped(){await expect(animated).toHaveCount(0);await page.waitForFunction(()=>document.querySelector('canvas')?.dataset.ready==='true')}
+  async function stopped(){await expect(animated).toHaveCount(0);await expect(page.locator('.fish-mascot--floating')).toHaveCount(0);await page.waitForFunction(()=>document.querySelector('canvas')?.dataset.ready==='true');assert.equal(await page.evaluate(()=>document.getAnimations().filter(a=>a.playState==='running').length),0)}
   async function position(value){await expect(progress).toHaveAttribute('value',String(value));await expect.poll(()=>marker.evaluate((element,p)=>{const t=element.parentElement,actual=new DOMMatrix(getComputedStyle(element).transform).m41;return Math.abs(actual-p/100*Math.max(0,t.clientWidth-element.offsetWidth))<1},value)).toBe(true)}
   await goto()
   await check('original GIF really changes pixels; only one cat, correct source and aspect ratio',async()=>{
     await expect(animated).toBeVisible();await page.waitForFunction(()=>{const img=document.querySelector('img.moyu-animated');return img?.complete&&img.naturalWidth>0})
-    assert.ok((await animated.getAttribute('src')).includes('moyu_original'));assert.equal(await page.locator('.we-countdown-illustration img,.we-countdown-illustration canvas').count(),1)
+    assert.ok((await animated.getAttribute('src')).includes('moyu_original'));assert.equal(await page.locator('.fish-marker img').count(),1);assert.equal(await page.locator('.we-countdown-illustration').count(),0)
+    // Isolate GIF pixels from the independently tested CSS bobbing motion.
+    await page.locator('.fish-mascot').evaluate(el=>{el.style.animation='none'})
     const hashes=[];for(let i=0;i<5;i++){hashes.push(createHash('sha256').update(await animated.screenshot({animations:'allow'})).digest('hex'));await page.waitForTimeout(140)}
     assert.ok(new Set(hashes).size>1,'GIF must visibly change frames, not just have an animated attribute')
-    await writeFile(resolve(directory,'gif-frame-hashes.json'),JSON.stringify({source:'original 226x217, 12 frames, 100ms/frame',hashes},null,2));await page.locator('.we-countdown-illustration').screenshot({path:resolve(directory,'d12-gif-frame.png')})
+    await writeFile(resolve(directory,'gif-frame-hashes.json'),JSON.stringify({source:'original 226x217, 12 frames, 100ms/frame; CSS float disabled only during pixel sampling',hashes},null,2));await animated.screenshot({path:resolve(directory,'d12-r2-gif-frame.png')});await page.locator('.fish-mascot').evaluate(el=>el.style.removeProperty('animation'))
+  })
+  await check('static white ripples stay inside the completed region; gentle cat bobbing does not change x',async()=>{
+    const waves=page.locator('.fish-waves'),mascot=page.locator('.fish-mascot');await expect(waves).toBeVisible();const css=await waves.evaluate(el=>{const style=getComputedStyle(el);return{color:style.backgroundColor,mask:style.maskImage,repeat:style.maskRepeat}});assert.notEqual(css.mask,'none');assert.match(css.color,/255,\s*255,\s*255/);assert.equal(css.repeat.split(',').length,3);assert.equal(await waves.evaluate(el=>getComputedStyle(el).animationName),'none')
+    const x=await marker.evaluate(el=>new DOMMatrix(getComputedStyle(el).transform).m41);await expect(mascot).toHaveClass(/fish-mascot--floating/);assert.equal(await mascot.evaluate(el=>getComputedStyle(el).animationDuration),'3s')
+    const before=await mascot.evaluate(el=>new DOMMatrix(getComputedStyle(el).transform).m42);await page.waitForTimeout(450);const y=await mascot.evaluate(el=>new DOMMatrix(getComputedStyle(el).transform).m42);assert.ok(y>=-1.51&&y<=.01);assert.notEqual(y,before);assert.equal(await marker.evaluate(el=>new DOMMatrix(getComputedStyle(el).transform).m41),x)
+    const boxes=await waves.evaluate(el=>({wave:el.getBoundingClientRect().right,fill:el.parentElement.getBoundingClientRect().right}));assert.ok(boxes.wave<=boxes.fill+1)
+  })
+  await check('compact dashboard has one-line title, corrected labels and no routine progress note or scrolling',async()=>{
+    // Conservative content budget leaves 60 DIP for a native frame; exact
+    // content bounds at 100% are separately checked in hidden Electron.
+    await page.setViewportSize(viewport)
+    await expect(page.locator('.app-header h1')).toHaveText('今天你摸鱼了吗');await expect(page.locator('.app-header p')).toHaveCount(0)
+    for(const text of ['Workday Escape','上班摸一会，下班更近一步','有效工作进度 · 不含午休','最终下班：','摸一会鱼，下班就更近啦！'])await expect(page.locator('body')).not.toContainText(text)
+    await expect(page.locator('.we-countdown-hint')).toHaveText('摸鱼一小步，下班一大步');await expect(page.locator('.we-countdown-target')).toContainText('下班时间：2026-10-15 18:00')
+    const layout=await page.evaluate(()=>({height:innerHeight,scroll:document.documentElement.scrollHeight,width:innerWidth,scrollWidth:document.documentElement.scrollWidth,bottom:document.querySelector('.dashboard-metrics').getBoundingClientRect().bottom,headingHeight:document.querySelector('.app-header h1').getBoundingClientRect().height}))
+    assert.ok(layout.scroll<=layout.height&&layout.scrollWidth<=layout.width);assert.ok(layout.height-layout.bottom>=16&&layout.height-layout.bottom<80);assert.ok(layout.headingHeight<=36)
+    await screenshot('d12-r2-dashboard-compact.png');await writeFile(resolve(directory,'compact-layout.json'),JSON.stringify(layout,null,2));await page.setViewportSize(defaultSize)
+  })
+  await check('ordinary overtime, overnight and nonworking states also fit the compact content budget',async()=>{
+    await page.setViewportSize(viewport)
+    for(const state of ['beforeWork','break','overtime','overnight','finished','rest']){await push(state);assert.equal(await page.evaluate(()=>document.documentElement.scrollHeight<=innerHeight&&document.documentElement.scrollWidth<=innerWidth),true,state)}
+    await push('working');await page.setViewportSize(defaultSize)
   })
   await check('zero, quarter, half, three-quarter and complete map to exact single-track positions',async()=>{for(const p of [0,25,50,75,100]){await percent(p);await position(p);await expect(page.locator('.dashboard-progress-heading strong')).toHaveText(p+'%')}assert.equal(await track.count(),1)})
   await check('overtime rollback follows actual D09 progress backwards; timer stays supplied',async()=>{
@@ -59,12 +84,12 @@ export async function runD12Visual({page,browser,check,goto,group,screenshot,dir
   await check('all themes, 720/640/480/360 sizes, marker endpoints and GIF proportion remain readable',async()=>{
     await goto();await page.emulateMedia({reducedMotion:'no-preference'})
     for(const mode of ['light','dark'])for(const accent of ['ocean','coral']){await group('appearance');await page.getByLabel('显示模式',{exact:true}).selectOption(mode);await page.getByLabel('配色',{exact:true}).selectOption(accent);await page.getByRole('button',{name:'保存设置',exact:true}).click();await expect(animated).toBeVisible()
-      for(const width of [720,640,480,360]){await page.setViewportSize({width,height:780});for(const value of [0,100]){await percent(value);await position(value);assert.equal(await marker.evaluate(el=>{const box=el.getBoundingClientRect(),track=el.parentElement.getBoundingClientRect();return box.left>=track.left-1&&box.right<=track.right+1}),true)}
+      for(const width of [720,640,480,360]){await page.setViewportSize({width,height:viewport.height});for(const value of [0,100]){await percent(value);await position(value);assert.equal(await marker.evaluate(el=>{const box=el.getBoundingClientRect(),track=el.parentElement.getBoundingClientRect();return box.left>=track.left-1&&box.right<=track.right+1}),true)}
         assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth+1),true);const box=await animated.boundingBox();assert.ok(Math.abs(box.width/box.height-226/217)<.01)
       }
-      await page.setViewportSize({width:720,height:780});await percent(62.5);await position(62.5);await screenshot(`d12-dashboard-${accent}-${mode}.png`)
+      await page.setViewportSize(viewport);await percent(62.5);await position(62.5);await screenshot(`d12-r2-dashboard-${accent}-${mode}.png`)
     }
-    await page.setViewportSize({width:360,height:560});await screenshot('d12-dashboard-narrow.png');await page.setViewportSize({width:720,height:780})
+    await page.setViewportSize({width:360,height:560});await screenshot('d12-r2-dashboard-narrow.png');await page.setViewportSize(viewport)
     await track.evaluate(el=>{el.style.width='16px'});await percent(100);await position(100);assert.equal(await marker.evaluate(el=>el.offsetWidth<=el.parentElement.clientWidth),true);await track.evaluate(el=>el.style.removeProperty('width'))
   })
   await check('missing calendar estimate and forced colors keep numeric progress, text and boundaries',async()=>{

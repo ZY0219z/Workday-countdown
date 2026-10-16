@@ -7,7 +7,7 @@ import { APPLICATION_ID, APPLICATION_NAME, resolveApplicationPaths } from './app
 import { acquireSingleInstance } from './single-instance'
 import { createWindowManager, windowPresentationVisible } from './windows/window-manager'
 import type { WindowManager } from './windows/window-manager'
-import { restoreWindowBounds, applyRestoredBounds } from './windows/window-bounds'
+import { restoreWindowBounds, applyRestoredBounds, MAIN_WINDOW_DEFAULT_SIZE, MAIN_WINDOW_MINIMUM_SIZE } from './windows/window-bounds'
 import { createOperationBarrier } from './lifecycle/operation-barrier'
 import { createQuitCoordinator } from './lifecycle/quit-coordinator'
 import type { ExitChoice } from './lifecycle/quit-coordinator'
@@ -116,8 +116,8 @@ else if (instance.data.primary) {
       }
     })
     const areas = () => screen.getAllDisplays().map(display => ({ id: display.id, workArea: display.workArea, scaleFactor: display.scaleFactor }))
-    const defaults = { x: screen.getPrimaryDisplay().workArea.x, y: screen.getPrimaryDisplay().workArea.y, width: 720, height: 780 }
-    const minimum = { width: 480, height: 560 }
+    const defaults = { x: screen.getPrimaryDisplay().workArea.x, y: screen.getPrimaryDisplay().workArea.y, ...MAIN_WINDOW_DEFAULT_SIZE }
+    const minimum = MAIN_WINDOW_MINIMUM_SIZE
     const bounds = (saved: unknown) => {
       const result = restoreWindowBounds(saved, areas(), screen.getPrimaryDisplay().id, defaults, minimum)
       if (!result.ok) throw new Error(result.error.message)

@@ -2,7 +2,7 @@ html,body,#app { margin:0;min-width:0;min-height:100%; }
 .app-shell { min-height:100vh;padding:var(--we-space-5); }
 .app-content { max-width:920px;margin:0 auto; }
 .app-header { display:flex;align-items:center;justify-content:space-between;gap:var(--we-space-3);margin-bottom:var(--we-space-5);flex-wrap:wrap; }
-.app-header h1 { font-size:22px;letter-spacing:-.02em; }
+.app-header h1 { font-size:22px;letter-spacing:-.02em;white-space:nowrap; }
 .app-actions { display:flex;flex-wrap:wrap;gap:var(--we-space-2); }
 .app-menu { width:40px;height:40px;font-size:24px;line-height:1; }.app-default-note { font-size:var(--we-text-small);margin-bottom:var(--we-space-2)!important; }
 .app-error { color:var(--we-danger-text);font-size:var(--we-text-body);overflow-wrap:anywhere;margin-bottom:var(--we-space-3)!important; }

@@ -9,4 +9,5 @@ export {createV2Bridge} from '../../src/shared/bridge.ts'
 export {validateContractRequest} from '../../src/shared/capabilities.ts'
 export {V2_CHANNELS,WINDOW_VISIBILITY_PUSH} from '../../src/shared/ipc.ts'
 export {windowPresentationVisible} from '../../src/main/windows/window-manager.ts'
+export {MAIN_WINDOW_DEFAULT_SIZE,MAIN_WINDOW_MINIMUM_SIZE,restoreWindowBounds} from '../../src/main/windows/window-bounds.ts'
 export function render(snapshot,motionAllowed=true){return renderToString(createSSRApp({render:()=>h(Dashboard,{snapshot,motionAllowed})}))}

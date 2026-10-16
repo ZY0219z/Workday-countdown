@@ -25,7 +25,7 @@ const display = computed(() => countdownPresentation(props.state, props.text, pr
         <h2 :id="headingId">{{ display.heading }}</h2>
         <output v-if="display.text !== null" class="we-countdown-value" role="timer" aria-live="off" :aria-label="display.heading">{{ display.text }}</output>
         <p v-else class="we-countdown-empty">{{ display.emptyLabel }}</p>
-        <p v-if="target && display.text !== null" class="we-muted we-countdown-target">{{ target.kind === 'workStart' ? '上班' : '最终下班' }}：{{ [target.date, target.time].filter(Boolean).join(' ') }}</p>
+        <p v-if="target && display.text !== null" class="we-muted we-countdown-target">{{ target.kind === 'workStart' ? '上班' : '下班时间' }}：{{ [target.date, target.time].filter(Boolean).join(' ') }}</p>
       </div>
       <div v-if="$slots.illustration" class="we-countdown-illustration"><slot name="illustration"></slot></div>
     </div>

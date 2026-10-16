@@ -11,6 +11,7 @@ import { createAppConfig } from '../src/shared/config-schema'
 import { loadBundledCalendarStore } from '../src/main/services/calendar-store'
 import type { AppConfig, Result, MainWindowApi } from '../src/shared/contracts'
 import type { ExitChoice } from '../src/main/lifecycle/quit-coordinator'
+import {MAIN_WINDOW_DEFAULT_SIZE,MAIN_WINDOW_MINIMUM_SIZE} from '../src/main/windows/window-bounds'
 import { V2_CHANNELS } from '../src/shared/ipc'
 type TestApp=App & {__workdayD08Test:{background:boolean;windows:{beginQuit():void};quit:{requestQuit():Promise<Result<null>>};chooseExit(choice:ExitChoice|null):void;selectFile(kind:'import'|'export',name:string):void}}
 // Native-hidden integration stimulates real DOM handlers. Pixel hit-testing and
@@ -59,12 +60,12 @@ test.afterEach(async()=>{
   expect(profile.startsWith(join(tmpdir(),'workday-d08-background-'))).toBe(true)
   rmSync(profile,{recursive:true,force:true,maxRetries:10,retryDelay:200})
 })
-async function launch(seed=true,rendererUrl?:string){
+async function launch(seed=true,rendererUrl?:string,scaleOne=false){
   if(seed&&!existsSync(formal())){mkdirSync(join(profile,'lifecycle'),{recursive:true});writeFileSync(formal(),JSON.stringify(fixture()))}
   const env=Object.fromEntries(Object.entries(process.env).filter((pair):pair is [string,string]=>pair[1]!==undefined));delete env.ELECTRON_RUN_AS_NODE;delete env.ELECTRON_RENDERER_URL;delete env.WORKDAY_ESCAPE_GUI_TESTS
   env.WORKDAY_ESCAPE_TEST_MODE='1';env.WORKDAY_ESCAPE_TEST_PROFILE=profile;env.WORKDAY_ESCAPE_TEST_BACKGROUND='1'
   if(rendererUrl)env.ELECTRON_RENDERER_URL=rendererUrl
-  application=await electron.launch({args:['.'],env});applicationProcess=application.process();const page=await application.firstWindow()
+  application=await electron.launch({args:[...(scaleOne?['--force-device-scale-factor=1']:[]),'.'],env});applicationProcess=application.process();const page=await application.firstWindow()
   await expect(page.locator('[data-workday-root]')).toHaveAttribute('data-pending','false');await hidden();return page
 }
 async function settings(page:Awaited<ReturnType<typeof launch>>){const button=page.getByRole('button',{name:'设置',exact:true});if(await button.count())await activate(button)}
@@ -73,7 +74,7 @@ async function settled(page:Awaited<ReturnType<typeof launch>>){await expect(pag
 async function choose(choice:ExitChoice|null){await application!.evaluate(({app},choice)=>(app as TestApp).__workdayD08Test.chooseExit(choice),choice)}
 async function file(kind:'import'|'export',name:string){await application!.evaluate(({app},data)=>(app as TestApp).__workdayD08Test.selectFile(data.kind,data.name),{kind,name})}
 test('formal main stays hidden; real Preload and renderer sandbox deny legacy/Node/general IPC',async()=>{
-  const page=await launch();await expect(page.getByRole('heading',{name:'Workday Escape',exact:true})).toBeVisible()
+  const page=await launch();await expect(page.getByRole('heading',{name:'今天你摸鱼了吗',exact:true})).toBeVisible()
   const prefs=await application!.evaluate(({BrowserWindow})=>(BrowserWindow.getAllWindows()[0].webContents as unknown as {getLastWebPreferences():WebPreferences}).getLastWebPreferences())
   expect({sandbox:prefs.sandbox,contextIsolation:prefs.contextIsolation,nodeIntegration:prefs.nodeIntegration,webSecurity:prefs.webSecurity}).toEqual({sandbox:true,contextIsolation:true,nodeIntegration:false,webSecurity:true})
   expect(await page.evaluate(()=>({legacy:typeof window.workday,require:typeof globalThis.require,process:typeof globalThis.process,generic:'invoke'in window.workdayV2}))).toEqual({legacy:'undefined',require:'undefined',process:'undefined',generic:false})
@@ -88,6 +89,16 @@ test('D12 real hidden Electron publishes own native visibility and never loads a
   value(await page.evaluate(()=>window.workdayV2.window.unsubscribeVisibility()));await hidden()
   const metrics=await application!.evaluate(({app})=>app.getAppMetrics().map(p=>({pid:p.pid,type:p.type,cpu:p.cpu,memory:p.memory})))
   writeFileSync('test-results/d12-hidden-electron-metrics.json',JSON.stringify({scope:'single native-hidden Electron sample, animation off; not G05',metrics},null,2))
+})
+test('D12 compact default native window fits the dashboard at 100 percent without focus or scrolling',async()=>{
+  const page=await launch(true,undefined,true)
+  const native=await application!.evaluate(({BrowserWindow})=>{const window=BrowserWindow.getAllWindows()[0];return {bounds:window.getBounds(),content:window.getContentBounds(),minimum:window.getMinimumSize()}})
+  expect({width:native.bounds.width,height:native.bounds.height}).toEqual(MAIN_WINDOW_DEFAULT_SIZE);expect(native.minimum).toEqual([MAIN_WINDOW_MINIMUM_SIZE.width,MAIN_WINDOW_MINIMUM_SIZE.height])
+  await expect(page.getByRole('heading',{name:'今天你摸鱼了吗',exact:true})).toBeVisible();await expect(page.locator('.app-header')).not.toContainText('Workday Escape');await expect(page.locator('.app-header p')).toHaveCount(0)
+  await expect(page.locator('.dashboard-progress')).not.toContainText('有效工作进度 · 不含午休')
+  const layout=await page.evaluate(()=>{const bottom=document.querySelector('.dashboard-metrics')!.getBoundingClientRect().bottom;return {dpr:devicePixelRatio,width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,scrollHeight:document.documentElement.scrollHeight,bottom,gap:innerHeight-bottom}})
+  expect(layout.dpr).toBe(1);expect(layout.width).toBe(native.content.width);expect(layout.height).toBe(native.content.height);expect(layout.scrollWidth).toBeLessThanOrEqual(layout.width);expect(layout.scrollHeight).toBeLessThanOrEqual(layout.height);expect(layout.gap).toBeGreaterThanOrEqual(16);expect(layout.gap).toBeLessThan(80)
+  writeFileSync('test-results/d12-r2-native-layout.json',JSON.stringify({native,layout,hidden:true},null,2));await hidden()
 })
 test('first launch shows default dashboard, persists safely, restarts and preserves POC sentinel',async()=>{
   const sentinel='{"workStartTime":"08:30","workEndTime":"18:00"}';writeFileSync(join(profile,'settings.json'),sentinel)
@@ -194,6 +205,9 @@ test('actual router still rejects iframe, foreign senders and hostile DTOs',asyn
 
 test('development Vite main-frame identity and URL permit real IPC, not arbitrary origins',async()=>{
   const url=await developmentUrl(),page=await launch(false,url)
+  const mask=await page.locator('.fish-waves').evaluate(element=>getComputedStyle(element).maskImage),waveUrl=/url\("([^"]+)"\)/.exec(mask)?.[1]
+  expect(waveUrl).toBeTruthy();const wave=await page.request.get(waveUrl!);expect(wave.status()).toBe(200);expect(await wave.body()).toEqual(readFileSync(resolve('../assets/image/wave-fin.png')))
+  expect((await page.request.get(url+'/@fs/'+resolve('../workday_counter.py').replaceAll('\\','/'))).status()).toBe(403)
   await application!.evaluate(({ipcMain,BrowserWindow},channel)=>{
     const handlers=(ipcMain as unknown as {_invokeHandlers:Map<string,(event:any,input:unknown)=>Promise<unknown>>})._invokeHandlers
     const original=handlers.get(channel)!,contents=BrowserWindow.getAllWindows()[0].webContents

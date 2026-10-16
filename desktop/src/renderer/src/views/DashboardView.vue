@@ -3,7 +3,6 @@ import { computed } from 'vue'
 import type { DashboardSnapshot } from '../../../shared/contracts'
 import CountdownCard from '../components/CountdownCard.vue'
 import MetricCard from '../components/MetricCard.vue'
-import MoyuIllustration from '../components/MoyuIllustration.vue'
 import FishProgress from '../components/FishProgress.vue'
 import { fishCanAnimate } from '../ui/fish-progress'
 import { durationText, wallLabel, qualityText, affectedWarnings } from '../ui/dashboard-display'
@@ -17,13 +16,11 @@ const estimate=computed(()=>props.snapshot?.countdown?.quality.approximate?quali
 </script>
 <template>
   <section class="dashboard" aria-label="工作日仪表盘">
-    <CountdownCard :state="snapshot?.state || 'incomplete'" :text="durationText(snapshot?.countdown?.seconds)" :target="target" :estimate="estimate" :warning="snapshot ? affectedWarnings(snapshot,'countdown') : '暂时无法计算，请查看设置。'" hint="摸一会鱼，下班就更近啦！">
-      <template #illustration><MoyuIllustration :playing="animated" /></template>
-    </CountdownCard>
+    <CountdownCard :state="snapshot?.state || 'incomplete'" :text="durationText(snapshot?.countdown?.seconds)" :target="target" :estimate="estimate" :warning="snapshot ? affectedWarnings(snapshot,'countdown') : '暂时无法计算，请查看设置。'" hint="摸鱼一小步，下班一大步" />
     <section class="we-surface dashboard-progress" aria-label="今日工作进度">
       <div class="dashboard-progress-heading"><h2>今日工作进度</h2><strong>{{ percentage===null?'无工作进度':percentage+'%' }}</strong></div>
       <FishProgress :percent="snapshot?.progress?.percent??null" :animate="animated" />
-      <p class="we-muted">{{ snapshot?.progress?'有效工作进度 · 不含午休':'无有效班次或暂不可计算，不代表 0%' }}</p>
+      <p v-if="!snapshot?.progress" class="we-muted">无有效班次或暂不可计算，不代表 0%</p>
       <p v-if="snapshot?.progress?.quality.approximate" class="dashboard-warning">{{ qualityText(snapshot.progress.quality) }}</p>
       <p v-if="snapshot && affectedWarnings(snapshot,'progress')" class="dashboard-warning">{{ affectedWarnings(snapshot,'progress') }}</p>
       <p v-if="snapshot?.activeShift && (snapshot.activeShift.overtimeMinutes>0 || snapshot.activeShift.shiftDate!==snapshot.localDate)" class="we-muted">班次 {{ snapshot.activeShift.shiftDate }} · 加班 {{ snapshot.activeShift.overtimeMinutes }} 分钟</p>
@@ -36,8 +33,8 @@ const estimate=computed(()=>props.snapshot?.countdown?.quality.approximate?quali
   </section>
 </template>
 <style scoped>
-.dashboard { display:grid;gap:var(--we-space-4);container-type:inline-size; }
-.dashboard-progress { padding:var(--we-space-4); }
+.dashboard { display:grid;gap:var(--we-space-3);container-type:inline-size; }
+.dashboard-progress { padding:var(--we-space-3) var(--we-space-4); }
 .dashboard-progress-heading { display:flex;justify-content:space-between;gap:var(--we-space-3);align-items:center; }
 h2 { font-size:var(--we-text-body); }
 strong { color:var(--we-accent);font-variant-numeric:tabular-nums; }

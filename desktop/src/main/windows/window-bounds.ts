@@ -1,6 +1,10 @@
 import type { Result, WindowBounds } from '../../shared/contracts'
 import { issue, success, v, validateStructure, validationFailure } from '../../shared/validation'
 
+// Outer native window sizes in DIP; saved bounds still take precedence.
+export const MAIN_WINDOW_DEFAULT_SIZE=Object.freeze({width:720,height:660})
+export const MAIN_WINDOW_MINIMUM_SIZE=Object.freeze({width:480,height:520})
+
 export interface DisplayArea { id: number; workArea: WindowBounds; scaleFactor: number }
 export interface BoundsWindow {
   getBounds(): WindowBounds

@@ -1,7 +1,20 @@
 import {test} from 'node:test'
 import assert from 'node:assert/strict'
-import {fixtures,render,progressRatio,fishPosition,fishCanAnimate,createThemeController,createIpcRouter,createV2Bridge,validateContractRequest,V2_CHANNELS,WINDOW_VISIBILITY_PUSH,windowPresentationVisible} from '../../test-results/d12-ssr/components.mjs'
+import {fixtures,render,progressRatio,fishPosition,fishCanAnimate,createThemeController,createIpcRouter,createV2Bridge,validateContractRequest,V2_CHANNELS,WINDOW_VISIBILITY_PUSH,windowPresentationVisible,MAIN_WINDOW_DEFAULT_SIZE,MAIN_WINDOW_MINIMUM_SIZE,restoreWindowBounds} from '../../test-results/d12-ssr/components.mjs'
 const f=fixtures(),ok=data=>({ok:true,data})
+test('compact default bounds share one source, preserve saved bounds and clamp to small work areas',()=>{
+  assert.deepEqual(MAIN_WINDOW_DEFAULT_SIZE,{width:720,height:660});assert.deepEqual(MAIN_WINDOW_MINIMUM_SIZE,{width:480,height:520})
+  const displays=[{id:1,workArea:{x:0,y:0,width:1920,height:1080},scaleFactor:1}],defaults={x:0,y:0,...MAIN_WINDOW_DEFAULT_SIZE}
+  assert.deepEqual(restoreWindowBounds(null,displays,1,defaults,MAIN_WINDOW_MINIMUM_SIZE).data.bounds,defaults)
+  const saved={x:20,y:30,width:900,height:700};assert.deepEqual(restoreWindowBounds(saved,displays,1,defaults,MAIN_WINDOW_MINIMUM_SIZE).data.bounds,saved)
+  const small=restoreWindowBounds(null,[{id:1,workArea:{x:0,y:0,width:400,height:300},scaleFactor:2}],1,defaults,MAIN_WINDOW_MINIMUM_SIZE).data;assert.equal(small.bounds.height,300);assert.equal(small.minimum.height,300)
+})
+test('progress uses one original cat on the track, static waves and only necessary copy',async()=>{
+  const html=await render(f.snapshots.working)
+  assert.equal((html.match(/原始蓝色摸鱼猫抱灰鱼/g)||[]).length,1);assert.ok(html.includes('fish-mascot--floating'));assert.ok(html.includes('fish-waves'));assert.ok(!html.includes('fish-body'));assert.ok(!html.includes('we-countdown-illustration'))
+  assert.ok(!html.includes('有效工作进度 · 不含午休'));assert.ok(html.includes('摸鱼一小步，下班一大步'));assert.ok(html.includes('下班时间：2026-10-15 18:00'));assert.ok(!html.includes('最终下班：'))
+  const stopped=await render(f.snapshots.break);assert.ok(!stopped.includes('fish-mascot--floating'));assert.ok(stopped.includes('（静态）'))
+})
 for(const state of [{visible:true,minimized:false,destroyed:false,expected:true},{visible:false,minimized:false,destroyed:false,expected:false},{visible:true,minimized:true,destroyed:false,expected:false},{visible:true,minimized:false,destroyed:true,expected:false}])test(`native presentation ${JSON.stringify(state)} ignores document visibility`,()=>{
   assert.equal(windowPresentationVisible({isVisible:()=>state.visible,isMinimized:()=>state.minimized,isDestroyed:()=>state.destroyed}),state.expected)
 })
