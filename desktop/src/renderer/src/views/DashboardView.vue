@@ -3,9 +3,12 @@ import { computed } from 'vue'
 import type { DashboardSnapshot } from '../../../shared/contracts'
 import CountdownCard from '../components/CountdownCard.vue'
 import MetricCard from '../components/MetricCard.vue'
-import MoyuStill from '../components/MoyuStill.vue'
+import MoyuIllustration from '../components/MoyuIllustration.vue'
+import FishProgress from '../components/FishProgress.vue'
+import { fishCanAnimate } from '../ui/fish-progress'
 import { durationText, wallLabel, qualityText, affectedWarnings } from '../ui/dashboard-display'
-const props=defineProps<{snapshot:DashboardSnapshot|null}>()
+const props=withDefaults(defineProps<{snapshot:DashboardSnapshot|null;motionAllowed?:boolean}>(),{motionAllowed:false})
+const animated=computed(()=>fishCanAnimate(props.snapshot?.state,props.snapshot?.progress?.percent,props.motionAllowed))
 const target=computed(()=>{const s=props.snapshot;if(!s?.countdown)return null;const wall=wallLabel(s.countdown.targetAt,s.timeZoneId);return wall?{kind:s.countdown.target,...wall}:null})
 const percentage=computed(()=>props.snapshot?.progress?.percent.toFixed(1).replace(/\.0$/,'')??null)
 const salaryDescription=computed(()=>{const salary=props.snapshot?.salary;if(!salary)return '';return `${salary.days===0?'今天计划发薪 · ':''}${salary.actualDate}`})
@@ -15,11 +18,11 @@ const estimate=computed(()=>props.snapshot?.countdown?.quality.approximate?quali
 <template>
   <section class="dashboard" aria-label="工作日仪表盘">
     <CountdownCard :state="snapshot?.state || 'incomplete'" :text="durationText(snapshot?.countdown?.seconds)" :target="target" :estimate="estimate" :warning="snapshot ? affectedWarnings(snapshot,'countdown') : '暂时无法计算，请查看设置。'" hint="摸一会鱼，下班就更近啦！">
-      <template #illustration><MoyuStill /></template>
+      <template #illustration><MoyuIllustration :playing="animated" /></template>
     </CountdownCard>
     <section class="we-surface dashboard-progress" aria-label="今日工作进度">
       <div class="dashboard-progress-heading"><h2>今日工作进度</h2><strong>{{ percentage===null?'无工作进度':percentage+'%' }}</strong></div>
-      <progress v-if="snapshot?.progress" :value="snapshot.progress.percent" max="100" aria-label="有效工作进度"></progress>
+      <FishProgress :percent="snapshot?.progress?.percent??null" :animate="animated" />
       <p class="we-muted">{{ snapshot?.progress?'有效工作进度 · 不含午休':'无有效班次或暂不可计算，不代表 0%' }}</p>
       <p v-if="snapshot?.progress?.quality.approximate" class="dashboard-warning">{{ qualityText(snapshot.progress.quality) }}</p>
       <p v-if="snapshot && affectedWarnings(snapshot,'progress')" class="dashboard-warning">{{ affectedWarnings(snapshot,'progress') }}</p>
@@ -38,9 +41,6 @@ const estimate=computed(()=>props.snapshot?.countdown?.quality.approximate?quali
 .dashboard-progress-heading { display:flex;justify-content:space-between;gap:var(--we-space-3);align-items:center; }
 h2 { font-size:var(--we-text-body); }
 strong { color:var(--we-accent);font-variant-numeric:tabular-nums; }
-progress { display:block;width:100%;height:8px;appearance:none;border:0;border-radius:8px;overflow:hidden;background:var(--we-track);margin:var(--we-space-2) 0;accent-color:var(--we-accent); }
-progress::-webkit-progress-bar { background:var(--we-track);border-radius:var(--we-radius-control); }
-progress::-webkit-progress-value { background:var(--we-accent);border-radius:var(--we-radius-control); }
 .dashboard-metrics { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--we-space-3); }
 .dashboard-warning { font-size:var(--we-text-small);color:var(--we-warning-text);overflow-wrap:anywhere; }
 @media (max-width:639px) { .dashboard-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } }

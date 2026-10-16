@@ -1,6 +1,7 @@
-import type { Capability, ContractRequests, ContractResponses, MainWindowApi, MiniWindowApi, Result, DashboardSnapshot } from './contracts'
+import type { Capability, ContractRequests, ContractResponses, MainWindowApi, MiniWindowApi, Result, DashboardSnapshot, WindowVisibility } from './contracts'
 import { CONTRACT_VERSION } from './contracts'
-import { V2_CHANNELS, SNAPSHOT_PUSH, ipcFailure,readIpcResult } from './ipc'
+import { V2_CHANNELS, SNAPSHOT_PUSH, WINDOW_VISIBILITY_PUSH, ipcFailure,readIpcResult } from './ipc'
+import { validateStructure, v } from './validation'
 export interface BridgeTransport {invoke(channel:string,input:unknown):Promise<unknown>;listen(channel:string,listener:(payload:unknown)=>void):()=>void}
 export function createV2Bridge(role:'main',transport:BridgeTransport):MainWindowApi
 export function createV2Bridge(role:'mini',transport:BridgeTransport):MiniWindowApi
@@ -11,6 +12,9 @@ export function createV2Bridge(role:'main'|'mini',transport:BridgeTransport):Mai
   const listeners=new Set<(result:Result<DashboardSnapshot>)=>void>();let unlisten:(()=>void)|null=null,queue:Promise<unknown>=Promise.resolve()
   const serial=<T>(fn:()=>Promise<T>):Promise<T>=>{const job=queue.then(fn);queue=job.catch(()=>{});return job}
   function detach(){const release=unlisten;unlisten=null;try{release?.();return true}catch{return false}}
+  const visibilityListeners=new Set<(result:Result<WindowVisibility>)=>void>();let stopVisibility:(()=>void)|null=null,visibilitySequence=-1
+  function visibilityResult(payload:unknown):Result<WindowVisibility>{const result=readIpcResult<unknown>(payload);return result.ok?validateStructure(result.data,v.object<WindowVisibility>({visible:v.boolean,sequence:v.number(1,Number.MAX_SAFE_INTEGER)})):result}
+  function emitVisibility(result:Result<WindowVisibility>){if(result.ok){if(result.data.sequence<=visibilitySequence)return;visibilitySequence=result.data.sequence}for(const listener of visibilityListeners)try{listener(result)}catch{/* Consumer isolation. */}}
   const common={contractVersion:CONTRACT_VERSION,role,
     snapshot:Object.freeze({read:()=>call('snapshot.read',null),subscribe:(listener:(result:Result<DashboardSnapshot>)=>void)=>serial(async()=>{
       if(typeof listener!=='function')return ipcFailure()
@@ -21,7 +25,16 @@ export function createV2Bridge(role:'main'|'mini',transport:BridgeTransport):Mai
         const result=await call('snapshot.subscribe',null);if(!result.ok){listeners.clear();detach()}return result}
       return {ok:true as const,data:null}
     }),unsubscribe:()=>serial(async()=>{listeners.clear();const removed=detach(),result=await call('snapshot.unsubscribe',null);return removed?result:ipcFailure()})}),
-    app:Object.freeze({quit:()=>call('app.quit',null)}),window:Object.freeze({perform:(request:ContractRequests['window.perform'])=>call('window.perform',request)})}
+    app:Object.freeze({quit:()=>call('app.quit',null)}),window:Object.freeze({perform:(request:ContractRequests['window.perform'])=>call('window.perform',request),
+      readVisibility:async()=>visibilityResult(await call('window.readVisibility',null)),
+      subscribeVisibility:(listener:(result:Result<WindowVisibility>)=>void)=>serial(async()=>{
+        if(typeof listener!=='function')return ipcFailure();visibilityListeners.add(listener)
+        try{if(!stopVisibility)stopVisibility=transport.listen(WINDOW_VISIBILITY_PUSH,payload=>emitVisibility(visibilityResult(payload)))
+          const result=visibilityResult(await call('window.readVisibility',null));emitVisibility(result);if(!result.ok){visibilityListeners.clear();const stop=stopVisibility;stopVisibility=null;stop?.();return result}return {ok:true as const,data:null}
+        }catch{visibilityListeners.clear();const stop=stopVisibility;stopVisibility=null;try{stop?.()}catch{}return ipcFailure()}
+      }),
+      unsubscribeVisibility:()=>serial(async()=>{visibilityListeners.clear();visibilitySequence=-1;const stop=stopVisibility;stopVisibility=null;try{stop?.();return {ok:true as const,data:null}}catch{return ipcFailure()}})
+    })}
   if(role==='mini')return Object.freeze({...common,role:'mini'})
   return Object.freeze({...common,role:'main',
     config:Object.freeze({read:()=>call('config.read',null),save:(request:ContractRequests['config.save'])=>call('config.save',request)}),

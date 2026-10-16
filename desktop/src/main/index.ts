@@ -5,7 +5,7 @@ import { join, dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { APPLICATION_ID, APPLICATION_NAME, resolveApplicationPaths } from './app-identity'
 import { acquireSingleInstance } from './single-instance'
-import { createWindowManager } from './windows/window-manager'
+import { createWindowManager, windowPresentationVisible } from './windows/window-manager'
 import type { WindowManager } from './windows/window-manager'
 import { restoreWindowBounds, applyRestoredBounds } from './windows/window-bounds'
 import { createOperationBarrier } from './lifecycle/operation-barrier'
@@ -132,7 +132,7 @@ else if (instance.data.primary) {
       })
       if (background) interactiveAttempts = blockInteractiveWindowOperations(window)
       const releaseWindow=router.register('main',{sender:window.webContents,frame:()=>window.webContents.mainFrame,url:()=>window.webContents.mainFrame.url,
-        destroyed:()=>window.isDestroyed()||window.webContents.isDestroyed(),visible:()=>!window.isDestroyed()&&window.isVisible()&&!window.isMinimized(),
+        destroyed:()=>window.isDestroyed()||window.webContents.isDestroyed(),visible:()=>windowPresentationVisible(window),
         push:(channel,result)=>{if(!window.isDestroyed())window.webContents.send(channel,result)}},rendererUrl)
       window.once('closed',releaseWindow)
       window.webContents.on('did-start-navigation',(_event,_url,_inPlace,isMainFrame)=>{if(isMainFrame)router.revokeSubscription(window.webContents)})

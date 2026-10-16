@@ -73,7 +73,7 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
         </section>
         <section v-if="active==='appearance'" class="settings-panel">
           <h3>外观主题</h3><label>显示模式<select v-model="form.appearance.mode" aria-label="显示模式" class="we-control" @change="update"><option value="system">跟随系统</option><option value="light">亮色</option><option value="dark">深色</option></select></label><label>配色<select v-model="form.appearance.accent" aria-label="配色" class="we-control" @change="update"><option value="ocean">海蓝</option><option value="coral">珊瑚</option></select></label><label class="we-check"><input v-model="form.appearance.reduceMotion" type="checkbox" @change="update" />减少动画</label>
-          <p class="we-muted">即时预览；取消或放弃恢复已保存主题。系统或应用任一减少动画设置生效。当前形象为静态，原 GIF 动画后续接入。</p><FieldErrors :issues="issues" path="$.appearance" />
+          <p class="we-muted">即时预览；取消或放弃恢复已保存主题。系统或应用任一减少动画设置生效，暂停动画并保留静态形象。</p><FieldErrors :issues="issues" path="$.appearance" />
         </section>
         <section v-if="active==='desktop'" class="settings-panel">
           <h3>窗口与托盘偏好</h3><label>关闭主窗口<select v-model="form.desktop.closeAction" class="we-control" @change="update"><option value="hideToTray">隐藏到托盘</option><option value="quit">退出程序</option></select></label><label class="we-check"><input v-model="form.desktop.miniEnabled" type="checkbox" @change="update" />迷你窗偏好</label><label class="we-check"><input v-model="form.desktop.alwaysOnTop" type="checkbox" @change="update" />迷你窗置顶偏好</label>

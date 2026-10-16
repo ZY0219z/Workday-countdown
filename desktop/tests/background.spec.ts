@@ -79,6 +79,16 @@ test('formal main stays hidden; real Preload and renderer sandbox deny legacy/No
   expect(await page.evaluate(()=>({legacy:typeof window.workday,require:typeof globalThis.require,process:typeof globalThis.process,generic:'invoke'in window.workdayV2}))).toEqual({legacy:'undefined',require:'undefined',process:'undefined',generic:false})
   value(await page.evaluate(()=>window.workdayV2.snapshot.read()))
 })
+test('D12 real hidden Electron publishes own native visibility and never loads a playing GIF',async()=>{
+  const page=await launch();const state=value(await page.evaluate(()=>window.workdayV2.window.readVisibility()));expect(state.visible).toBe(false);expect(state.sequence).toBeGreaterThan(0)
+  await expect(page.locator('img.moyu-animated')).toHaveCount(0);await expect(page.getByRole('img',{name:'原始蓝色摸鱼猫抱灰鱼（静态）'})).toBeVisible()
+  const subscription=await page.evaluate(async()=>{const seen:unknown[]=[];(globalThis as any).__d12Visibility=seen;return window.workdayV2.window.subscribeVisibility(result=>seen.push(result))});value(subscription)
+  await expect.poll(()=>page.evaluate(()=>(globalThis as any).__d12Visibility.length)).toBeGreaterThan(0)
+  expect(await page.evaluate(()=>(globalThis as any).__d12Visibility.every((result:Result<{visible:boolean}>)=>result.ok&&!result.data.visible))).toBe(true)
+  value(await page.evaluate(()=>window.workdayV2.window.unsubscribeVisibility()));await hidden()
+  const metrics=await application!.evaluate(({app})=>app.getAppMetrics().map(p=>({pid:p.pid,type:p.type,cpu:p.cpu,memory:p.memory})))
+  writeFileSync('test-results/d12-hidden-electron-metrics.json',JSON.stringify({scope:'single native-hidden Electron sample, animation off; not G05',metrics},null,2))
+})
 test('first launch shows default dashboard, persists safely, restarts and preserves POC sentinel',async()=>{
   const sentinel='{"workStartTime":"08:30","workEndTime":"18:00"}';writeFileSync(join(profile,'settings.json'),sentinel)
   const started=performance.now(),page=await launch(false)

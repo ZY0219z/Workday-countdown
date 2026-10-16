@@ -7,11 +7,13 @@ export const V2_CHANNELS=Object.freeze({
   'settingsDraft.setExpectedEnd':'workday-v2:draft-expected-end',
   'snapshot.read':'workday-v2:snapshot-read','snapshot.subscribe':'workday-v2:snapshot-subscribe','snapshot.unsubscribe':'workday-v2:snapshot-unsubscribe',
   'window.perform':'workday-v2:window-perform','app.quit':'workday-v2:quit',
+  'window.readVisibility':'workday-v2:window-visibility-read',
   'data.previewImport':'workday-v2:import-preview','data.applyImport':'workday-v2:import-apply','data.export':'workday-v2:export',
   'data.previewRecovery':'workday-v2:recovery-preview','data.cancelImport':'workday-v2:import-cancel','calendar.readMetadata':'workday-v2:calendar-metadata',
   'calendar.previewImport':'workday-v2:calendar-preview','calendar.applyImport':'workday-v2:calendar-apply'
 } as const satisfies Record<Capability,string>)
 export const SNAPSHOT_PUSH='workday-v2:snapshot-changed'
+export const WINDOW_VISIBILITY_PUSH='workday-v2:window-visibility-changed'
 export function ipcFailure():Result<never>{return {ok:false,error:{code:'INTERNAL',message:'调用失败，未执行不安全操作。'}}}
 // Validate the envelope as well as JSON transferability. Payload fields still
 // belong to the fixed method's DTO, not a generic Electron transport surface.

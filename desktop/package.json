@@ -25,6 +25,8 @@
     "test:d11": "node scripts/test-d11.mjs",
     "test:d11:visual": "npm run build && node scripts/test-d11-visual.mjs",
     "test:d11:services": "node scripts/test-d11-services.mjs",
+    "test:d12": "node scripts/test-d12.mjs",
+    "test:d12:visual": "npm run build && node scripts/test-d11-visual.mjs --d12",
     "profile:d11": "node scripts/test-lifecycle.mjs d11-performance",
     "test:d10": "node scripts/test-d10.mjs",
     "test:d10:visual": "node scripts/test-d10-visual.mjs",

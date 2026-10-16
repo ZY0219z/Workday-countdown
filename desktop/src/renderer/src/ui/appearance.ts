@@ -21,7 +21,7 @@ export function resolveAppearance(input: Appearance, systemDark: boolean, system
 const attributes = ['data-theme', 'data-accent', 'data-reduced-motion'] as const
 
 // One scoped host. Required initial preferences are not saved defaults.
-export function createThemeController(target: ThemeTarget, media: { dark: MediaPort; motion: MediaPort }, initial: Appearance) {
+export function createThemeController(target: ThemeTarget, media: { dark: MediaPort; motion: MediaPort }, initial: Appearance, onResolved?: (value: ResolvedAppearance) => void) {
   const checked = validateStructure(initial, editableValidators.appearance)
   if (!checked.ok) return checked
   let preferences = checked.data, disposed = false
@@ -31,6 +31,7 @@ export function createThemeController(target: ThemeTarget, media: { dark: MediaP
     target.setAttribute('data-theme', resolved.theme)
     target.setAttribute('data-accent', resolved.accent)
     target.setAttribute('data-reduced-motion', String(resolved.reduceMotion))
+    onResolved?.(resolved)
     return resolved
   }
   const changed = () => { if (!disposed) apply() }

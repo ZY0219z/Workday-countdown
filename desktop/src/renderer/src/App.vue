@@ -5,6 +5,7 @@ import DashboardView from './views/DashboardView.vue'
 import SettingsView from './views/SettingsView.vue'
 import { createSettingsController } from './ui/settings-controller'
 import { useTheme } from './composables/useTheme'
+import { useWindowVisibility } from './composables/useWindowVisibility'
 import type { EditorSettings } from './ui/settings-editor'
 
 const api=window.workdayV2,host=ref<HTMLElement|null>(null),settingsOpen=ref(false),loading=ref(true),snapshot=shallowRef<DashboardSnapshot|null>(null),metadata=ref<CalendarDatasetMetadata[]>([])
@@ -15,7 +16,7 @@ const error=ref(''),confirmLeave=ref(false),quitAfterLeave=ref(false),dialogRef=
 const controller=createSettingsController(api,()=>{state.value=structuredClone(controller.state)})
 const state=shallowRef(structuredClone(controller.state))
 const preferences=computed(()=>settingsOpen.value?state.value.editor.appearance:state.value.session?.saved?.appearance??state.value.editor.appearance)
-useTheme(host,preferences)
+const reduceMotion=useTheme(host,preferences),windowVisible=useWindowVisibility(api.window)
 const syncing=computed(()=>state.value.pending>0||state.value.busy||dataBusy.value||loading.value||composing.value)
 const pending=computed(()=>syncing.value||state.value.unsynced)
 const defaultPending=computed(()=>state.value.session?.defaultPersistence?.status==='pending')
@@ -75,7 +76,7 @@ onBeforeUnmount(()=>{controller.dispose();void api.snapshot.unsubscribe()})
           <SettingsView :expected-end="state.expectedEnd" :expected-end-input="state.expectedEndInput" :quit-disabled="syncing||quitting||defaultPending" :model="state.editor" :issues="state.issues" :busy="state.busy||dataBusy||defaultPending" :dirty="state.dirty||state.pending>0" :initialized="!!state.session?.saved" :default-unpersisted="!!state.session?.defaultPersistence" :session-ready="!!state.session" :validation-attempt="validationAttempt" :can-save="canSave" :metadata="metadata" :api="api" @expected-end="value=>{error='';controller.editExpectedEnd(value)}" @change="edit" @save="saved" @cancel="leave" @quit="quit" @imported="imported" @data-busy="value=>dataBusy=value" />
           <p v-if="state.session?.configurationStatus==='recoverable'" class="app-error">当前只读使用有效备份，请到数据页预览并确认恢复；损坏源文件已保留。</p>
         </section>
-        <DashboardView v-else :snapshot="snapshot" />
+        <DashboardView v-else :snapshot="snapshot" :motion-allowed="windowVisible&&!reduceMotion" />
       </main>
     </div>
     <div v-if="confirmLeave" class="app-modal-backdrop"><section ref="dialogRef" class="we-surface app-modal" role="dialog" aria-modal="true" aria-labelledby="leave-title" @keydown="trap"><h2 id="leave-title">设置尚未保存</h2><p>{{ quitAfterLeave?'保存后退出，或明确放弃本次修改。':'保存后返回，或明确放弃本次修改。' }}</p><div class="app-actions"><button type="button" class="we-button we-button--primary" :disabled="state.busy" @click="chooseLeave('save')">保存</button><button type="button" class="we-button" :disabled="state.busy" @click="chooseLeave('discard')">放弃</button><button type="button" class="we-button" :disabled="state.busy" @click="chooseLeave('continue')">继续编辑</button></div><p v-if="errorText" role="alert">{{ errorText }}</p></section></div>

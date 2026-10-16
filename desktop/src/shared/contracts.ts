@@ -176,6 +176,8 @@ export type ExpectedEndContext = {available:false;message:string} | {
 
 export type WindowCommand = { action: 'showMain' } | { action: 'showMini' } | { action: 'hideMini' } | { action: 'setMiniTop'; enabled: boolean }
 export type MiniWindowCommand = Exclude<WindowCommand, { action: 'showMini' }>
+// Presentation only; own registered window, no native handles or window IDs.
+export interface WindowVisibility { visible: boolean; sequence: number }
 export interface ImportPreview {
   previewToken: string
   sourceKind: MigrationSource
@@ -208,6 +210,7 @@ export interface ContractRequests {
   'snapshot.subscribe': null
   'snapshot.unsubscribe': null
   'window.perform': WindowCommand
+  'window.readVisibility': null
   'app.quit': null
   'data.previewImport': { sourceKind: MigrationSource }
   'data.applyImport': { previewToken: string; expectedRevision: number; selectedFields: ImportField[]; undatedOvertimeShiftDate: LocalDate | null; confirmPreviouslyImported?: boolean }
@@ -229,6 +232,7 @@ export interface ContractResponses {
   'snapshot.subscribe': null
   'snapshot.unsubscribe': null
   'window.perform': null
+  'window.readVisibility': WindowVisibility
   'app.quit': null
   'data.previewImport': ImportPreview
   'data.applyImport': ConfigSnapshot
@@ -252,9 +256,14 @@ export interface CommonApi {
   snapshot: SnapshotApi
   app: { quit(): Promise<Result<null>> }
 }
+export interface WindowVisibilityApi {
+  readVisibility(): Promise<Result<WindowVisibility>>
+  subscribeVisibility(listener: (result: Result<WindowVisibility>) => void): Promise<Result<null>>
+  unsubscribeVisibility(): Promise<Result<null>>
+}
 export interface MainWindowApi extends CommonApi {
   readonly role: 'main'
-  window: { perform: Call<'window.perform'> }
+  window: WindowVisibilityApi & { perform: Call<'window.perform'> }
   config: { read(): Promise<Result<ConfigSnapshot>>; save: Call<'config.save'> }
   settingsDraft: { read(): Promise<Result<SettingsDraftSession>>; update: Call<'settingsDraft.update'>; discard(): Promise<Result<SettingsDraftSession>>; setExpectedEnd:Call<'settingsDraft.setExpectedEnd'> }
   data: { previewRecovery(): Promise<Result<ImportPreview>>; cancelImport: Call<'data.cancelImport'>; previewImport: Call<'data.previewImport'>; applyImport: Call<'data.applyImport'>; export: Call<'data.export'> }
@@ -262,6 +271,6 @@ export interface MainWindowApi extends CommonApi {
 }
 export interface MiniWindowApi extends CommonApi {
   readonly role: 'mini'
-  window: { perform(request: MiniWindowCommand): Promise<Result<null>> }
+  window: WindowVisibilityApi & { perform(request: MiniWindowCommand): Promise<Result<null>> }
 }
 export type WorkdayV2Api = MainWindowApi | MiniWindowApi

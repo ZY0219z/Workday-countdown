@@ -14,6 +14,9 @@ export interface ManagedWindow {
   removeListener(event: string, callback: () => void): unknown
 }
 export type WindowState = 'mainVisible' | 'mainMinimized' | 'mainHidden' | 'miniVisible' | 'trayOnly' | 'quitting' | 'starting'
+export function windowPresentationVisible(window:Pick<ManagedWindow,'isDestroyed'|'isVisible'|'isMinimized'>):boolean {
+  return !window.isDestroyed()&&window.isVisible()&&!window.isMinimized()
+}
 export interface TrayRecovery { isAvailable(): boolean; registerRestore(callback: () => void): () => void }
 export function createWindowManager(createMain: () => ManagedWindow) {
   let main: ManagedWindow | null = null, mini: ManagedWindow | null = null

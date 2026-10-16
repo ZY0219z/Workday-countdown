@@ -7,10 +7,10 @@ import type { Validator } from './validation'
 const mainCapabilities = [
   'config.read', 'config.save', 'settingsDraft.read', 'settingsDraft.update', 'settingsDraft.discard',
   'settingsDraft.setExpectedEnd',
-  'snapshot.read', 'snapshot.subscribe', 'snapshot.unsubscribe', 'window.perform', 'app.quit',
+  'snapshot.read', 'snapshot.subscribe', 'snapshot.unsubscribe', 'window.perform', 'window.readVisibility', 'app.quit',
   'data.previewImport', 'data.applyImport', 'data.export', 'data.previewRecovery', 'data.cancelImport', 'calendar.readMetadata', 'calendar.previewImport', 'calendar.applyImport'
 ] as const satisfies readonly Capability[]
-const miniCapabilities = ['snapshot.read', 'snapshot.subscribe', 'snapshot.unsubscribe', 'window.perform', 'app.quit'] as const satisfies readonly Capability[]
+const miniCapabilities = ['snapshot.read', 'snapshot.subscribe', 'snapshot.unsubscribe', 'window.perform', 'window.readVisibility', 'app.quit'] as const satisfies readonly Capability[]
 export const WINDOW_CAPABILITIES = Object.freeze({ main: Object.freeze(mainCapabilities), mini: Object.freeze(miniCapabilities) })
 export function isCapabilityAllowed(role: WindowRole, method: Capability): boolean {
   return Object.prototype.hasOwnProperty.call(WINDOW_CAPABILITIES, role) && (WINDOW_CAPABILITIES[role] as readonly string[]).includes(method)
@@ -32,6 +32,7 @@ const requests = {
   'settingsDraft.setExpectedEnd': v.object<ContractRequests['settingsDraft.setExpectedEnd']>({expectedRevision:revisionFormat,targetKey:v.string(undefined,128),input:(value,field,issues)=>value===''?'':v.nullable(v.string(undefined,32))(value,field,issues)}),
   'snapshot.read': nullRequest, 'snapshot.subscribe': nullRequest, 'snapshot.unsubscribe': nullRequest,
   'app.quit': nullRequest,
+  'window.readVisibility': nullRequest,
   'data.previewImport': v.object<ContractRequests['data.previewImport']>({ sourceKind: v.enum(['python-v1', 'electron-poc', 'v2'] as const) }),
   'data.applyImport': v.object<ContractRequests['data.applyImport']>({
     previewToken: v.string(undefined, 256), expectedRevision: revisionFormat,
