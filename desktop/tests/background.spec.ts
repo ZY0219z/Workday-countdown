@@ -205,7 +205,7 @@ test('actual router still rejects iframe, foreign senders and hostile DTOs',asyn
 
 test('development Vite main-frame identity and URL permit real IPC, not arbitrary origins',async()=>{
   const url=await developmentUrl(),page=await launch(false,url)
-  const mask=await page.locator('.fish-waves').evaluate(element=>getComputedStyle(element).maskImage),waveUrl=/url\("([^"]+)"\)/.exec(mask)?.[1]
+  const mask=await page.locator('.fish-wave').first().evaluate(element=>getComputedStyle(element).maskImage),waveUrl=/url\("([^"]+)"\)/.exec(mask)?.[1]
   expect(waveUrl).toBeTruthy();const wave=await page.request.get(waveUrl!);expect(wave.status()).toBe(200);expect(await wave.body()).toEqual(readFileSync(resolve('../assets/image/wave-fin.png')))
   expect((await page.request.get(url+'/@fs/'+resolve('../workday_counter.py').replaceAll('\\','/'))).status()).toBe(403)
   await application!.evaluate(({ipcMain,BrowserWindow},channel)=>{

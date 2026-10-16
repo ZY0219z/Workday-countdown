@@ -23,6 +23,10 @@ test('waves use the existing work/overtime gate and remain static for all stoppe
   }
   assert.ok(!(await render({...f.snapshots.working,progress:null})).includes('fish-waves--flowing'))
 })
+test('wave group contains exactly three independent paths and three original square sprites',async()=>{
+  for(const allowed of [true,false]){const html=await render(f.snapshots.working,allowed);assert.equal((html.match(/class="fish-wave-path"/g)||[]).length,3);assert.equal((html.match(/class="fish-wave"/g)||[]).length,3)}
+  assert.ok(!(await render({...f.snapshots.working,progress:null})).includes('class="fish-wave"'))
+})
 for(const state of [{visible:true,minimized:false,destroyed:false,expected:true},{visible:false,minimized:false,destroyed:false,expected:false},{visible:true,minimized:true,destroyed:false,expected:false},{visible:true,minimized:false,destroyed:true,expected:false}])test(`native presentation ${JSON.stringify(state)} ignores document visibility`,()=>{
   assert.equal(windowPresentationVisible({isVisible:()=>state.visible,isMinimized:()=>state.minimized,isDestroyed:()=>state.destroyed}),state.expected)
 })

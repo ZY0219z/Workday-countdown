@@ -10,7 +10,7 @@ import {chromium,expect} from '@playwright/test'
 // by browser initScript. No fixture switches or alternate API in shipped code.
 await build({configFile:false,plugins:[vue()],logLevel:'warn',build:{ssr:'tests/unit/d11-components.entry.mjs',outDir:'test-results/d11-ssr',emptyOutDir:false,rollupOptions:{output:{entryFileNames:'components.mjs'}}}})
 const {fixtures,MAIN_WINDOW_DEFAULT_SIZE}=await import(pathToFileURL(resolve('test-results/d11-ssr/components.mjs')).href),fixture=fixtures()
-const d12=process.argv.includes('--d12'),root=resolve('out/renderer'),directory=resolve(d12?'test-results/d12-r3-visual':'test-results/d11-visual');await mkdir(directory,{recursive:true})
+const d12=process.argv.includes('--d12'),root=resolve('out/renderer'),directory=resolve(d12?'test-results/d12-r4-visual':'test-results/d11-visual');await mkdir(directory,{recursive:true})
 const files=await readdir(root,{recursive:true,withFileTypes:true}),assets=new Map(files.filter(file=>file.isFile()).map(file=>{const full=resolve(file.parentPath,file.name);return ['/'+relative(root,full).split(sep).join('/'),full]}))
 let activePage
 const browser=await chromium.launch({channel:'msedge',headless:true,chromiumSandbox:true}),checks=[],errors=[],requests=[]
@@ -40,7 +40,9 @@ try{
   },fixture)
   const goto=async(query='')=>{await page.goto('http://d11.test/index.html'+query);await expect(page.locator('[data-workday-root]')).toHaveAttribute('data-pending','false')}
   const group=async value=>{const open=page.getByRole('button',{name:'设置',exact:true});if(await open.count())await open.click();if(['schedule','employee','salary'].includes(value))return;const details=page.locator('details.settings-more');if(!await details.evaluate(element=>element.open))await details.locator('summary').click();await page.getByLabel('设置分组').selectOption(value)}
-  const screenshot=async name=>{await page.waitForFunction(()=>[...document.querySelectorAll('canvas')].every(canvas=>canvas.dataset.ready==='true'));await page.screenshot({path:resolve(directory,name),fullPage:true,animations:'disabled'})}
+  // D12 observes live CSS motion. Playwright's disabled mode cancels and then
+  // replays infinite animations, which can detach them from later CSS removal.
+  const screenshot=async name=>{await page.waitForFunction(()=>[...document.querySelectorAll('canvas')].every(canvas=>canvas.dataset.ready==='true'));await page.screenshot({path:resolve(directory,name),fullPage:true,animations:d12?'allow':'disabled'})}
   if(d12){const {installD12Instrumentation,runD12Visual}=await import('./test-d12-visual.mjs');await installD12Instrumentation(page);await runD12Visual({page,browser,check,goto,group,screenshot,directory,fixture,defaultSize:MAIN_WINDOW_DEFAULT_SIZE})}else{
   await goto()
   await check('formal dashboard consumes a real D09 fixture with dominant timer and static original image',async()=>{await expect(page.locator('[role=timer]')).toHaveText('03:00:00');await expect(page.locator('.dashboard-metrics .we-metric')).toHaveCount(3);await expect(page.getByRole('heading',{name:'累计计划工作日'})).toHaveCount(0);await expect(page.locator('.dashboard > p')).toHaveCount(0);await expect(page.getByRole('img',{name:'原始蓝色摸鱼猫抱灰鱼（静态）'})).toBeVisible();await screenshot('d11-r4-dashboard-ocean-light.png')})

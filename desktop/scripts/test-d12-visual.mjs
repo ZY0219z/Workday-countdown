@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {expect} from '@playwright/test'
-import {writeFile} from 'node:fs/promises'
+import {readFile,writeFile} from 'node:fs/promises'
 import {resolve} from 'node:path'
 import {createHash} from 'node:crypto'
 import {cpus} from 'node:os'
@@ -22,7 +22,7 @@ export async function runD12Visual({page,browser,check,goto,group,screenshot,dir
   const animated=page.locator('img.moyu-animated'),marker=page.locator('.fish-marker'),track=page.locator('.fish-track'),progress=page.locator('progress')
   const push=name=>page.evaluate(name=>window.__d11.push(name),name)
   const percent=value=>page.evaluate(value=>window.__d12.progress(value),value)
-  async function stopped(){await expect(animated).toHaveCount(0);await expect(page.locator('.fish-mascot--floating,.fish-waves--flowing')).toHaveCount(0);await page.waitForFunction(()=>document.querySelector('canvas')?.dataset.ready==='true');assert.equal(await page.evaluate(()=>document.getAnimations().filter(a=>a.playState==='running').length),0);if(await page.locator('.fish-waves').count())assert.equal(await page.locator('.fish-waves').evaluate(el=>getComputedStyle(el).animationName),'none')}
+  async function stopped(){await expect(animated).toHaveCount(0);await expect(page.locator('.fish-mascot--floating,.fish-waves--flowing')).toHaveCount(0);await page.waitForFunction(()=>document.querySelector('canvas')?.dataset.ready==='true');const styles=await page.locator('.fish-wave-path,.fish-wave').evaluateAll(elements=>elements.map(el=>getComputedStyle(el).animationName));assert.ok(styles.every(name=>name==='none'));const running=await page.evaluate(()=>document.getAnimations().filter(a=>a.playState==='running').map(a=>({name:a.animationName,target:a.effect.target.className,connected:a.effect.target.isConnected,css:getComputedStyle(a.effect.target).animationName,parent:a.effect.target.parentElement.className,parentDisplay:getComputedStyle(a.effect.target.parentElement).display})));assert.equal(running.length,0,JSON.stringify(running));if(await page.locator('.fish-waves').count())assert.equal(await page.locator('.fish-waves').evaluate(el=>getComputedStyle(el).animationName),'none')}
   async function position(value){await expect(progress).toHaveAttribute('value',String(value));await expect.poll(()=>marker.evaluate((element,p)=>{const t=element.parentElement,actual=new DOMMatrix(getComputedStyle(element).transform).m41;return Math.abs(actual-p/100*Math.max(0,t.clientWidth-element.offsetWidth))<1},value)).toBe(true)}
   await goto()
   await check('original GIF really changes pixels; only one cat, correct source and aspect ratio',async()=>{
@@ -32,32 +32,55 @@ export async function runD12Visual({page,browser,check,goto,group,screenshot,dir
     await page.locator('.fish-mascot').evaluate(el=>{el.style.animation='none'})
     const hashes=[];for(let i=0;i<5;i++){hashes.push(createHash('sha256').update(await animated.screenshot({animations:'allow'})).digest('hex'));await page.waitForTimeout(140)}
     assert.ok(new Set(hashes).size>1,'GIF must visibly change frames, not just have an animated attribute')
-    await writeFile(resolve(directory,'gif-frame-hashes.json'),JSON.stringify({source:'original 226x217, 12 frames, 100ms/frame; CSS float disabled only during pixel sampling',hashes},null,2));await animated.screenshot({path:resolve(directory,'d12-r3-gif-frame.png')});await page.locator('.fish-mascot').evaluate(el=>el.style.removeProperty('animation'))
+    await writeFile(resolve(directory,'gif-frame-hashes.json'),JSON.stringify({source:'original 226x217, 12 frames, 100ms/frame; CSS float disabled only during pixel sampling',hashes},null,2));await animated.screenshot({path:resolve(directory,'d12-r4-gif-frame.png')});await page.locator('.fish-mascot').evaluate(el=>el.style.removeProperty('animation'))
   })
-  await check('larger repeated white waves are clearer than the previous sparse layer',async()=>{
-    const waves=page.locator('.fish-waves'),water=await page.locator('.fish-water').boundingBox(),fill=await page.locator('.fish-fill').boundingBox(),clip={x:water.x,y:water.y,width:Math.floor(Math.min(240,fill.width-64)),height:water.height};assert.ok(clip.width>=80)
-    await waves.evaluate(el=>{const a=el.getAnimations()[0];a.pause();a.currentTime=0})
-    const current=await page.screenshot({clip});const original=await waves.getAttribute('style')
+  await check('three independent 32px square waves match the original alpha contour, not a stretched texture',async()=>{
+    const waves=page.locator('.fish-wave'),paths=page.locator('.fish-wave-path');assert.equal((await page.locator('.fish-water').boundingBox()).height,32);await expect(waves).toHaveCount(3);await expect(paths).toHaveCount(3)
+    const source='data:image/png;base64,'+(await readFile(resolve('../assets/image/wave-fin.png'))).toString('base64')
+    const contour=await page.evaluate(async source=>{
+      const original=new Image();original.src=source;await original.decode()
+      const panel=document.createElement('div');panel.id='wave-shape-proof';Object.assign(panel.style,{position:'fixed',left:'20px',top:'20px',padding:'20px',display:'flex',gap:'28px',background:'#2196f3',color:'white',zIndex:'9999'})
+      const reference=document.createElement('canvas');reference.width=reference.height=32;reference.id='wave-original-32';const ctx=reference.getContext('2d');ctx.imageSmoothingQuality='high';ctx.drawImage(original,0,0,32,32);ctx.globalCompositeOperation='source-in';ctx.fillStyle='white';ctx.fillRect(0,0,32,32)
+      const sprite=document.querySelector('.fish-wave').cloneNode(true);sprite.id='wave-vue-32';Object.assign(sprite.style,{position:'relative',display:'block',left:'0',top:'0',animation:'none',transform:'none'})
+      for(const [label,node]of [['Original alpha / 32x32',reference],['Production sprite / 32x32',sprite]]){const cell=document.createElement('div'),text=document.createElement('p');text.textContent=label;text.style.margin='0 0 12px';cell.append(text,node);panel.append(cell)}document.body.append(panel)
+      const css=getComputedStyle(sprite),box=sprite.getBoundingClientRect();return{sourceWidth:original.width,sourceHeight:original.height,width:box.width,height:box.height,maskSize:css.maskSize,repeat:css.maskRepeat}
+    },source)
     try{
-      await waves.evaluate(el=>{const mask=getComputedStyle(el).maskImage;Object.assign(el.style,{animation:'none',inset:'0',background:'rgb(255 255 255 / 88%)',maskImage:[mask,mask,mask].join(','),maskSize:'22px 16px,18px 14px,24px 18px',maskPosition:'17% 40%,46% 60%,73% 40%',maskRepeat:'no-repeat'})})
-      const previous=await page.screenshot({clip})
-      const white=async buffer=>page.evaluate(async url=>{const img=new Image();img.src=url;await img.decode();const canvas=document.createElement('canvas');canvas.width=img.width;canvas.height=img.height;const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0);const data=ctx.getImageData(0,0,img.width,img.height).data;let count=0;for(let i=0;i<data.length;i+=4)if(data[i]>235&&data[i+1]>235&&data[i+2]>235)count++;return count},'data:image/png;base64,'+buffer.toString('base64'))
-      const counts={previous:await white(previous),current:await white(current),clip};assert.ok(counts.current>counts.previous*1.5);assert.ok(counts.current<clip.width*clip.height*.35,'waves must remain sparse, not a white texture')
-      await writeFile(resolve(directory,'wave-previous.png'),previous);await writeFile(resolve(directory,'wave-current.png'),current);await writeFile(resolve(directory,'wave-contrast.json'),JSON.stringify(counts,null,2))
-    }finally{await waves.evaluate((el,style)=>{if(style===null)el.removeAttribute('style');else el.setAttribute('style',style)},original)}
-  })
-  await check('waves move right with a subtle vertical cycle and a seamless tile wrap; cat x and fill stay fixed',async()=>{
-    const waves=page.locator('.fish-waves'),mascot=page.locator('.fish-mascot');await expect(waves).toHaveClass(/fish-waves--flowing/);const css=await waves.evaluate(el=>{const style=getComputedStyle(el);return{color:style.backgroundColor,mask:style.maskImage,size:style.maskSize,repeat:style.maskRepeat}});assert.notEqual(css.mask,'none');assert.match(css.color,/255,\s*255,\s*255/);assert.equal(css.size,'88px 24px');assert.equal(css.repeat,'repeat-x')
-    const sample=()=>waves.evaluate(el=>{const a=el.getAnimations()[0],m=new DOMMatrix(getComputedStyle(el).transform);return{time:a.currentTime,x:m.m41,y:m.m42,duration:a.effect.getTiming().duration,easing:a.effect.getTiming().easing}})
-    await waves.evaluate(el=>{const a=el.getAnimations()[0];a.currentTime=0;a.play()});const start=await sample();await page.waitForTimeout(350);const next=await sample();assert.ok(next.time>start.time);assert.ok(next.x>start.x+2&&next.x<start.x+20);assert.ok(Math.abs(next.y)<=1.01);assert.equal(next.duration,4400);assert.equal(next.easing,'linear')
-    const fill=await page.locator('.fish-fill').boundingBox(),water=await page.locator('.fish-water').boundingBox(),clip={x:water.x,y:water.y,width:Math.floor(Math.min(240,fill.width-64)),height:water.height},frames=[],images=[]
-    for(const phase of [0,.25,.5,.75,.999999]){await waves.evaluate((el,phase)=>{const a=el.getAnimations()[0];a.pause();a.currentTime=4400*phase},phase);const value=await sample();assert.ok(Math.abs(value.x-phase*88)<.02);assert.ok(Math.abs(value.y)<=1.01);frames.push({phase,...value});const buffer=await page.screenshot({clip});images.push(buffer);await writeFile(resolve(directory,`wave-motion-${Math.round(phase*100)}.png`),buffer)}
-    assert.ok(frames.some(f=>f.y<-.9)&&frames.some(f=>f.y>.9))
-    const seam=await page.evaluate(async urls=>{const pixels=await Promise.all(urls.map(async url=>{const img=new Image();img.src=url;await img.decode();const canvas=document.createElement('canvas');canvas.width=img.width;canvas.height=img.height;const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0);return ctx.getImageData(0,0,img.width,img.height).data}));let total=0;for(let i=0;i<pixels[0].length;i++)total+=Math.abs(pixels[0][i]-pixels[1][i]);return total/pixels[0].length},[images[0],images.at(-1)].map(buffer=>'data:image/png;base64,'+buffer.toString('base64')));assert.ok(seam<1,'one-tile wrap must not flash')
-    assert.deepEqual(await page.locator('.fish-fill').boundingBox(),fill);await writeFile(resolve(directory,'wave-motion.json'),JSON.stringify({realtime:[start,next],frames,seamMeanChannelDelta:seam,fill,clip},null,2));await waves.evaluate(el=>{const a=el.getAnimations()[0];a.currentTime=0;a.play()})
-    const x=await marker.evaluate(el=>new DOMMatrix(getComputedStyle(el).transform).m41);await expect(mascot).toHaveClass(/fish-mascot--floating/);assert.equal(await mascot.evaluate(el=>getComputedStyle(el).animationDuration),'3s')
-    const before=await mascot.evaluate(el=>new DOMMatrix(getComputedStyle(el).transform).m42);await page.waitForTimeout(450);const y=await mascot.evaluate(el=>new DOMMatrix(getComputedStyle(el).transform).m42);assert.ok(y>=-1.51&&y<=.01);assert.notEqual(y,before);assert.equal(await marker.evaluate(el=>new DOMMatrix(getComputedStyle(el).transform).m41),x)
+      assert.deepEqual(contour,{sourceWidth:200,sourceHeight:200,width:32,height:32,maskSize:'32px 32px',repeat:'no-repeat'})
+      await page.locator('#wave-shape-proof').screenshot({path:resolve(directory,'wave-shape-comparison.png')})
+      const reference=await page.locator('#wave-original-32').screenshot(),actual=await page.locator('#wave-vue-32').screenshot()
+      const similarity=await page.evaluate(async urls=>{const pixels=await Promise.all(urls.map(async url=>{const img=new Image();img.src=url;await img.decode();const canvas=document.createElement('canvas');canvas.width=canvas.height=32;const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0);return ctx.getImageData(0,0,32,32).data}));let delta=0,intersection=0,union=0;for(let i=0;i<pixels[0].length;i+=4){for(let c=0;c<3;c++)delta+=Math.abs(pixels[0][i+c]-pixels[1][i+c]);const a=pixels[0][i]>120,b=pixels[1][i]>120;if(a&&b)intersection++;if(a||b)union++}return{meanChannelDelta:delta/(32*32*3),contourIntersectionOverUnion:intersection/union}},[reference,actual].map(buffer=>'data:image/png;base64,'+buffer.toString('base64')))
+      assert.ok(similarity.meanChannelDelta<8);assert.ok(similarity.contourIntersectionOverUnion>.8)
+      await writeFile(resolve(directory,'wave-original-32.png'),reference);await writeFile(resolve(directory,'wave-vue-32.png'),actual);await writeFile(resolve(directory,'wave-shape.json'),JSON.stringify({contour,similarity,reference:'Original PNG alpha converted to white at the Python 32x32 size; browser resampling, not a Tk screenshot'},null,2))
+    }finally{await page.locator('#wave-shape-proof').evaluate(el=>el.remove())}
     assert.equal(await page.locator('.fish-fill').evaluate(el=>getComputedStyle(el).overflow),'hidden');assert.equal(await page.locator('.fish-water').evaluate(el=>getComputedStyle(el).overflow),'hidden')
+  })
+  await check('live T0/T1/T2 frames show three separate waves flowing right and swaying independently',async()=>{
+    await percent(62.5);await position(62.5)
+    // Start the real CSS animations at a common known time. Then let the
+    // browser clock run freely: no seeking/pausing between these live frames.
+    await page.locator('.fish-wave-path,.fish-wave').evaluateAll(elements=>{const start=document.timeline.currentTime-300;for(const el of elements)for(const a of el.getAnimations()){a.startTime=start;a.play()}})
+    const fill=await page.locator('.fish-fill').boundingBox(),cat=await marker.boundingBox(),water=await page.locator('.fish-water').boundingBox(),clip={x:water.x,y:water.y,width:Math.floor(cat.x-water.x),height:water.height},frames=[],hashes=[],started=Date.now()
+    for(const second of [0,.4,1,1.4,2]){await page.waitForTimeout(Math.max(0,second*1000-(Date.now()-started)))
+      const frame=await page.locator('.fish-wave').evaluateAll(elements=>({time:performance.now(),waves:elements.map(el=>{const box=el.getBoundingClientRect(),path=el.parentElement,m=new DOMMatrix(getComputedStyle(el).transform),flow=path.getAnimations()[0],css=getComputedStyle(el);return{x:box.x,y:box.y,width:box.width,height:box.height,cssWidth:css.width,cssHeight:css.height,swayX:m.m41,swayY:m.m42,flowTime:flow.currentTime,delay:flow.effect.getTiming().delay,duration:flow.effect.getTiming().duration,swayDuration:el.getAnimations()[0].effect.getTiming().duration,repeat:css.maskRepeat}})}))
+      const buffer=await page.screenshot({clip,animations:'allow'});hashes.push(createHash('sha256').update(buffer).digest('hex'));await writeFile(resolve(directory,`wave-live-t${second}.png`),buffer);await page.locator('.dashboard-progress').screenshot({path:resolve(directory,`progress-live-t${second}.png`),animations:'allow'});frames.push({second,...frame})
+      assert.deepEqual(await page.locator('.fish-fill').boundingBox(),fill);assert.equal((await marker.boundingBox()).x,cat.x)
+      for(const wave of frame.waves){assert.equal(wave.cssWidth,'32px');assert.equal(wave.cssHeight,'32px');assert.ok(Math.abs(wave.width-32)<.01&&Math.abs(wave.height-32)<.01);assert.equal(wave.duration,3000);assert.ok(Math.abs(wave.swayY)<=4.01);assert.equal(wave.repeat,'no-repeat')}
+      assert.ok(new Set(frame.waves.map(w=>Math.round(w.swayY*10))).size>1)
+    }
+    assert.equal(new Set(hashes).size,5,'wave-only crops must actually change, without relying on GIF pixels')
+    for(let i=0;i<3;i++){for(let t=1;t<frames.length;t++){let dx=frames[t].waves[i].x-frames[t-1].waves[i].x;if(dx<0)dx+=fill.width;const expected=fill.width*(frames[t].time-frames[t-1].time)/3000;assert.ok(Math.abs(dx-expected)<10,'each sprite advances right; wrap is unwrapped by identity')}
+      assert.ok(Math.max(...frames.map(f=>f.waves[i].y))-Math.min(...frames.map(f=>f.waves[i].y))>1,'each of the three sprites must actually sway vertically')}
+    assert.equal(new Set(frames[0].waves.map(w=>w.swayDuration)).size,3)
+    const occlusion=await page.evaluate(()=>{const group=document.querySelector('.fish-waves'),fill=document.querySelector('.fish-fill').getBoundingClientRect(),cat=document.querySelector('.fish-marker').getBoundingClientRect(),clip=getComputedStyle(group).clipPath;return{clip,fillRight:fill.right,catLeft:cat.left}});assert.match(occlusion.clip,/inset/);assert.ok(Math.abs(occlusion.fillRight-parseFloat(occlusion.clip.split(' ')[1])-occlusion.catLeft)<1);assert.equal(await marker.evaluate(el=>{const b=el.getBoundingClientRect();return el.contains(document.elementFromPoint(b.x+b.width/2,b.y+b.height/2))}),true)
+    await writeFile(resolve(directory,'wave-live-motion.json'),JSON.stringify({clock:'real browser timeline, freely running between samples',frames,hashes,fill,cat,clip,occlusion},null,2))
+  })
+  await check('each wave wraps invisibly at the edge while the original cat keeps its gentle vertical motion',async()=>{
+    const path=page.locator('.fish-wave-path').first(),originalStart=await path.evaluate(el=>el.getAnimations()[0].startTime)
+    const edges=[];for(const time of [1,2999]){await path.evaluate((el,time)=>{const a=el.getAnimations()[0];a.pause();a.currentTime=time},time);edges.push(await path.evaluate(el=>Number(getComputedStyle(el).opacity)))}assert.ok(edges.every(alpha=>alpha<.01));await path.evaluate((el,start)=>{const a=el.getAnimations()[0];a.startTime=start;a.play()},originalStart)
+    const mascot=page.locator('.fish-mascot'),x=await marker.evaluate(el=>new DOMMatrix(getComputedStyle(el).transform).m41);await expect(mascot).toHaveClass(/fish-mascot--floating/);assert.equal(await mascot.evaluate(el=>getComputedStyle(el).animationDuration),'3s')
+    const before=await mascot.evaluate(el=>new DOMMatrix(getComputedStyle(el).transform).m42);await page.waitForTimeout(450);const y=await mascot.evaluate(el=>new DOMMatrix(getComputedStyle(el).transform).m42);assert.ok(y>=-1.51&&y<=.01);assert.notEqual(y,before);assert.equal(await marker.evaluate(el=>new DOMMatrix(getComputedStyle(el).transform).m41),x)
+    await writeFile(resolve(directory,'wave-wrap.json'),JSON.stringify({edgeAlpha:edges,behaviour:'fade only at entering/leaving edges; stationary fill and cat x'},null,2))
   })
   await check('compact dashboard has one-line title, corrected labels and no routine progress note or scrolling',async()=>{
     // Conservative content budget leaves 60 DIP for a native frame; exact
@@ -68,7 +91,7 @@ export async function runD12Visual({page,browser,check,goto,group,screenshot,dir
     await expect(page.locator('.we-countdown-hint')).toHaveText('摸鱼一小步，下班一大步');await expect(page.locator('.we-countdown-target')).toContainText('下班时间：2026-10-15 18:00')
     const layout=await page.evaluate(()=>({height:innerHeight,scroll:document.documentElement.scrollHeight,width:innerWidth,scrollWidth:document.documentElement.scrollWidth,bottom:document.querySelector('.dashboard-metrics').getBoundingClientRect().bottom,headingHeight:document.querySelector('.app-header h1').getBoundingClientRect().height}))
     assert.ok(layout.scroll<=layout.height&&layout.scrollWidth<=layout.width);assert.ok(layout.height-layout.bottom>=16&&layout.height-layout.bottom<80);assert.ok(layout.headingHeight<=36)
-    await screenshot('d12-r3-dashboard-compact.png');await writeFile(resolve(directory,'compact-layout.json'),JSON.stringify(layout,null,2));await page.setViewportSize(defaultSize)
+    await screenshot('d12-r4-dashboard-compact.png');await writeFile(resolve(directory,'compact-layout.json'),JSON.stringify(layout,null,2));await page.setViewportSize(defaultSize)
   })
   await check('ordinary overtime, overnight and nonworking states also fit the compact content budget',async()=>{
     await page.setViewportSize(viewport)
@@ -106,9 +129,9 @@ export async function runD12Visual({page,browser,check,goto,group,screenshot,dir
       for(const width of [720,640,480,360]){await page.setViewportSize({width,height:viewport.height});for(const value of [0,100]){await percent(value);await position(value);assert.equal(await marker.evaluate(el=>{const box=el.getBoundingClientRect(),track=el.parentElement.getBoundingClientRect();return box.left>=track.left-1&&box.right<=track.right+1}),true)}
         assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth+1),true);const box=await animated.boundingBox();assert.ok(Math.abs(box.width/box.height-226/217)<.01)
       }
-      await page.setViewportSize(viewport);await percent(62.5);await position(62.5);await screenshot(`d12-r3-dashboard-${accent}-${mode}.png`)
+      await page.setViewportSize(viewport);await percent(62.5);await position(62.5);await screenshot(`d12-r4-dashboard-${accent}-${mode}.png`)
     }
-    await page.setViewportSize({width:360,height:560});await screenshot('d12-r3-dashboard-narrow.png');await page.setViewportSize(viewport)
+    await page.setViewportSize({width:360,height:560});await screenshot('d12-r4-dashboard-narrow.png');await page.setViewportSize(viewport)
     await track.evaluate(el=>{el.style.width='16px'});await percent(100);await position(100);assert.equal(await marker.evaluate(el=>el.offsetWidth<=el.parentElement.clientWidth),true);await track.evaluate(el=>el.style.removeProperty('width'))
   })
   await check('missing calendar estimate and forced colors keep numeric progress, text and boundaries',async()=>{
@@ -126,7 +149,7 @@ export async function runD12Visual({page,browser,check,goto,group,screenshot,dir
     const cdp=await browser.newBrowserCDPSession(),phases=[],cores=cpus().length
     for(const phase of ['animated','staticWaves','reduced','hidden']){
       await page.emulateMedia({reducedMotion:phase==='reduced'?'reduce':'no-preference'});await page.evaluate(visible=>window.__d12.visibility(visible),phase!=='hidden')
-      if(phase==='animated'||phase==='staticWaves')await expect(animated).toBeVisible();else await stopped();if(await page.locator('.fish-waves').count())await page.locator('.fish-waves').evaluate((el,phase)=>{if(phase==='staticWaves')el.style.animation='none';else el.style.removeProperty('animation')},phase);await page.waitForTimeout(1000)
+      if(phase==='animated'||phase==='staticWaves')await expect(animated).toBeVisible();else await stopped();await page.locator('.fish-wave-path,.fish-wave').evaluateAll((elements,phase)=>{for(const el of elements){if(phase==='staticWaves')el.style.animation='none';else el.style.removeProperty('animation')}},phase);await page.waitForTimeout(1000)
       const startedAt=new Date().toISOString();let prior=await cdp.send('SystemInfo.getProcessInfo'),at=performance.now();const cpu=[]
       for(let i=0;i<5;i++){await page.waitForTimeout(1000);const current=await cdp.send('SystemInfo.getProcessInfo'),now=performance.now(),times=new Map(prior.processInfo.map(p=>[p.id,p.cpuTime]));cpu.push(current.processInfo.reduce((total,p)=>total+Math.max(0,p.cpuTime-(times.get(p.id)??p.cpuTime)),0)/((now-at)/1000*cores)*100);prior=current;at=now}
       let memory;try{const ids=prior.processInfo.map(p=>Number(p.id)).filter(Number.isSafeInteger),filter=ids.map(id=>`IDProcess=${id}`).join(' OR ');const text=execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-WindowStyle','Hidden','-Command',`$ErrorActionPreference='Stop'; @(Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -Filter '${filter}' | Select-Object IDProcess,WorkingSetPrivate) | ConvertTo-Json -Compress`],{windowsHide:true,timeout:15000,encoding:'utf8'});const rows=[JSON.parse(text)].flat();memory={status:'MEASURED',requestedPids:ids,rows,processes:rows.length,privateWorkingSetMiB:rows.reduce((n,row)=>n+Number(row.WorkingSetPrivate),0)/1048576};assert.ok(rows.length>0)}catch(error){memory={status:'NOT RUN',reason:'Private Working Set unavailable in current context'}}
