@@ -1,6 +1,6 @@
 import type { Capability, ContractRequests, ContractResponses, Result, WindowRole } from '../../shared/contracts'
 import { validateContractRequest } from '../../shared/capabilities'
-import { V2_CHANNELS, SNAPSHOT_PUSH, WINDOW_VISIBILITY_PUSH, safeResult, ipcFailure } from '../../shared/ipc'
+import { V2_CHANNELS, SNAPSHOT_PUSH, WINDOW_VISIBILITY_PUSH, OPEN_SETTINGS_PUSH, safeResult, ipcFailure } from '../../shared/ipc'
 import type { Runtime } from '../services/runtime'
 export interface IpcEvent {sender:object;senderFrame:unknown}
 export interface RegisteredWindow {
@@ -44,6 +44,11 @@ export function createIpcRouter(ipc:IpcPort,runtime:Runtime,operations:{window:(
   for(const method of Object.keys(V2_CHANNELS) as Capability[])ipc.handle(V2_CHANNELS[method],(event,input)=>invoke(method,event,input))
   return {register(role:WindowRole,port:RegisteredWindow,exactUrl:string){if(disposed||windows.has(port.sender)||!exactUrl)throw new Error('Window registration invalid');windows.set(port.sender,{role,port,url:exactUrl,visibilitySequence:0});return()=>release(port.sender)},
     revokeSubscription(sender:object){runtime.refresh.unsubscribe(sender)},
+    openSettings():Result<null>{
+      if(disposed)return {ok:false,error:{code:'UNAVAILABLE',message:'窗口服务已退出。'}}
+      for(const known of windows.values())try{if(known.role==='main'&&!known.port.destroyed()&&known.port.frame()&&known.port.url()===known.url){known.port.push(OPEN_SETTINGS_PUSH,safeResult({ok:true,data:{action:'openSettings'}}));return {ok:true,data:null}}}catch{/* Keep exact trusted-page guards. */}
+      return {ok:false,error:{code:'UNAVAILABLE',message:'主页面尚未就绪，未打开设置。'}}
+    },
     visibilityChanged(){
       for(const known of windows.values())try{if(!known.port.destroyed()&&known.port.url()===known.url)known.port.push(WINDOW_VISIBILITY_PUSH,safeResult({ok:true,data:visibility(known)}))}catch{/* Fail closed at renderer; never show/focus a window. */}
       runtime.refresh.visibilityChanged()

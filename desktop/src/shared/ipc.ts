@@ -14,6 +14,7 @@ export const V2_CHANNELS=Object.freeze({
 } as const satisfies Record<Capability,string>)
 export const SNAPSHOT_PUSH='workday-v2:snapshot-changed'
 export const WINDOW_VISIBILITY_PUSH='workday-v2:window-visibility-changed'
+export const OPEN_SETTINGS_PUSH='workday-v2:open-settings'
 export function ipcFailure():Result<never>{return {ok:false,error:{code:'INTERNAL',message:'调用失败，未执行不安全操作。'}}}
 // Validate the envelope as well as JSON transferability. Payload fields still
 // belong to the fixed method's DTO, not a generic Electron transport surface.

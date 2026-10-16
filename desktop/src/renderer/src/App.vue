@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { CalendarDatasetMetadata, DashboardSnapshot } from '../../shared/contracts'
 import DashboardView from './views/DashboardView.vue'
 import SettingsView from './views/SettingsView.vue'
@@ -30,6 +30,15 @@ const errorText=computed(()=>{if(error.value)return error.value;const value=stat
 async function load(){const result=await controller.load();if(!result.ok){error.value='IPC 初始化失败，尚未读取 Main 草稿：'+result.error.message;return false}error.value='';const calendars=await api.calendar.readMetadata();if(calendars.ok)metadata.value=calendars.data;return true}
 async function refreshSnapshot(){const result=await api.snapshot.read();snapshot.value=result.ok?result.data:null}
 async function openSettings(){if(pending.value)return;error.value='';controller.clearNotice();const loaded=await controller.load();if(!loaded.ok)error.value='读取设置失败，输入保留：'+loaded.error.message;settingsOpen.value=true}
+let traySettingsRequested=false
+function openTraySettings(){
+  if(!traySettingsRequested)return
+  if(settingsOpen.value){traySettingsRequested=false;return}
+  if(pending.value||confirmLeave.value)return
+  traySettingsRequested=false;void openSettings()
+}
+const stopTraySettings=api.window.onOpenSettings?.(()=>{traySettingsRequested=true;openTraySettings()})
+watch([pending,settingsOpen,confirmLeave],openTraySettings)
 function edit(value:EditorSettings){error.value='';controller.edit(value)}
 async function saved(){if(composing.value){error.value='请先完成输入法组合输入，再保存设置。';return}error.value='';if(await controller.save()){await refreshSnapshot();settingsOpen.value=false}else validationAttempt.value++}
 async function leave(){controller.clearNotice();if(state.value.busy)return;if(composing.value){error.value='请先完成输入法组合输入，再离开设置。';return}error.value='';const synced=await controller.flush();if(!synced.ok){error.value='草稿同步失败，输入保留：'+synced.error.message;if(!state.value.dirty&&!state.value.unsynced)return}if(state.value.dirty||state.value.unsynced){quitAfterLeave.value=false;leaveOrigin.value=document.activeElement as HTMLElement;confirmLeave.value=true;await nextTick();dialogRef.value?.querySelector<HTMLButtonElement>('button')?.focus()}else settingsOpen.value=false}
@@ -58,7 +67,7 @@ async function initialize(){
   }catch{settingsOpen.value=true;error.value='IPC 初始化失败，请重新连接配置；尚未取得草稿时不能编辑或保存。'}finally{loading.value=false}
 }
 onMounted(initialize)
-onBeforeUnmount(()=>{controller.dispose();void api.snapshot.unsubscribe()})
+onBeforeUnmount(()=>{stopTraySettings?.();controller.dispose();void api.snapshot.unsubscribe()})
 </script>
 <template>
   <div ref="host" class="workday-ui app-shell" data-workday-root :data-pending="String(pending)" @compositionstart="composing=true" @compositionend="composing=false">

@@ -263,7 +263,7 @@ export interface WindowVisibilityApi {
 }
 export interface MainWindowApi extends CommonApi {
   readonly role: 'main'
-  window: WindowVisibilityApi & { perform: Call<'window.perform'> }
+  window: WindowVisibilityApi & { perform: Call<'window.perform'>; onOpenSettings(listener:()=>void):()=>void }
   config: { read(): Promise<Result<ConfigSnapshot>>; save: Call<'config.save'> }
   settingsDraft: { read(): Promise<Result<SettingsDraftSession>>; update: Call<'settingsDraft.update'>; discard(): Promise<Result<SettingsDraftSession>>; setExpectedEnd:Call<'settingsDraft.setExpectedEnd'> }
   data: { previewRecovery(): Promise<Result<ImportPreview>>; cancelImport: Call<'data.cancelImport'>; previewImport: Call<'data.previewImport'>; applyImport: Call<'data.applyImport'>; export: Call<'data.export'> }

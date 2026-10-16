@@ -1,6 +1,6 @@
 import type { Capability, ContractRequests, ContractResponses, MainWindowApi, MiniWindowApi, Result, DashboardSnapshot, WindowVisibility } from './contracts'
 import { CONTRACT_VERSION } from './contracts'
-import { V2_CHANNELS, SNAPSHOT_PUSH, WINDOW_VISIBILITY_PUSH, ipcFailure,readIpcResult } from './ipc'
+import { V2_CHANNELS, SNAPSHOT_PUSH, WINDOW_VISIBILITY_PUSH, OPEN_SETTINGS_PUSH, ipcFailure,readIpcResult } from './ipc'
 import { validateStructure, v } from './validation'
 export interface BridgeTransport {invoke(channel:string,input:unknown):Promise<unknown>;listen(channel:string,listener:(payload:unknown)=>void):()=>void}
 export function createV2Bridge(role:'main',transport:BridgeTransport):MainWindowApi
@@ -37,6 +37,10 @@ export function createV2Bridge(role:'main'|'mini',transport:BridgeTransport):Mai
     })}
   if(role==='mini')return Object.freeze({...common,role:'mini'})
   return Object.freeze({...common,role:'main',
+    window:Object.freeze({...common.window,onOpenSettings(listener:()=>void){
+      if(typeof listener!=='function')return()=>{}
+      return transport.listen(OPEN_SETTINGS_PUSH,payload=>{const result=readIpcResult<unknown>(payload);if(result.ok&&validateStructure(result.data,v.object({action:v.enum(['openSettings'] as const)})).ok)try{listener()}catch{/* Consumer isolation. */}})
+    }}),
     config:Object.freeze({read:()=>call('config.read',null),save:(request:ContractRequests['config.save'])=>call('config.save',request)}),
     settingsDraft:Object.freeze({read:()=>call('settingsDraft.read',null),update:(request:ContractRequests['settingsDraft.update'])=>call('settingsDraft.update',request),discard:()=>call('settingsDraft.discard',null),setExpectedEnd:(request:ContractRequests['settingsDraft.setExpectedEnd'])=>call('settingsDraft.setExpectedEnd',request)}),
     data:Object.freeze({previewRecovery:()=>call('data.previewRecovery',null),cancelImport:(request:ContractRequests['data.cancelImport'])=>call('data.cancelImport',request),previewImport:(request:ContractRequests['data.previewImport'])=>call('data.previewImport',request),applyImport:(request:ContractRequests['data.applyImport'])=>call('data.applyImport',request),export:(request:ContractRequests['data.export'])=>call('data.export',request)}),

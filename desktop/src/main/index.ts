@@ -22,6 +22,9 @@ import { createRuntime } from './services/runtime'
 import { createMigrationService } from './services/migration-service'
 import { createMigrationFiles } from './services/migration-files'
 import { createIpcRouter } from './ipc/router'
+import { createTrayController, type TrayController } from './tray/tray-controller'
+import { createNativeTray, readTrayIcon } from './tray/native-tray'
+import { createBackgroundTray } from './tray/background-tray'
 
 const rendererFile = join(__dirname, '../renderer/index.html')
 const devUrl = !app.isPackaged ? process.env.ELECTRON_RENDERER_URL : undefined
@@ -54,13 +57,15 @@ else if (instance.data.primary) {
     const writes = createOperationBarrier()
     let importFileForTest: string | null = null, exportFileForTest: string | null = null
     let exitChoiceForTest: ExitChoice | null = null
+    let hideChoiceForTest:boolean|null=null,tray:TrayController|undefined,testTray:ReturnType<typeof createBackgroundTray>|undefined
+    let settingsRequested=false
     let feedbackOpen = false
     let interactiveAttempts: string[] = []
     const main = () => windows?.getMain() as BrowserWindow | null
     const quit = createQuitCoordinator({ waitMilliseconds: 3000, confirmationMilliseconds: 120000,
       waitForWrites: writes.drain, restoreMain: () => { if (!background) windows?.showMain() },
       commitQuit() {
-        writes.seal(); windows!.beginQuit(); instance.data.beginQuit()
+        writes.seal(); windows!.beginQuit(); tray?.dispose(); instance.data.beginQuit()
         setImmediate(() => app.quit()) // Permit the existing IPC reply to settle.
         return success(null)
       }
@@ -136,8 +141,9 @@ else if (instance.data.primary) {
         push:(channel,result)=>{if(!window.isDestroyed())window.webContents.send(channel,result)}},rendererUrl)
       window.once('closed',releaseWindow)
       window.webContents.on('did-start-navigation',(_event,_url,_inPlace,isMainFrame)=>{if(isMainFrame)router.revokeSubscription(window.webContents)})
-      window.on('show',router.visibilityChanged);window.on('hide',router.visibilityChanged)
-      window.on('minimize',router.visibilityChanged);window.on('restore',router.visibilityChanged)
+      const presentationChanged=()=>{router.visibilityChanged();if(windowPresentationVisible(window))runtime.refresh.wake()}
+      window.on('show',presentationChanged);window.on('hide',presentationChanged)
+      window.on('minimize',presentationChanged);window.on('restore',presentationChanged)
       window.setMenu(null)
       window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       window.webContents.on('will-navigate', event => event.preventDefault())
@@ -145,12 +151,30 @@ else if (instance.data.primary) {
       window.webContents.session.setPermissionCheckHandler(() => false)
       window.webContents.on('will-prevent-unload', event => { if (quit.isAuthorized()) event.preventDefault() })
       window.once('ready-to-show', () => { if (!quit.isAuthorized()) { if (!background) { windows!.showMain(); void repairBounds() }; instance.data.markReady() } })
-      // No tray in D08: native close still requests real exit, never orphaned hide.
-      window.on('close', event => { if (!quit.isAuthorized()) { event.preventDefault(); void requestQuit(true) } })
+      window.webContents.on('did-finish-load',()=>{if(settingsRequested){settingsRequested=false;router.openSettings()}})
+      window.on('close', event => { if (!quit.isAuthorized()) { event.preventDefault(); if(tray)void tray.closeMain();else void requestQuit(true) } })
       const loaded = devUrl ? window.loadURL(rendererUrl) : window.loadFile(rendererFile)
       void loaded.catch(() => { if (!quit.isAuthorized() && !window.isDestroyed()) { startupError('页面加载失败，应用将退出；配置未被更改。'); app.exit(1) } })
       return window
     })
+    tray=createTrayController({windows,
+      create(){if(background){readTrayIcon();testTray=createBackgroundTray();return testTray}return createNativeTray()},
+      config(){const read=runtime.readConfig();return read.ok?success(read.data.config):read},
+      snapshot:()=>runtime.snapshots.read(),quit:()=>requestQuit(true),exiting:quit.isAuthorized,
+      openSettings(){const window=main();if(!window||window.isDestroyed())return {ok:false,error:{code:'UNAVAILABLE',message:'主窗口不可用。'}};if(window.webContents.isLoading()){settingsRequested=true;return success(null)}return router.openSettings()},
+      async confirmFirstHide(message){
+        if(background)return hideChoiceForTest===null?{ok:false,error:{code:'UNAVAILABLE',message:'后台隐藏需要显式测试选择，不弹出提示。'}}:success(hideChoiceForTest)
+        const window=main();if(!window)return {ok:false,error:{code:'UNAVAILABLE',message:'主窗口不可用，未隐藏。'}}
+        const result=await dialog.showMessageBox(window,{type:'info',title:APPLICATION_NAME,message,buttons:['知道了，隐藏到托盘','暂不隐藏'],defaultId:0,cancelId:1,noLink:true})
+        return success(result.response===0)
+      },
+      acknowledgeNotice:()=>runtime.acknowledgeTrayNotice(),
+      feedback(message){if(background){console.error(message);return}const window=main();if(window&&!window.isDestroyed()&&!feedbackOpen){feedbackOpen=true;void dialog.showMessageBox(window,{type:'warning',title:APPLICATION_NAME,message,buttons:['返回窗口']}).finally(()=>{feedbackOpen=false})}else console.error(message)}
+    })
+    // Native Electron handles TaskbarCreated. These existing lifecycle events
+    // also recheck destroyed ports, without an extra polling timer/service.
+    const ensureTray=()=>tray!.ensure()
+    ensureTray()
     quit.registerDraft({...runtime.exitAdapter,
       async read(){
         const window=main()
@@ -179,23 +203,27 @@ else if (instance.data.primary) {
     screen.on('display-removed', displayChanged)
     screen.on('display-metrics-changed', displayChanged)
     screen.on('display-added', displayChanged)
-    const activated = () => { if (!background && !quit.isAuthorized()) windows!.showMain() }
+    const activated = () => { if (!background && !quit.isAuthorized()) {ensureTray();windows!.showMain()} }
     const beforeQuit = (event: Event) => { if (!quit.isAuthorized()) { event.preventDefault(); void requestQuit(true) } }
     const allClosed = () => { if (!quit.isAuthorized()) windows!.showMain() }
     app.on('activate', activated); app.on('before-quit', beforeQuit); app.on('window-all-closed', allClosed)
-    const resumed=()=>{zones.clear();runtime.refresh.wake(true)}
+    const resumed=()=>{zones.clear();runtime.refresh.wake(true);ensureTray()}
     powerMonitor.on('resume',resumed)
     app.once('will-quit', () => {
       if (boundsTimer) clearTimeout(boundsTimer)
       screen.removeListener('display-removed', displayChanged); screen.removeListener('display-metrics-changed', displayChanged); screen.removeListener('display-added', displayChanged)
       app.removeListener('activate', activated); app.removeListener('before-quit', beforeQuit); app.removeListener('window-all-closed', allClosed)
-      powerMonitor.removeListener('resume',resumed);router.dispose();runtime.dispose()
+      powerMonitor.removeListener('resume',resumed);tray?.dispose();router.dispose();runtime.dispose()
       windows!.dispose(); quit.dispose(); instance.data.dispose()
     })
     if (paths.data.testProfile) Object.defineProperty(app, '__workdayD08Test', { value: {
       windows, quit, paths: paths.data, repairBounds, background,
       interactiveAttempts: () => interactiveAttempts.slice(),
       chooseExit(choice: ExitChoice | null) { exitChoiceForTest = choice },
+      tray:{close:()=>tray!.closeMain(),menu:()=>tray!.openMenu(),chooseHide(value:boolean|null){hideChoiceForTest=value},
+        settings:()=>router.openSettings(),items:()=>testTray?.items().map(({label,type,enabled})=>({label,type,enabled})),
+        click(label:string){return testTray?.items().find(item=>item.label===label)?.click?.()},
+        icon:()=>({empty:readTrayIcon().isEmpty(),size:readTrayIcon().getSize()}),available:()=>tray!.available()},
       selectFile(kind:'import'|'export',name:string){
         if(!/^[A-Za-z0-9_-]+\.json$/.test(name))throw Error('Test fixture basename only')
         if(kind==='import')importFileForTest=name;else exportFileForTest=name

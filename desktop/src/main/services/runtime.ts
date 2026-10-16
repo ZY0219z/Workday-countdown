@@ -25,6 +25,7 @@ export interface Runtime {
   updateDraft(request:ContractRequests['settingsDraft.update']):Result<SettingsDraftSession>
   setExpectedEnd(request:ContractRequests['settingsDraft.setExpectedEnd']):Result<SettingsDraftSession>
   discardDraft():Result<SettingsDraftSession>;save(request:ContractRequests['config.save']):Promise<Result<ConfigSnapshot>>
+  acknowledgeTrayNotice():void
   applyImport(request:ContractRequests['data.applyImport']):Promise<Result<ConfigSnapshot>>
   previewImport(request:ContractRequests['data.previewImport']):Promise<Result<import('../../shared/contracts').ImportPreview>>
   previewRecovery():Promise<Result<import('../../shared/contracts').ImportPreview>>
@@ -41,6 +42,9 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
   let defaultSettings:import('../../shared/contracts').EditableConfig|null=null,defaultPersistence:SettingsDraftSession['defaultPersistence']|null=null
   let defaultTask:ReturnType<typeof setImmediate>|null=null
   let expectedEndEdit:SettingsDraftSession['expectedEndEdit']|null=null
+  // Main-only acknowledgement. Persist with the next normal, revision-checked
+  // save, never issue an independent write over a renderer's unsynced draft.
+  let trayNoticePending=false
   const snapshots=createSnapshotService(options.clock,c=>{
     const engine=createDashboardEngine(c,options.calendars,options.zones,options.maxHistoryDays)
     if(!engine.ok)return engine
@@ -89,6 +93,7 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
     const next=createSettingsDraft(value.config);if(!next.ok)return next
     const changed=setSnapshot(value.config)
     config=clone(value);draft=next.data
+    if(value.config.desktop.tray.firstHideNoticeAcknowledged)trayNoticePending=false
     defaultSettings=null;defaultPersistence=null
     expectedEndEdit=null
     if(!changed.ok)config.warnings.push({field:'$.snapshot',reason:'FORMAT',message:'配置已保存，但快照准备不可用；没有保留旧有效快照。'})
@@ -96,6 +101,7 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
   }
   const methods:Runtime={
     snapshots,refresh,
+    acknowledgeTrayNotice(){if(!disposed)trayNoticePending=true},
     async start():Promise<Result<null>>{
       const loaded=await options.store.load();if(!loaded.ok)return loaded;state=loaded.data
       if(state.config){const read=await options.store.read();if(!read.ok)return read;const applied=accept(read.data);if(!applied.ok)return applied}
@@ -150,6 +156,7 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
       const valid=validateContractRequest('main','config.save',request);if(!valid.ok)return valid
       if(busy||disposed)return unavailable('设置正在保存或服务已退出。')
       const revision=checkExpectedRevision(valid.data.expectedRevision,config?.config.revision??0);if(!revision.ok)return revision
+      if(trayNoticePending)valid.data.settings.desktop.tray.firstHideNoticeAcknowledged=true
       if(expectedEndEdit){
         const target=overtimeTarget(valid.data.settings);if(!target.ok)return target
         if(target.data.view.targetKey!==expectedEndEdit.targetKey)return unavailable('当前班次或时区已变化，未应用旧输入；请放弃旧草稿后重新填写。')

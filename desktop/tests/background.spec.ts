@@ -4,16 +4,16 @@ import type { App, WebPreferences } from 'electron'
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, renameSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { createServer, loadConfigFromFile, type ViteDevServer, type UserConfig } from 'vite'
-import { tmpdir } from 'node:os'
+import { tmpdir, cpus } from 'node:os'
 import { createServer as createHttpServer } from 'node:http'
-import type { ChildProcess } from 'node:child_process'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import { createAppConfig } from '../src/shared/config-schema'
 import { loadBundledCalendarStore } from '../src/main/services/calendar-store'
 import type { AppConfig, Result, MainWindowApi } from '../src/shared/contracts'
 import type { ExitChoice } from '../src/main/lifecycle/quit-coordinator'
 import {MAIN_WINDOW_DEFAULT_SIZE,MAIN_WINDOW_MINIMUM_SIZE} from '../src/main/windows/window-bounds'
 import { V2_CHANNELS } from '../src/shared/ipc'
-type TestApp=App & {__workdayD08Test:{background:boolean;windows:{beginQuit():void};quit:{requestQuit():Promise<Result<null>>};chooseExit(choice:ExitChoice|null):void;selectFile(kind:'import'|'export',name:string):void}}
+type TestApp=App & {__workdayD08Test:{background:boolean;windows:{beginQuit():void};quit:{requestQuit():Promise<Result<null>>};chooseExit(choice:ExitChoice|null):void;selectFile(kind:'import'|'export',name:string):void;interactiveAttempts():string[];tray:{close():Promise<Result<null>>;menu():Promise<Result<null>>;chooseHide(value:boolean|null):void;settings():Result<null>;items():Array<{label?:string;type?:string;enabled?:boolean}>;click(label:string):void;available():boolean;icon():{empty:boolean;size:{width:number;height:number}}}}}
 // Native-hidden integration stimulates real DOM handlers. Pixel hit-testing and
 // stable rendering frames are verified by real Headless clicks, not by showing
 // Electron or forcing native focus. Disabled/DOM visibility assertions remain.
@@ -23,12 +23,18 @@ let application:ElectronApplication|undefined,applicationProcess:ChildProcess|un
 let developmentServer:ViteDevServer|undefined
 async function developmentUrl(){
   if(!developmentServer){
+    // Vite treats port:0 as its default 5173, which can be bound by unrelated
+    // Windows clients. Ask the OS for a free port, then keep strict ownership.
+    const probe=createHttpServer()
+    await new Promise<void>((done,reject)=>{probe.once('error',reject);probe.listen(0,'127.0.0.1',done)})
+    const address=probe.address();await new Promise<void>((done,reject)=>probe.close(error=>error?reject(error):done()))
+    if(!address||typeof address==='string')throw Error('Missing isolated Vite port')
     const loaded=await loadConfigFromFile({command:'serve',mode:'development'},resolve('electron.vite.config.ts'))
     if(!loaded)throw Error('Development renderer configuration unavailable')
     const renderer=(loaded.config as unknown as {renderer:UserConfig}).renderer
     // URL/IPC integration, not a live source-edit/watch test. Keep Vite's real
     // transforms, disable unsolicited HMR navigation during negative URL probes.
-    developmentServer=await createServer({...renderer,configFile:false,root:resolve('src/renderer'),server:{...renderer.server,port:0,hmr:false},logLevel:'error'})
+    developmentServer=await createServer({...renderer,configFile:false,root:resolve('src/renderer'),server:{...renderer.server,port:address.port,strictPort:true,open:false,hmr:false},logLevel:'error'})
     await developmentServer.listen()
     await developmentServer.environments.client.depsOptimizer?.scanProcessing
   }
@@ -39,6 +45,8 @@ async function developmentUrl(){
 test.afterAll(async()=>{await developmentServer?.close()})
 const value=<T>(result:Result<T>):T=>{expect(result.ok,JSON.stringify(result)).toBe(true);if(!result.ok)throw Error('Expected success');return result.data}
 const formal=()=>join(profile,'lifecycle','settings.json')
+function seed(config:AppConfig){mkdirSync(join(profile,'lifecycle'),{recursive:true});writeFileSync(formal(),JSON.stringify(config))}
+function seedCloseQuit(){const config=fixture();config.desktop.closeAction='quit';seed(config)}
 function fixture():AppConfig {
   const config=value(createAppConfig({startDate:'2026-10-01',startTime:'09:00',endTime:'18:00',salaryDay:10,themeMode:'system',themeAccent:'ocean',updatedAt:'2026-10-15T00:00:00.000Z',appVersion:'2.0.0'}))
   config.revision=1;config.calendar.enabledYears=[2024,2025,2026];config.calendar.datasets=value(loadBundledCalendarStore()).listMetadata();return config
@@ -162,6 +170,7 @@ test('leave save keeps dialog and input on failure, then saves only after correc
   await activate(page.getByRole('dialog').getByRole('button',{name:'继续编辑',exact:true}));await page.getByLabel('下班时间',{exact:true}).fill('19:00');await settled(page);await activate(page.getByRole('button',{name:'取消 / 返回仪表盘',exact:true}));await activate(page.getByRole('dialog').getByRole('button',{name:'保存',exact:true}));await expect(page.getByRole('region',{name:'工作日仪表盘'})).toBeVisible({timeout:40000});expect(JSON.parse(readFileSync(formal(),'utf8')).schedule.endTime).toBe('19:00')
 })
 for(const action of ['explicit','close'] as const)test('real clean '+action+' ends the actual Electron process',async()=>{
+  if(action==='close')seedCloseQuit() // D13: native close exits only under the saved quit preference.
   const page=await launch();await settings(page);const handle=application!.process(),closed=application!.waitForEvent('close');if(action==='explicit')await activate(page.getByRole('button',{name:'退出程序',exact:true}));else await application!.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].close());await closed;await expect.poll(()=>handle.exitCode).toBe(0);application=undefined
 })
 test('dirty exit without test choice refuses native prompts, keeps Main draft and process alive',async()=>{
@@ -176,6 +185,7 @@ test('exit save validation failure cancels real exit and preserves invalid input
   const page=await launch(),original=readFileSync(formal(),'utf8');await settings(page);await page.getByLabel('下班时间',{exact:true}).fill('08:00');await settled(page);await choose('save');await activate(page.getByRole('button',{name:'退出程序',exact:true}));await expect(page.locator('.app-error')).toBeVisible();expect(application!.process().exitCode).toBe(null);expect(readFileSync(formal(),'utf8')).toBe(original);await expect(page.getByLabel('下班时间',{exact:true})).toHaveValue('08:00')
 })
 test('pending-local-edit marker vetoes clean native close instead of discarding unsynchronized data',async()=>{
+  seedCloseQuit()
   const page=await launch();await page.evaluate(()=>document.querySelector('[data-workday-root]')!.setAttribute('data-pending','true'));const result=await application!.evaluate(async({app,BrowserWindow})=>{BrowserWindow.getAllWindows()[0].close();return (app as TestApp).__workdayD08Test.quit.requestQuit()});expect(result).toMatchObject({ok:false,error:{code:'IO_BUSY'}});expect(application!.process().exitCode).toBe(null);await hidden()
 })
 test('native source adapter uses owned fixture; actual preview selection applies only confirmed fields',async()=>{
@@ -205,6 +215,8 @@ test('actual router still rejects iframe, foreign senders and hostile DTOs',asyn
 
 test('development Vite main-frame identity and URL permit real IPC, not arbitrary origins',async()=>{
   const url=await developmentUrl(),page=await launch(false,url)
+  expect(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.tray.icon())).toEqual({empty:false,size:{width:32,height:32}})
+  expect(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.tray.available())).toBe(true)
   const mask=await page.locator('.fish-wave').first().evaluate(element=>getComputedStyle(element).maskImage),waveUrl=/url\("([^"]+)"\)/.exec(mask)?.[1]
   expect(waveUrl).toBeTruthy();const wave=await page.request.get(waveUrl!);expect(wave.status()).toBe(200);expect(await wave.body()).toEqual(readFileSync(resolve('../assets/image/wave-fin.png')))
   expect((await page.request.get(url+'/@fs/'+resolve('../workday_counter.py').replaceAll('\\','/'))).status()).toBe(403)
@@ -338,7 +350,7 @@ test('expected end previews midnight via Main, saves only this shift; notice exp
   console.log('D11 transient notice:',JSON.stringify({noticeDurationMs,hidden:true}));await hidden()
 })
 test('expected partial text survives reload, dirty native close/save fail safely, discard restores and valid exit saves',async()=>{
-  const {date:seedDate}=seedHistoric();const page=await launch(),before=readFileSync(formal(),'utf8');await settings(page);const input=page.getByLabel('今天预计下班时间',{exact:true});await input.fill('19:');await settled(page)
+  const {date:seedDate,config}=seedHistoric();config.desktop.closeAction='quit';seed(config);const page=await launch(),before=readFileSync(formal(),'utf8');await settings(page);const input=page.getByLabel('今天预计下班时间',{exact:true});await input.fill('19:');await settled(page)
   await page.reload();await settled(page);await expect(input).toHaveValue('19:');await choose('continueEditing');await application!.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].close());await expect(input).toHaveValue('19:');expect(application!.process().exitCode).toBe(null)
   await choose('save');await activate(page.getByRole('button',{name:'退出程序',exact:true}));await expect(page.locator('.app-error')).toBeVisible();expect(application!.process().exitCode).toBe(null);expect(readFileSync(formal(),'utf8')).toBe(before)
   await activate(page.getByRole('button',{name:'取消 / 返回仪表盘',exact:true}));await activate(page.getByRole('dialog').getByRole('button',{name:'继续编辑',exact:true}));await expect(input).toHaveValue('19:')
@@ -354,4 +366,50 @@ test('failed scratch synchronization still offers explicit quit continue/discard
   seedHistoric();const page=await launch(),before=readFileSync(formal(),'utf8');await settings(page);const input=page.getByLabel('今天预计下班时间',{exact:true});await input.fill('x'.repeat(33));await expect(page.getByRole('button',{name:'重试同步草稿',exact:true})).toBeVisible()
   await activate(page.getByRole('button',{name:'退出程序',exact:true}));await expect(page.getByRole('dialog')).toContainText('保存后退出');await activate(page.getByRole('dialog').getByRole('button',{name:'继续编辑',exact:true}));await expect(input).toHaveValue('x'.repeat(33));expect(application!.process().exitCode).toBe(null)
   await activate(page.getByRole('button',{name:'退出程序',exact:true}));const child=application!.process(),closed=application!.waitForEvent('close');await activate(page.getByRole('dialog').getByRole('button',{name:'放弃',exact:true}));await closed;await expect.poll(()=>child.exitCode).toBe(0);application=undefined;expect(readFileSync(formal(),'utf8')).toBe(before)
+})
+
+test('D13 bundled icon decodes and menu uses real Snapshot without showing native UI',async()=>{
+  const page=await launch();expect(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.tray.icon())).toEqual({empty:false,size:{width:32,height:32}})
+  value(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.tray.menu()))
+  const items=await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.tray.items());expect(items).toHaveLength(5);expect(items[0].enabled).toBe(false);expect(items[0].label).not.toContain('undefined');expect(items.slice(1).map(i=>i.label??i.type)).toEqual(['打开主窗口','打开设置','separator','退出程序'])
+  expect(await page.evaluate(()=>typeof window.workdayV2.window.onOpenSettings)).toBe('function');expect(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.interactiveAttempts())).toEqual([]);await hidden()
+})
+
+test('D13 native X keeps pending input and Snapshot alive; acknowledgement waits for safe save',async()=>{
+  const page=await launch(),before=readFileSync(formal(),'utf8'),id=await application!.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].id)
+  await settings(page);await page.getByLabel('上班时间',{exact:true}).fill('08:');await settled(page)
+  await application!.evaluate(({app,BrowserWindow})=>{(app as TestApp).__workdayD08Test.tray.chooseHide(true);BrowserWindow.getAllWindows()[0].close()});value(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.tray.close()))
+  await expect(page.getByLabel('上班时间',{exact:true})).toHaveValue('08:');expect(readFileSync(formal(),'utf8')).toBe(before);expect(application!.process().exitCode).toBe(null)
+  const first=value(await page.evaluate(()=>window.workdayV2.snapshot.read()));await expect.poll(async()=>value(await page.evaluate(()=>window.workdayV2.snapshot.read())).sequence).toBeGreaterThan(first.sequence)
+  await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.tray.chooseHide(null));value(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.tray.close())) // session acknowledgement, no second prompt.
+  await page.getByLabel('上班时间',{exact:true}).fill('08:30');await settled(page);await activate(page.getByRole('button',{name:'保存设置',exact:true}));await expect(page.getByRole('region',{name:'工作日仪表盘'})).toBeVisible()
+  const saved=JSON.parse(readFileSync(formal(),'utf8'));expect(saved.desktop.tray.firstHideNoticeAcknowledged).toBe(true);expect(saved.revision).toBe(2)
+  await page.reload();await settled(page);value(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.tray.close()))
+  expect(await application!.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().map(w=>w.id))).toEqual([id]);await expect(page.locator('img.moyu-animated')).toHaveCount(0);expect(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.interactiveAttempts())).toEqual([]);await hidden()
+})
+
+test('D13 restricted Main settings push opens existing page without resetting partial or composing input',async()=>{
+  const page=await launch();value(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.tray.settings()));await expect(page.getByLabel('上班时间',{exact:true})).toBeVisible()
+  const input=page.getByLabel('上班时间',{exact:true});await input.fill('08:');await settled(page);await input.dispatchEvent('compositionstart');await input.evaluate(element=>(element as HTMLInputElement).value='输入中')
+  value(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.tray.settings()));await expect(input).toHaveValue('输入中');await expect(page.locator('[data-workday-root]')).toHaveAttribute('data-pending','true')
+  await input.evaluate(element=>{(element as HTMLInputElement).value='08:';element.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'08:'}))});await settled(page);await expect(input).toHaveValue('08:');expect(await application!.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().length)).toBe(1);await hidden()
+})
+
+for(const choice of ['save','discard','continueEditing'] as const)test('D13 background tray exit delegates actual protected '+choice,async()=>{
+  const page=await launch();await settings(page);await page.getByLabel('下班时间',{exact:true}).fill('19:00');await settled(page);await choose(choice);value(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.tray.menu()))
+  const child=application!.process()
+  if(choice==='continueEditing'){expect(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.tray.click('退出程序'))).toMatchObject({ok:false,error:{code:'CANCELLED'}});expect(value(await page.evaluate(()=>window.workdayV2.settingsDraft.read())).dirty).toBe(true);await expect(page.getByLabel('下班时间',{exact:true})).toHaveValue('19:00');expect(child.exitCode).toBe(null);await hidden()}
+  else{const closed=application!.waitForEvent('close');await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.tray.click('退出程序'));await closed;await expect.poll(()=>child.exitCode).toBe(0);application=undefined;expect(JSON.parse(readFileSync(formal(),'utf8')).schedule.endTime).toBe(choice==='save'?'19:00':'18:00')}
+})
+
+test('D13 short owned hidden-Electron observation records CPU and PWS without claiming G05',async()=>{
+  const page=await launch(),cores=cpus().length
+  const metrics=()=>application!.evaluate(({app})=>app.getAppMetrics().map(p=>({pid:p.pid,type:p.type,cpu:p.cpu})))
+  await page.waitForTimeout(1000);let previous=await metrics(),at=performance.now();const samples=[]
+  for(let i=0;i<5;i++){await page.waitForTimeout(1000);const current=await metrics(),now=performance.now(),times=new Map(previous.map(p=>[p.pid,p.cpu.cumulativeCPUUsage]));expect(current.every(p=>typeof p.cpu.cumulativeCPUUsage==='number')).toBe(true);const cpuPercent=current.reduce((n,p)=>n+Math.max(0,p.cpu.cumulativeCPUUsage!-(times.get(p.pid)??p.cpu.cumulativeCPUUsage!)),0)/((now-at)/1000*cores)*100;samples.push({cpuPercent,pids:current.map(p=>p.pid),intervalMs:now-at});previous=current;at=now}
+  const ids=previous.map(p=>p.pid),filter=ids.map(id=>`IDProcess=${id}`).join(' OR ')
+  const output=execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-WindowStyle','Hidden','-Command',`$ErrorActionPreference='Stop'; @(Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -Filter '${filter}' | Select-Object IDProcess,WorkingSetPrivate) | ConvertTo-Json -Compress`],{windowsHide:true,timeout:15000,encoding:'utf8'})
+  const rows=[JSON.parse(output)].flat();expect(rows.map(row=>row.IDProcess).sort()).toEqual([...ids].sort())
+  const result={scope:'real hidden Electron app.getAppMetrics PID set; memory tray adapter; NOT real tray-only G05',warmupSeconds:1,sampleSeconds:5,logicalCores:cores,samples,meanCpuPercent:samples.reduce((n,s)=>n+s.cpuPercent,0)/samples.length,privateWorkingSetMiB:rows.reduce((n,row)=>n+Number(row.WorkingSetPrivate),0)/1048576,memoryRows:rows,processInfo:previous}
+  writeFileSync('test-results/d13-hidden-resources.json',JSON.stringify(result,null,2));console.log('D13 short observation:',JSON.stringify({meanCpuPercent:result.meanCpuPercent,privateWorkingSetMiB:result.privateWorkingSetMiB,logicalCores:cores,scope:result.scope}));await hidden()
 })

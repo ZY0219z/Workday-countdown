@@ -77,7 +77,7 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
         </section>
         <section v-if="active==='desktop'" class="settings-panel">
           <h3>窗口与托盘偏好</h3><label>关闭主窗口<select v-model="form.desktop.closeAction" class="we-control" @change="update"><option value="hideToTray">隐藏到托盘</option><option value="quit">退出程序</option></select></label><label class="we-check"><input v-model="form.desktop.miniEnabled" type="checkbox" @change="update" />迷你窗偏好</label><label class="we-check"><input v-model="form.desktop.alwaysOnTop" type="checkbox" @change="update" />迷你窗置顶偏好</label>
-          <p class="settings-deferred">当前仅保存偏好，尚未创建托盘或迷你窗。此阶段点击关闭仍真正退出并保护草稿，不隐藏成无法恢复的进程；首次启动仍打开主窗口。</p><FieldErrors :issues="issues" path="$.desktop" />
+          <p class="settings-deferred">关闭行为按已保存设置执行；隐藏到托盘保留输入，托盘“退出程序”仍保护未保存设置。最小化保留任务栏。托盘不可用时不会隐藏。迷你窗尚未开放，上方迷你选项仅保存偏好。</p><FieldErrors :issues="issues" path="$.desktop" />
         </section>
         <section v-if="active==='data'" class="settings-panel"><DataSettings :api="api" :blocked="dirty||busy" @applied="emit('imported')" @busy="value=>emit('dataBusy',value)" /></section>
         </details>
