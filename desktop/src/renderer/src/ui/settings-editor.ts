@@ -17,11 +17,15 @@ export function editorFrom(session: SettingsDraftSession): EditorSettings {
   const base = initialEditor(), parsed = validateDraftFields(session.draft)
   if (!parsed.ok) return base
   // Traverse a fixed known shape, never spread unchecked objects into settings.
-  function merge(shape: JsonValue, value: JsonValue | undefined): JsonValue {
+  function merge(shape: JsonValue, value: JsonValue | undefined, field=''): JsonValue {
     if (Array.isArray(shape)) return Array.isArray(value) ? structuredClone(value) : shape
     if (shape !== null && typeof shape === 'object') {
       const result: JsonObject = {}, source = value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {}
-      for (const key of Object.keys(shape)) result[key] = merge(shape[key], source[key])
+      // This schema-declared date dictionary has dynamic keys, unlike fixed
+      // business objects. validateDraftFields already rejected unsafe JSON keys;
+      // Main still validates real dates and work/rest values before saving.
+      if(field==='calendar.overrides')return structuredClone(source)
+      for (const key of Object.keys(shape)) result[key] = merge(shape[key], source[key],field?`${field}.${key}`:key)
       return result
     }
     return value === undefined ? shape : structuredClone(value)

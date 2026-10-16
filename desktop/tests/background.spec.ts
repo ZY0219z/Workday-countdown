@@ -273,6 +273,22 @@ test('failed IPC initialization disables save; a later exit error is visible and
   const child=application!.process(),closed=application!.waitForEvent('close');await activate(page.getByRole('button',{name:'退出程序',exact:true}));await closed;await expect.poll(()=>child.exitCode).toBe(0);application=undefined
 })
 
+for(const policy of ['advance','none'] as const)test(`hidden legacy ${policy} settings survive unrelated UI saves and restart`,async()=>{
+  const config=fixture();config.schedule={startTime:'22:00',endTime:'06:00',crossMidnight:true,workWeek:[1,2,3,4,5,6],breaks:[{startTime:'01:00',endTime:'01:30',startDayOffset:1,endDayOffset:1}]}
+  config.salary.nonWorkingPolicy=policy;config.overtime.entries=[{shiftDate:'2024-01-02',minutes:80}];config.calendar.overrides['2026-10-10']='rest'
+  mkdirSync(join(profile,'lifecycle'),{recursive:true});writeFileSync(formal(),JSON.stringify(config))
+  const sentinel='{"workStartTime":"08:30","workEndTime":"18:00"}';writeFileSync(join(profile,'settings.json'),sentinel)
+  const page=await launch();await settings(page)
+  await expect(page.getByText('保留历史跨夜班次',{exact:false})).toBeVisible();await expect(page.getByText('保留历史工作周：周一、周二、周三、周四、周五、周六',{exact:false})).toBeVisible()
+  await expect(page.getByText(policy==='advance'?'保留历史发薪策略：提前至上一个工作日。':'保留历史发薪策略：休息日不调整。',{exact:true})).toBeVisible()
+  await expect(page.getByLabel('跨夜班次（下班在次日）',{exact:true})).toHaveCount(0);await expect(page.getByRole('group',{name:'每周工作日',exact:true})).toHaveCount(0);await expect(page.getByLabel('遇休息日',{exact:true})).toHaveCount(0)
+  await page.getByLabel('每月发薪日',{exact:true}).fill('11');await settled(page);await activate(page.getByRole('button',{name:'保存设置',exact:true}));await expect(page.getByRole('region',{name:'工作日仪表盘'})).toBeVisible()
+  const saved=JSON.parse(readFileSync(formal(),'utf8'));expect(saved.schedule).toEqual(config.schedule);expect(saved.salary).toEqual({...config.salary,day:11});expect(saved.overtime).toEqual(config.overtime);expect(saved.calendar).toEqual(config.calendar);expect(readFileSync(join(profile,'settings.json'),'utf8')).toBe(sentinel)
+  expect(value(await page.evaluate(()=>window.workdayV2.snapshot.read())).configRevision).toBe(saved.revision);await settings(page)
+  const child=application!.process(),closed=application!.waitForEvent('close');await activate(page.getByRole('button',{name:'退出程序',exact:true}));await closed;await expect.poll(()=>child.exitCode).toBe(0);application=undefined
+  const reopened=await launch(false);await settings(reopened);await expect(reopened.getByLabel('每月发薪日',{exact:true})).toHaveValue('11');expect(value(await reopened.evaluate(()=>window.workdayV2.config.read())).config).toEqual(saved);await hidden()
+})
+
 function seedHistoric(){
   const date=new Intl.DateTimeFormat('sv-SE',{year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),config=fixture()
   config.calendar.overrides[date]='work';config.schedule.breaks=[{startTime:'12:00',endTime:'13:00',startDayOffset:0,endDayOffset:0}]

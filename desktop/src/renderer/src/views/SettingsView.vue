@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { CalendarDatasetMetadata, ValidationIssue, ExpectedEndContext } from '../../../shared/contracts'
 import type { EditorSettings } from '../ui/settings-editor'
 import FieldErrors from '../components/FieldErrors.vue'
@@ -17,6 +17,9 @@ const groups=[['calendar','工作日历'],['appearance','外观主题'],['deskto
 // Jump only on explicit failed Save, never during typing/group navigation.
 watch(()=>props.validationAttempt,()=>{const field=props.issues[0]?.field.split('.')[1];if(groups.some(group=>group[0]===field)){active.value=field;moreOpen.value=true}})
 const days=['周一','周二','周三','周四','周五','周六','周日']
+// Hidden legacy fields remain in the full draft; these labels never normalize it.
+const customWorkWeek=computed(()=>form.value.schedule.workWeek.length!==5||([1,2,3,4,5] as const).some(day=>!form.value.schedule.workWeek.includes(day)))
+const workWeekLabel=computed(()=>form.value.schedule.workWeek.map(day=>days[day-1]).join('、')||'无固定工作日')
 function update(){emit('change',JSON.parse(JSON.stringify(form.value)))}
 function addOverride(){const valid=normalizeLocalDate(date.value);if(!valid.ok){dateError.value='请选择真实有效的日期。';return}form.value.calendar.overrides[valid.data]=kind.value;dateError.value='';update()}
 function numeric(event:Event):number|null{const value=(event.target as HTMLInputElement).value;return value===''?null:Number(value)}
@@ -43,8 +46,8 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
           <p v-else class="we-muted">{{ expectedEnd&&!expectedEnd.available?expectedEnd.message:'正在确认当前班次…' }}</p>
           <p v-if="expectedEnd?.available&&expectedEnd.previewEnd" class="we-muted">本次预计结束：{{ expectedEnd.previewEnd.date }} {{ expectedEnd.previewEnd.time }}（保存后生效）</p>
           <FieldErrors :issues="issues" path="$.expectedEndTime" /></div>
-          <label class="we-check"><input v-model="form.schedule.crossMidnight" type="checkbox" @change="update" /> 跨夜班次（下班在次日）</label>
-          <fieldset><legend>每周工作日</legend><div class="settings-checks"><label v-for="(day,i) in days" :key="day" class="we-check"><input v-model="form.schedule.workWeek" type="checkbox" :value="i+1" @change="update" />{{ day }}</label></div></fieldset>
+          <p v-if="form.schedule.crossMidnight" class="we-muted">保留历史跨夜班次，下班在次日。</p>
+          <p v-if="customWorkWeek" class="we-muted">保留历史工作周：{{ workWeekLabel }}；仍按原规则计算。</p>
           <p v-if="form.schedule.breaks.length" class="we-muted">保留了历史午休配置，仍按原规则计算；修改其他设置不会清除它。</p>
           <FieldErrors :issues="issues" path="$.schedule" />
         </section>
@@ -54,8 +57,8 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
         </section>
         <section class="settings-panel">
           <h3>计划发薪</h3><label>每月发薪日<input :value="form.salary.day??''" type="number" min="1" max="31" step="1" class="we-control" @input="form.salary.day=numeric($event);update()" /></label>
-          <label>遇休息日<select v-model="form.salary.nonWorkingPolicy" class="we-control" @change="update"><option value="delay">顺延下一个工作日</option><option value="advance">提前上一个工作日</option><option value="none">不调整</option></select></label>
-          <p class="we-muted">每月发上月工资，按所选休息日规则调整。仅为计划日期。</p><FieldErrors :issues="issues" path="$.salary" />
+          <p v-if="form.salary.nonWorkingPolicy!=='delay'" class="we-muted">保留历史发薪策略：{{ form.salary.nonWorkingPolicy==='advance'?'提前至上一个工作日':'休息日不调整' }}。</p>
+          <p v-else class="we-muted">每月发上月工资，遇休息日按工作日历顺延。</p><FieldErrors :issues="issues" path="$.salary" />
         </section>
         </div>
         <details class="settings-more" :open="moreOpen" @toggle="moreOpen=($event.target as HTMLDetailsElement).open"><summary>更多设置</summary>
@@ -94,7 +97,6 @@ h2 { font-size:22px; } h3 { font-size:var(--we-text-title); }
 .settings-panel { display:grid;gap:var(--we-space-3); }
 .settings-panel > label:not(.we-check), .settings-record > label { display:grid;gap:var(--we-space-1); }
 .settings-panel .we-control { max-width:100%;width:100%; }
-.settings-checks { display:flex;flex-wrap:wrap;gap:var(--we-space-2); }
 fieldset { border:1px solid var(--we-border);border-radius:var(--we-radius-control);min-width:0; }
 .settings-record { border:1px solid var(--we-border);border-radius:var(--we-radius-control);padding:var(--we-space-3);display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--we-space-2); }
 .settings-actions { display:flex;gap:var(--we-space-2);flex-wrap:wrap;align-items:center;margin-top:var(--we-space-5);padding-top:var(--we-space-3);border-top:1px solid var(--we-border); }
