@@ -166,6 +166,12 @@ export interface UninitializedDraftState {
 export type SettingsDraftSession = (DraftState | UninitializedDraftState) & {
   configurationStatus?: 'unloaded' | 'missing' | 'ready' | 'recoverable' | 'invalid' | 'future'
   defaultPersistence?: {status:'pending'} | {status:'failed';error:ContractError}
+  expectedEnd?: ExpectedEndContext
+  expectedEndEdit?: {targetKey:string;input:string|null} // Session only; never persisted.
+}
+export type ExpectedEndContext = {available:false;message:string} | {
+  available:true;targetKey:string;shiftDate:LocalDate;normalEnd:{date:LocalDate;time:LocalTime};finalEnd:{date:LocalDate;time:LocalTime};minutes:number
+  previewEnd?:{date:LocalDate;time:LocalTime} // Main's valid unsaved projection.
 }
 
 export type WindowCommand = { action: 'showMain' } | { action: 'showMini' } | { action: 'hideMini' } | { action: 'setMiniTop'; enabled: boolean }
@@ -197,6 +203,7 @@ export interface ContractRequests {
   'settingsDraft.read': null
   'settingsDraft.update': { draft: JsonObject; expectedRevision: number }
   'settingsDraft.discard': null
+  'settingsDraft.setExpectedEnd': {expectedRevision:number;targetKey:string;input:string|null}
   'snapshot.read': null
   'snapshot.subscribe': null
   'snapshot.unsubscribe': null
@@ -217,6 +224,7 @@ export interface ContractResponses {
   'settingsDraft.read': SettingsDraftSession
   'settingsDraft.update': SettingsDraftSession
   'settingsDraft.discard': SettingsDraftSession
+  'settingsDraft.setExpectedEnd': SettingsDraftSession
   'snapshot.read': DashboardSnapshot
   'snapshot.subscribe': null
   'snapshot.unsubscribe': null
@@ -248,7 +256,7 @@ export interface MainWindowApi extends CommonApi {
   readonly role: 'main'
   window: { perform: Call<'window.perform'> }
   config: { read(): Promise<Result<ConfigSnapshot>>; save: Call<'config.save'> }
-  settingsDraft: { read(): Promise<Result<SettingsDraftSession>>; update: Call<'settingsDraft.update'>; discard(): Promise<Result<SettingsDraftSession>> }
+  settingsDraft: { read(): Promise<Result<SettingsDraftSession>>; update: Call<'settingsDraft.update'>; discard(): Promise<Result<SettingsDraftSession>>; setExpectedEnd:Call<'settingsDraft.setExpectedEnd'> }
   data: { previewRecovery(): Promise<Result<ImportPreview>>; cancelImport: Call<'data.cancelImport'>; previewImport: Call<'data.previewImport'>; applyImport: Call<'data.applyImport'>; export: Call<'data.export'> }
   calendar: { readMetadata(): Promise<Result<CalendarDatasetMetadata[]>>; previewImport(): Promise<Result<CalendarImportPreview>>; applyImport: Call<'calendar.applyImport'> }
 }

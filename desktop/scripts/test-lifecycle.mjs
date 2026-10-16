@@ -15,7 +15,7 @@ after(() => {
 })
 const files = [
   ...['contracts', 'validation', 'formats', 'config-schema', 'capabilities', 'settings-draft'].map(name => `src/shared/${name}.ts`),
-  ...['local-date', 'local-time', 'time-zone', 'clock', 'annual-calendar', 'calendar', 'calculation-quality', 'schedule', 'overtime', 'progress', 'salary'].map(name => `src/domain/${name}.ts`),
+  ...['local-date', 'local-time', 'time-zone', 'clock', 'annual-calendar', 'calendar', 'calculation-quality', 'schedule', 'overtime', 'progress', 'salary', 'expected-end'].map(name => `src/domain/${name}.ts`),
   ...['intl-time-zone', 'system-clock'].map(name => `src/adapters/${name}.ts`),
   ...['calendar-store','config-validation','config-files','config-store','migration-files','migration-service'].map(name => `src/main/services/${name}.ts`), ...['app-identity','single-instance','windows/window-bounds','windows/window-manager','lifecycle/operation-barrier','lifecycle/quit-coordinator','lifecycle/poc-draft','lifecycle/background-testing'].map(name => `src/main/${name}.ts`), 'src/shared/settings.ts', 'tests/unit/config-fixtures.ts', 'tests/unit/lifecycle.test.ts'
 ]

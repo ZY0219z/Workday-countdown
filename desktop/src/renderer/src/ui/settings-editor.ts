@@ -29,6 +29,7 @@ export function editorFrom(session: SettingsDraftSession): EditorSettings {
   return merge(asDraft(base), parsed.data) as unknown as EditorSettings
 }
 export function fieldMessage(issue: ValidationIssue): string {
+  if(issue.field==='$.expectedEndTime')return issue.message
   if(issue.field==='$.salary.day')return '请填写每月发薪日，使用 1–31 的整数。'
   if(/\.(startTime|endTime)$/.test(issue.field)&&['FORMAT','MISSING_FIELD','TYPE'].includes(issue.reason))return '请输入 24 小时制 HH:MM（00:00–23:59），例如 08:30。'
   return ({ MISSING_FIELD:'请填写此项。', UNKNOWN_FIELD:'包含不支持的设置。', TYPE:'请输入正确类型的值。', RANGE:'数值或时间区间超出允许范围。', ENUM:'请选择有效选项。', FORMAT:'请检查日期、时间格式及区间关系。', DUPLICATE:'存在重复或冲突记录。', DANGEROUS_KEY:'包含不安全字段。', NOT_SERIALIZABLE:'内容无法安全保存。', LIMIT:'超过处理范围，请减少记录或检查设置。' } as const)[issue.reason]

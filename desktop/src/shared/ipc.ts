@@ -4,6 +4,7 @@ import { validateJsonDto, validateStructure, v } from './validation'
 export const V2_CHANNELS=Object.freeze({
   'config.read':'workday-v2:config-read','config.save':'workday-v2:config-save',
   'settingsDraft.read':'workday-v2:draft-read','settingsDraft.update':'workday-v2:draft-update','settingsDraft.discard':'workday-v2:draft-discard',
+  'settingsDraft.setExpectedEnd':'workday-v2:draft-expected-end',
   'snapshot.read':'workday-v2:snapshot-read','snapshot.subscribe':'workday-v2:snapshot-subscribe','snapshot.unsubscribe':'workday-v2:snapshot-unsubscribe',
   'window.perform':'workday-v2:window-perform','app.quit':'workday-v2:quit',
   'data.previewImport':'workday-v2:import-preview','data.applyImport':'workday-v2:import-apply','data.export':'workday-v2:export',

@@ -22,6 +22,7 @@ export function createIpcRouter(ipc:IpcPort,runtime:Runtime,operations:{window:(
         case 'settingsDraft.read':result=runtime.readDraft();break
         case 'settingsDraft.update':result=runtime.updateDraft(request.data as ContractRequests['settingsDraft.update']);break
         case 'settingsDraft.discard':result=runtime.discardDraft();break
+        case 'settingsDraft.setExpectedEnd':result=runtime.setExpectedEnd(request.data as ContractRequests['settingsDraft.setExpectedEnd']);break
         case 'snapshot.read':result=await runtime.snapshots.read();break
         case 'snapshot.subscribe':runtime.refresh.subscribe(event.sender,{visible:known.port.visible,push:value=>{if(identify(event)===known)known.port.push(SNAPSHOT_PUSH,safeResult(value));else runtime.refresh.unsubscribe(event.sender)}});result={ok:true,data:null};break
         case 'snapshot.unsubscribe':runtime.refresh.unsubscribe(event.sender);result={ok:true,data:null};break

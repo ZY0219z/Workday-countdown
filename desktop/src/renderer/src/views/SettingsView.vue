@@ -1,19 +1,19 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import type { CalendarDatasetMetadata, ValidationIssue } from '../../../shared/contracts'
+import type { CalendarDatasetMetadata, ValidationIssue, ExpectedEndContext } from '../../../shared/contracts'
 import type { EditorSettings } from '../ui/settings-editor'
 import FieldErrors from '../components/FieldErrors.vue'
 import TimeInput from '../components/TimeInput.vue'
 import DataSettings from '../settings/DataSettings.vue'
 import type { MainWindowApi } from '../../../shared/contracts'
 import { normalizeLocalDate } from '../../../domain/local-date'
-const props=withDefaults(defineProps<{model:EditorSettings;issues:ValidationIssue[];busy:boolean;dirty:boolean;initialized:boolean;canSave:boolean;sessionReady?:boolean;quitDisabled?:boolean;defaultUnpersisted?:boolean;validationAttempt?:number;metadata:CalendarDatasetMetadata[];api:MainWindowApi}>(),{sessionReady:true,defaultUnpersisted:false,validationAttempt:0})
-const emit=defineEmits<{change:[value:EditorSettings];save:[];cancel:[];quit:[];imported:[];dataBusy:[value:boolean]}>()
+const props=withDefaults(defineProps<{model:EditorSettings;expectedEnd?:ExpectedEndContext|null;expectedEndInput?:string;issues:ValidationIssue[];busy:boolean;dirty:boolean;initialized:boolean;canSave:boolean;sessionReady?:boolean;quitDisabled?:boolean;defaultUnpersisted?:boolean;validationAttempt?:number;metadata:CalendarDatasetMetadata[];api:MainWindowApi}>(),{sessionReady:true,defaultUnpersisted:false,validationAttempt:0})
+const emit=defineEmits<{change:[value:EditorSettings];save:[];cancel:[];quit:[];imported:[];dataBusy:[value:boolean];expectedEnd:[value:string|null]}>()
 const form=ref<EditorSettings>(JSON.parse(JSON.stringify(props.model)))
 // Main acknowledgements must not replace equal local input on every keystroke.
 watch(()=>props.model,value=>{if(JSON.stringify(value)!==JSON.stringify(form.value))form.value=JSON.parse(JSON.stringify(value))})
-const moreOpen=ref(false),active=ref('overtime'), date=ref(''),kind=ref<'work'|'rest'>('rest'),dateError=ref('')
-const groups=[['overtime','加班记录'],['calendar','工作日历'],['appearance','外观主题'],['desktop','窗口与托盘'],['data','数据与恢复']]
+const moreOpen=ref(false),active=ref('calendar'), date=ref(''),kind=ref<'work'|'rest'>('rest'),dateError=ref('')
+const groups=[['calendar','工作日历'],['appearance','外观主题'],['desktop','窗口与托盘'],['data','数据与恢复']]
 // Jump only on explicit failed Save, never during typing/group navigation.
 watch(()=>props.validationAttempt,()=>{const field=props.issues[0]?.field.split('.')[1];if(groups.some(group=>group[0]===field)){active.value=field;moreOpen.value=true}})
 const days=['周一','周二','周三','周四','周五','周六','周日']
@@ -34,19 +34,18 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
           <FieldErrors :issues="issues" path="$.schedule.startTime" /></div><div>
           <TimeInput v-model="form.schedule.endTime" label="下班时间" @update:model-value="update" />
           <FieldErrors :issues="issues" path="$.schedule.endTime" /></div></div>
+          <div class="settings-expected"><fieldset :disabled="!expectedEnd?.available" class="settings-expected-fields">
+            <TimeInput :model-value="expectedEndInput||''" label="今天预计下班时间" @update:model-value="value=>emit('expectedEnd',value)" />
+            <button type="button" class="we-button" @click="emit('expectedEnd',null)">取消今天加班</button>
+          </fieldset>
+          <p class="we-muted">仅本班次有效，下一个工作日恢复正常下班时间。较早时刻按正常下班的次日解释。</p>
+          <p v-if="expectedEnd?.available" class="we-muted">本班次 {{ expectedEnd.shiftDate }} · 正常结束 {{ expectedEnd.normalEnd.date }} {{ expectedEnd.normalEnd.time }}<template v-if="expectedEnd.minutes>0"> · 现有预计结束 {{ expectedEnd.finalEnd.date }} {{ expectedEnd.finalEnd.time }}</template></p>
+          <p v-else class="we-muted">{{ expectedEnd&&!expectedEnd.available?expectedEnd.message:'正在确认当前班次…' }}</p>
+          <p v-if="expectedEnd?.available&&expectedEnd.previewEnd" class="we-muted">本次预计结束：{{ expectedEnd.previewEnd.date }} {{ expectedEnd.previewEnd.time }}（保存后生效）</p>
+          <FieldErrors :issues="issues" path="$.expectedEndTime" /></div>
           <label class="we-check"><input v-model="form.schedule.crossMidnight" type="checkbox" @change="update" /> 跨夜班次（下班在次日）</label>
           <fieldset><legend>每周工作日</legend><div class="settings-checks"><label v-for="(day,i) in days" :key="day" class="we-check"><input v-model="form.schedule.workWeek" type="checkbox" :value="i+1" @change="update" />{{ day }}</label></div></fieldset>
-          <p class="we-muted">午休可选：倒计时包含午休，工作进度不含午休。</p>
-          <button class="we-button" type="button" @click="form.schedule.breaks.push({startTime:'',endTime:'',startDayOffset:0,endDayOffset:0});update()">添加午休 / 休息区间</button>
-          <div v-for="(interval,i) in form.schedule.breaks" :key="i" class="settings-record">
-            <template v-if="interval && typeof interval==='object'">
-              <TimeInput v-model="interval.startTime" label="休息开始" @update:model-value="update" />
-              <label>开始日期<select v-model="interval.startDayOffset" class="we-control" @change="update"><option :value="0">班次开始日</option><option :value="1">次日</option></select></label>
-              <TimeInput v-model="interval.endTime" label="休息结束" @update:model-value="update" />
-              <label>结束日期<select v-model="interval.endDayOffset" class="we-control" @change="update"><option :value="0">班次开始日</option><option :value="1">次日</option></select></label>
-            </template>
-            <button class="we-button" type="button" @click="form.schedule.breaks.splice(i,1);update()">移除此休息区间</button>
-          </div>
+          <p v-if="form.schedule.breaks.length" class="we-muted">保留了历史午休配置，仍按原规则计算；修改其他设置不会清除它。</p>
           <FieldErrors :issues="issues" path="$.schedule" />
         </section>
         <section class="settings-panel">
@@ -61,14 +60,6 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
         </div>
         <details class="settings-more" :open="moreOpen" @toggle="moreOpen=($event.target as HTMLDetailsElement).open"><summary>更多设置</summary>
     <label class="settings-group-label">设置分组 <select v-model="active" :disabled="busy||!sessionReady" class="we-control"><option v-for="group in groups" :key="group[0]" :value="group[0]">{{ group[1] }}</option></select></label>
-        <section v-if="active==='overtime'" class="settings-panel">
-          <h3>按班次日期设置加班</h3><p class="we-muted">0–600 分钟；跨午夜仍归原班，历史不自动删除。清除仅影响所选条目，保存后生效；休息日不新建临时班次。</p>
-          <button type="button" class="we-button" @click="form.overtime.entries.push({shiftDate:'',minutes:null});update()">添加加班记录</button>
-          <div v-for="(entry,i) in form.overtime.entries" :key="i" class="settings-record">
-            <template v-if="entry && typeof entry==='object'"><label>所属班次日期<input v-model="entry.shiftDate" type="date" class="we-control" @input="update" /></label><label>加班分钟<input :value="entry.minutes??''" class="we-control" type="number" min="0" max="600" step="1" @input="entry.minutes=numeric($event);update()" /></label></template>
-            <button type="button" class="we-button" @click="form.overtime.entries.splice(i,1);update()">清除 {{ entry?.shiftDate||'此条' }} 班次设置</button>
-          </div><FieldErrors :issues="issues" path="$.overtime" />
-        </section>
         <section v-if="active==='calendar'" class="settings-panel">
           <h3>离线工作日历</h3><p class="we-muted">优先级：自定义日期 > 已核验年度安排 > 每周规则。缺少年份按周规则估算，不冒充官方数据。</p>
           <label v-for="item in metadata" :key="item.year" class="we-check calendar-year"><input v-model="form.calendar.enabledYears" type="checkbox" :value="item.year" @change="update" /><span>{{ item.year }} · {{ item.version }} · {{ item.verification==='verified'?'已核验':'未核验' }}<small>{{ item.source }} · 发布 {{ item.publishedOn }}</small></span></label>
@@ -99,6 +90,7 @@ h2 { font-size:22px; } h3 { font-size:var(--we-text-title); }
 .settings-group-label { display:flex;align-items:center;gap:var(--we-space-2);flex-wrap:wrap; }
 .settings-fields { border:0;padding:0;margin:0;min-width:0;display:grid;gap:var(--we-space-4); }
 .settings-common { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--we-space-4);align-items:start; }.settings-schedule { grid-column:1 / -1; }.settings-time-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--we-space-2);}.settings-more{border-top:1px solid var(--we-border);padding-top:var(--we-space-3)}summary{cursor:pointer;min-height:36px;line-height:36px;font-weight:600}.settings-more[open]{display:grid;gap:var(--we-space-3)}
+.settings-expected-fields { border:0;padding:0;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--we-space-2);align-items:end; }.settings-expected-fields > .we-button { align-self:center; }.settings-expected .we-muted{margin-top:var(--we-space-1)}
 .settings-panel { display:grid;gap:var(--we-space-3); }
 .settings-panel > label:not(.we-check), .settings-record > label { display:grid;gap:var(--we-space-1); }
 .settings-panel .we-control { max-width:100%;width:100%; }
@@ -109,5 +101,5 @@ fieldset { border:1px solid var(--we-border);border-radius:var(--we-radius-contr
 .settings-deferred { color:var(--we-warning-text);font-size:var(--we-text-small); }
 .settings-override { display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--we-space-2); }
 .calendar-year { align-items:flex-start; }.calendar-year small { display:block;font-size:var(--we-text-small);color:var(--we-muted);overflow-wrap:anywhere; }
-@media(max-width:520px){.settings-record,.settings-common,.settings-time-pair{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:520px){.settings-record,.settings-common,.settings-time-pair,.settings-expected-fields{grid-template-columns:minmax(0,1fr)}}
 </style>

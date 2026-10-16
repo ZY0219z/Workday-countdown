@@ -252,9 +252,9 @@ test('text time partial edits survive Main reload; invalid HH:MM is rejected wit
     await start.fill(text);await settled(page);expect(value(await page.evaluate(()=>window.workdayV2.settingsDraft.read())).draft.schedule).toMatchObject({startTime:text})
     await activate(page.getByRole('button',{name:'保存设置',exact:true}));await expect(page.locator('.field-error').first()).toContainText('HH:MM');await expect(start).toHaveValue(text);expect(readFileSync(formal(),'utf8')).toBe(before)
   }
-  await page.reload();await settled(page);await expect(start).toHaveValue('8:30');await start.fill('08:30');await activate(page.getByRole('button',{name:'添加午休 / 休息区间',exact:true}))
-  await page.getByLabel('休息开始',{exact:true}).fill('12:00');await page.getByLabel('休息结束',{exact:true}).fill('13:00');await settled(page)
-  expect(value(await page.evaluate(()=>window.workdayV2.settingsDraft.read())).draft.schedule).toMatchObject({startTime:'08:30',breaks:[{startTime:'12:00',endTime:'13:00'}]});expect(readFileSync(formal(),'utf8')).toBe(before)
+  await page.reload();await settled(page);await expect(start).toHaveValue('8:30');await start.fill('08:30');await settled(page)
+  await expect(page.getByRole('button',{name:'添加午休 / 休息区间',exact:true})).toHaveCount(0);await expect(page.getByLabel('休息开始',{exact:true})).toHaveCount(0)
+  expect(value(await page.evaluate(()=>window.workdayV2.settingsDraft.read())).draft.schedule).toMatchObject({startTime:'08:30',breaks:[]});expect(readFileSync(formal(),'utf8')).toBe(before)
 })
 
 test('failed IPC initialization disables save; a later exit error is visible and reconnect recovers',async()=>{
@@ -271,4 +271,47 @@ test('failed IPC initialization disables save; a later exit error is visible and
   await application!.evaluate(({ipcMain})=>{const handlers=(ipcMain as unknown as {_invokeHandlers:Map<string,unknown>})._invokeHandlers;for(const [channel,handler]of (globalThis as any).__d11OriginalHandlers)handlers.set(channel,handler)})
   await activate(page.getByRole('button',{name:'重新连接配置',exact:true}));await expect(page.getByRole('button',{name:'设置',exact:true})).toBeVisible();await expect(page.locator('.app-error')).toHaveCount(0);await settings(page)
   const child=application!.process(),closed=application!.waitForEvent('close');await activate(page.getByRole('button',{name:'退出程序',exact:true}));await closed;await expect.poll(()=>child.exitCode).toBe(0);application=undefined
+})
+
+function seedHistoric(){
+  const date=new Intl.DateTimeFormat('sv-SE',{year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),config=fixture()
+  config.calendar.overrides[date]='work';config.schedule.breaks=[{startTime:'12:00',endTime:'13:00',startDayOffset:0,endDayOffset:0}]
+  config.overtime.entries=[{shiftDate:'2024-01-02',minutes:80},{shiftDate:date,minutes:120}]
+  mkdirSync(join(profile,'lifecycle'),{recursive:true});writeFileSync(formal(),JSON.stringify(config));return {date,config}
+}
+test('expected end previews midnight via Main, saves only this shift; notice expires and cancel preserves history/lunch',async()=>{
+  const {date,config}=seedHistoric(),page=await launch();await settings(page)
+  await expect(page.getByLabel('今天预计下班时间',{exact:true})).toHaveValue('20:00');await expect(page.getByText('保留了历史午休配置',{exact:false})).toBeVisible()
+  await expect(page.getByRole('button',{name:'添加午休 / 休息区间',exact:true})).toHaveCount(0);await expect(page.getByLabel('休息开始',{exact:true})).toHaveCount(0)
+  await page.getByLabel('今天预计下班时间',{exact:true}).fill('00:30');await settled(page)
+  const draft=value(await page.evaluate(()=>window.workdayV2.settingsDraft.read()));expect(draft.expectedEnd?.available).toBe(true);if(!draft.expectedEnd?.available)throw Error('No target');expect(draft.expectedEnd.previewEnd?.time).toBe('00:30')
+  await expect(page.getByText('本次预计结束：',{exact:false})).toContainText(draft.expectedEnd.previewEnd!.date)
+  expect(JSON.parse(readFileSync(formal(),'utf8')).overtime.entries).toEqual(config.overtime.entries)
+  await activate(page.getByRole('button',{name:'保存设置',exact:true}));await expect(page.locator('.app-notice[role=status]')).toHaveText('设置已保存。')
+  const noticeAt=performance.now();await expect(page.locator('.app-notice[role=status]')).toHaveCount(0,{timeout:3500});const noticeDurationMs=performance.now()-noticeAt;expect(noticeDurationMs).toBeGreaterThan(1700)
+  const saved=JSON.parse(readFileSync(formal(),'utf8'));expect(saved.overtime.entries).toEqual([{shiftDate:'2024-01-02',minutes:80},{shiftDate:date,minutes:390}]);expect(saved.schedule.breaks).toEqual(config.schedule.breaks)
+  expect(value(await page.evaluate(()=>window.workdayV2.snapshot.read())).configRevision).toBe(saved.revision)
+  await settings(page);await expect(page.getByLabel('今天预计下班时间',{exact:true})).toHaveValue('00:30');await activate(page.getByRole('button',{name:'取消今天加班',exact:true}));await settled(page);await expect(page.getByLabel('今天预计下班时间',{exact:true})).toHaveValue('18:00')
+  expect(JSON.parse(readFileSync(formal(),'utf8')).overtime.entries).toEqual(saved.overtime.entries)
+  await activate(page.getByRole('button',{name:'保存设置',exact:true}));await expect(page.getByRole('region',{name:'工作日仪表盘'})).toBeVisible()
+  expect(JSON.parse(readFileSync(formal(),'utf8')).overtime.entries).toEqual([{shiftDate:'2024-01-02',minutes:80}]);expect(JSON.parse(readFileSync(formal(),'utf8')).schedule.breaks).toEqual(config.schedule.breaks)
+  console.log('D11 transient notice:',JSON.stringify({noticeDurationMs,hidden:true}));await hidden()
+})
+test('expected partial text survives reload, dirty native close/save fail safely, discard restores and valid exit saves',async()=>{
+  const {date:seedDate}=seedHistoric();const page=await launch(),before=readFileSync(formal(),'utf8');await settings(page);const input=page.getByLabel('今天预计下班时间',{exact:true});await input.fill('19:');await settled(page)
+  await page.reload();await settled(page);await expect(input).toHaveValue('19:');await choose('continueEditing');await application!.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].close());await expect(input).toHaveValue('19:');expect(application!.process().exitCode).toBe(null)
+  await choose('save');await activate(page.getByRole('button',{name:'退出程序',exact:true}));await expect(page.locator('.app-error')).toBeVisible();expect(application!.process().exitCode).toBe(null);expect(readFileSync(formal(),'utf8')).toBe(before)
+  await activate(page.getByRole('button',{name:'取消 / 返回仪表盘',exact:true}));await activate(page.getByRole('dialog').getByRole('button',{name:'继续编辑',exact:true}));await expect(input).toHaveValue('19:')
+  await activate(page.getByRole('button',{name:'取消 / 返回仪表盘',exact:true}));await activate(page.getByRole('dialog').getByRole('button',{name:'放弃',exact:true}));await settings(page);await expect(input).toHaveValue('20:00');expect(readFileSync(formal(),'utf8')).toBe(before)
+  await input.fill('21:00');await settled(page);await choose('save');const child=application!.process(),closed=application!.waitForEvent('close');await activate(page.getByRole('button',{name:'退出程序',exact:true}));await closed;await expect.poll(()=>child.exitCode).toBe(0);application=undefined;expect(JSON.parse(readFileSync(formal(),'utf8')).overtime.entries).toEqual([{shiftDate:'2024-01-02',minutes:80},{shiftDate:seedDate,minutes:180}])
+})
+test('rejected expected-time scratch sync can be explicitly discarded without trapping settings',async()=>{
+  seedHistoric();const page=await launch(),before=readFileSync(formal(),'utf8');await settings(page);await page.getByLabel('今天预计下班时间',{exact:true}).fill('x'.repeat(33))
+  await expect(page.getByRole('button',{name:'重试同步草稿',exact:true})).toBeVisible();await activate(page.getByRole('button',{name:'重试同步草稿',exact:true}));await expect(page.getByLabel('今天预计下班时间',{exact:true})).toHaveValue('x'.repeat(33));await page.getByLabel('每月发薪日',{exact:true}).fill('11');await expect(page.getByRole('button',{name:'重试同步草稿',exact:true})).toBeVisible();await expect(page.getByLabel('今天预计下班时间',{exact:true})).toHaveValue('x'.repeat(33));await activate(page.getByRole('button',{name:'取消 / 返回仪表盘',exact:true}));await activate(page.getByRole('dialog').getByRole('button',{name:'放弃',exact:true}));await settings(page);await expect(page.getByLabel('今天预计下班时间',{exact:true})).toHaveValue('20:00');expect(readFileSync(formal(),'utf8')).toBe(before)
+})
+
+test('failed scratch synchronization still offers explicit quit continue/discard and ends the owned process',async()=>{
+  seedHistoric();const page=await launch(),before=readFileSync(formal(),'utf8');await settings(page);const input=page.getByLabel('今天预计下班时间',{exact:true});await input.fill('x'.repeat(33));await expect(page.getByRole('button',{name:'重试同步草稿',exact:true})).toBeVisible()
+  await activate(page.getByRole('button',{name:'退出程序',exact:true}));await expect(page.getByRole('dialog')).toContainText('保存后退出');await activate(page.getByRole('dialog').getByRole('button',{name:'继续编辑',exact:true}));await expect(input).toHaveValue('x'.repeat(33));expect(application!.process().exitCode).toBe(null)
+  await activate(page.getByRole('button',{name:'退出程序',exact:true}));const child=application!.process(),closed=application!.waitForEvent('close');await activate(page.getByRole('dialog').getByRole('button',{name:'放弃',exact:true}));await closed;await expect.poll(()=>child.exitCode).toBe(0);application=undefined;expect(readFileSync(formal(),'utf8')).toBe(before)
 })

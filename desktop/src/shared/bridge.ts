@@ -25,7 +25,7 @@ export function createV2Bridge(role:'main'|'mini',transport:BridgeTransport):Mai
   if(role==='mini')return Object.freeze({...common,role:'mini'})
   return Object.freeze({...common,role:'main',
     config:Object.freeze({read:()=>call('config.read',null),save:(request:ContractRequests['config.save'])=>call('config.save',request)}),
-    settingsDraft:Object.freeze({read:()=>call('settingsDraft.read',null),update:(request:ContractRequests['settingsDraft.update'])=>call('settingsDraft.update',request),discard:()=>call('settingsDraft.discard',null)}),
+    settingsDraft:Object.freeze({read:()=>call('settingsDraft.read',null),update:(request:ContractRequests['settingsDraft.update'])=>call('settingsDraft.update',request),discard:()=>call('settingsDraft.discard',null),setExpectedEnd:(request:ContractRequests['settingsDraft.setExpectedEnd'])=>call('settingsDraft.setExpectedEnd',request)}),
     data:Object.freeze({previewRecovery:()=>call('data.previewRecovery',null),cancelImport:(request:ContractRequests['data.cancelImport'])=>call('data.cancelImport',request),previewImport:(request:ContractRequests['data.previewImport'])=>call('data.previewImport',request),applyImport:(request:ContractRequests['data.applyImport'])=>call('data.applyImport',request),export:(request:ContractRequests['data.export'])=>call('data.export',request)}),
     calendar:Object.freeze({readMetadata:()=>call('calendar.readMetadata',null),previewImport:()=>call('calendar.previewImport',null),applyImport:(request:ContractRequests['calendar.applyImport'])=>call('calendar.applyImport',request)})})
 }

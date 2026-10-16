@@ -18,6 +18,7 @@ import {createDefaultAppConfig} from '../../src/shared/config-schema'
 import {createCalendar} from '../../src/domain/calendar'
 import {calculateNextSalary} from '../../src/domain/salary'
 import {validateConfigSettings,validateConfigSettingsAsync,editableConfig} from '../../src/main/services/config-validation'
+import {currentOvertimeShift,expectedEndOvertime} from '../../src/domain/expected-end'
 import {success} from '../../src/shared/validation'
 import {createSettingsController} from '../../src/renderer/src/ui/settings-controller'
 import {nodeConfigFiles} from '../../src/main/services/config-files'
@@ -39,7 +40,7 @@ async function setup(options:{missing?:boolean;failWrite?:boolean}={}){
   const controller=createSettingsController(api,()=>{});value(await controller.load())
   const close=()=>{controller.dispose();quit.dispose();router.dispose();runtime.dispose()}
   after(close)
-  return {directory,store,runtime,controller,api,handlers,event,choose:(value:ExitChoice)=>{choice=value},quits:()=>quits,source:(path:string|null)=>{source=path},fail:()=>{failWrite=true}}
+  return {ctx,directory,store,runtime,controller,api,handlers,event,choose:(value:ExitChoice)=>{choice=value},quits:()=>quits,source:(path:string|null)=>{source=path},fail:()=>{failWrite=true}}
 }
 test('real missing first session remains missing until explicit UI save, then real Snapshot exists',async()=>{
   const a=await setup({missing:true});assert.equal(a.controller.state.session!.saved,null);assert.equal(a.controller.state.session!.configurationStatus,'missing')
@@ -153,4 +154,79 @@ test('default payroll delays a rest-day tenth but respects an official Saturday 
   const rest=value(calculateNextSalary(calendar,'2026-05-09',10,'delay')),makeup=value(calculateNextSalary(calendar,'2026-10-10',10,'delay'))
   assert.equal(rest.status,'found');if(rest.status==='found')assert.equal(rest.actualDate,'2026-05-11')
   assert.equal(makeup.status,'found');if(makeup.status==='found'){assert.equal(makeup.actualDate,'2026-10-10');assert.equal(makeup.days,0)}
+})
+
+function targetFixture(at='2026-10-14T10:00:00Z',zone='UTC',change:(settings:import('../../src/shared/contracts').EditableConfig)=>void=()=>{}){
+  const ctx=context();value(ctx.clock.setTimeZone(zone));value(ctx.clock.setInstant(Date.parse(at)))
+  const config=value(createDefaultAppConfig({updatedAt:'2026-10-15T00:00:00.000Z',appVersion:'2.0.0'},ctx.calendars.listMetadata())),settings=value(editableConfig(config));change(settings)
+  const calendar=value(createCalendar({workWeek:settings.schedule.workWeek,overrides:settings.calendar.overrides},[2024,2025,2026].map(year=>value(ctx.calendars.readYear(year))!)))
+  const scheduleContext={calendar,zones:ctx.zones,timeZoneId:zone},now=value(ctx.clock.read()),shift=currentOvertimeShift(settings,now,scheduleContext)
+  return {ctx,settings,scheduleContext,shift}
+}
+for(const [input,minutes]of [['18:00',0],['19:00',60],['20:00',120],['00:30',390]] as const)test(`expected end ${input} maps to ${minutes} exact elapsed minutes`,()=>{
+  const a=targetFixture(),shift=value(a.shift),result=value(expectedEndOvertime(a.settings,shift,input,a.scheduleContext))
+  assert.deepEqual(result.entries,[{shiftDate:'2026-10-14',minutes}]);assert.deepEqual(a.settings.overtime.entries,[])
+})
+for(const input of ['04:01','24:00','08:60','19:',''])test(`invalid expected end ${JSON.stringify(input)} never changes overtime`,()=>{
+  const a=targetFixture();rejected(expectedEndOvertime(a.settings,value(a.shift),input,a.scheduleContext));assert.deepEqual(a.settings.overtime.entries,[])
+})
+for(const [at,date]of [['2026-10-14T07:00:00Z','2026-10-14'],['2026-10-14T20:30:00Z','2026-10-14']] as const)test(`target is identifiable before work or after normal finish at ${at}`,()=>{
+  const a=targetFixture(at);assert.equal(value(a.shift).shiftDate,date);assert.equal(value(expectedEndOvertime(a.settings,value(a.shift),'21:00',a.scheduleContext)).entries[0].minutes,180)
+})
+test('overnight active shift is assigned to its original start date',()=>{
+  const a=targetFixture('2026-10-15T01:00:00Z','UTC',s=>{s.schedule.startTime='22:00';s.schedule.endTime='06:00';s.schedule.crossMidnight=true})
+  assert.equal(value(a.shift).shiftDate,'2026-10-14');assert.deepEqual(value(expectedEndOvertime(a.settings,value(a.shift),'07:00',a.scheduleContext)).entries,[{shiftDate:'2026-10-14',minutes:60}])
+})
+test('rest day without active regular shift never creates overtime',()=>{rejected(targetFixture('2026-10-17T12:00:00Z').shift,'UNAVAILABLE')})
+for(const [at,input]of [['2026-11-01T04:10:00Z','01:30'],['2026-03-08T06:10:00Z','02:30']] as const)test(`expected end refuses DST ambiguity or gap at ${at}`,()=>{
+  const a=targetFixture(at,'America/New_York',s=>{s.schedule.startTime='00:00';s.schedule.endTime=at.includes('11-01')?'00:30':'01:30';s.schedule.workWeek=[7]})
+  const result=expectedEndOvertime(a.settings,value(a.shift),input,a.scheduleContext);rejected(result);if(!result.ok)assert.match(result.error.message+' '+JSON.stringify(result.error),/DST/)
+})
+test('expected end still rejects overlap with the next regular shift',()=>{
+  const a=targetFixture('2026-10-14T10:00:00Z','UTC',s=>{s.schedule.startTime='00:30'})
+  rejected(expectedEndOvertime(a.settings,value(a.shift),'01:00',a.scheduleContext))
+})
+test('cancel current overtime preserves all other dated history and future records',()=>{
+  const a=targetFixture('2026-10-14T10:00:00Z','UTC',s=>{s.overtime.entries=[{shiftDate:'2026-10-01',minutes:80},{shiftDate:'2026-10-14',minutes:120},{shiftDate:'2026-10-15',minutes:60}]})
+  assert.deepEqual(value(expectedEndOvertime(a.settings,value(a.shift),null,a.scheduleContext)).entries,[{shiftDate:'2026-10-01',minutes:80},{shiftDate:'2026-10-15',minutes:60}]);assert.equal(a.settings.overtime.entries.length,3)
+})
+
+test('real Main scratch preserves partial input across reload; invalid save/exit never writes it',async()=>{
+  const a=await setup(),before=await readFile(join(a.directory,'settings.json'),'utf8');a.controller.editExpectedEnd('19:');value(await a.controller.flush())
+  const draft=value(a.runtime.readDraft());assert.equal(draft.expectedEndEdit!.input,'19:');assert.equal(draft.dirty,true);assert.deepEqual(draft.draft.overtime,{entries:[]})
+  const reloaded=createSettingsController(a.api,()=>{});value(await reloaded.load());assert.equal(reloaded.state.expectedEndInput,'19:');reloaded.dispose()
+  assert.equal(await a.controller.save(),false);a.choose('save');rejected(await a.api.app.quit());assert.equal(a.quits(),0);assert.equal(await readFile(join(a.directory,'settings.json'),'utf8'),before)
+  a.choose('continueEditing');rejected(await a.api.app.quit(),'CANCELLED');assert.equal(value(a.runtime.readDraft()).expectedEndEdit!.input,'19:')
+  assert.equal(await a.controller.discard(),true);assert.equal(a.controller.state.expectedEndInput,'18:00');assert.equal(a.controller.state.dirty,false)
+})
+test('real expected-end save updates Snapshot and progress, does not inherit next day',async()=>{
+  const a=await setup();value(a.ctx.clock.setInstant(Date.parse('2026-10-14T18:30:00Z')));value(await a.controller.load());a.controller.editExpectedEnd('20:00');value(await a.controller.flush());assert.equal(await a.controller.save(),true)
+  const config=value(a.runtime.readConfig()).config;assert.deepEqual(config.overtime.entries,[{shiftDate:'2026-10-14',minutes:120}]);const snapshot=value(await a.runtime.snapshots.read());assert.equal(snapshot.state,'overtime');assert.equal(snapshot.countdown!.seconds,5400);assert.ok(snapshot.progress!.percent<100)
+  value(a.ctx.clock.setInstant(Date.parse('2026-10-15T10:00:00Z')));a.runtime.refresh.wake(true);assert.equal(value(await a.runtime.snapshots.read()).activeShift!.overtimeMinutes,0)
+})
+test('history breaks survive unrelated save; cancel clears only current shift and failed write retains inputs',async()=>{
+  const a=await setup(),edit=structuredClone(a.controller.state.editor);edit.schedule.breaks=[{startTime:'12:00',endTime:'13:00',startDayOffset:0,endDayOffset:0}];edit.overtime.entries=[{shiftDate:'2026-10-01',minutes:80},{shiftDate:'2026-10-14',minutes:120}];a.controller.edit(edit);assert.equal(await a.controller.save(),true);assert.equal(a.controller.state.expectedEndInput,'20:00')
+  const next=structuredClone(a.controller.state.editor);next.appearance.accent='coral';a.controller.edit(next);assert.equal(await a.controller.save(),true);assert.deepEqual(value(a.runtime.readConfig()).config.schedule.breaks,edit.schedule.breaks)
+  a.controller.editExpectedEnd(null);assert.equal(await a.controller.save(),true);assert.deepEqual(value(a.runtime.readConfig()).config.overtime.entries,[{shiftDate:'2026-10-01',minutes:80}]);assert.equal(a.controller.state.expectedEndInput,'18:00')
+  const before=await readFile(join(a.directory,'settings.json'),'utf8');a.fail();a.controller.editExpectedEnd('19:00');assert.equal(await a.controller.save(),false);assert.equal(a.controller.state.expectedEndInput,'19:00');assert.equal(await readFile(join(a.directory,'settings.json'),'utf8'),before);assert.equal(await a.controller.discard(),true);assert.equal(a.controller.state.expectedEndInput,'18:00')
+})
+for(const change of ['date','zone'] as const)test(`stale expected-end target after ${change} change cannot target a new shift`,async()=>{
+  const a=await setup(),before=await readFile(join(a.directory,'settings.json'),'utf8');a.controller.editExpectedEnd('20:00');value(await a.controller.flush())
+  if(change==='date')value(a.ctx.clock.setInstant(Date.parse('2026-10-15T10:00:00Z')));else value(a.ctx.clock.setTimeZone('Asia/Shanghai'))
+  assert.equal(value(a.runtime.readDraft()).expectedEnd?.available,false);assert.equal(await a.controller.save(),false);assert.equal(a.controller.state.expectedEndInput,'20:00');assert.equal(await readFile(join(a.directory,'settings.json'),'utf8'),before)
+})
+test('new fixed IPC cannot set a foreign target or revision; native discard handles raw expected time',async()=>{
+  const a=await setup(),context=a.controller.state.expectedEnd;assert.ok(context?.available)
+  rejected(await a.api.settingsDraft.setExpectedEnd({targetKey:'foreign',expectedRevision:1,input:'19:00'}),'UNAVAILABLE')
+  rejected(await a.api.settingsDraft.setExpectedEnd({targetKey:context.targetKey,expectedRevision:2,input:'19:00'}),'REVISION_CONFLICT')
+  a.controller.editExpectedEnd('24:00');value(await a.controller.flush());a.choose('discard');value(await a.api.app.quit());assert.equal(a.quits(),1);assert.equal(value(a.runtime.readDraft()).expectedEndEdit,undefined)
+})
+
+test('Main provides a next-date preview without writing it or forgetting equal repeated input',async()=>{
+  const a=await setup(),before=await readFile(join(a.directory,'settings.json'),'utf8');a.controller.editExpectedEnd('00:30');value(await a.controller.flush());let draft=value(a.runtime.readDraft());assert.ok(draft.expectedEnd?.available);assert.deepEqual(draft.expectedEnd.previewEnd,{date:'2026-10-15',time:'00:30'});assert.equal(await readFile(join(a.directory,'settings.json'),'utf8'),before)
+  a.controller.editExpectedEnd('00:30');value(await a.controller.flush());draft=value(a.runtime.readDraft());assert.equal(draft.expectedEndEdit!.input,'00:30');assert.equal(await a.controller.save(),true);assert.deepEqual(value(a.runtime.readConfig()).config.overtime.entries,[{shiftDate:'2026-10-14',minutes:390}])
+})
+
+test('failed expected-time synchronization survives an unrelated edit and retry, then explicit discard clears it',async()=>{
+  const a=await setup(),before=await readFile(join(a.directory,'settings.json'),'utf8');a.controller.editExpectedEnd('x'.repeat(33));rejected(await a.controller.flush());const edit=structuredClone(a.controller.state.editor);edit.appearance.accent='coral';a.controller.edit(edit);rejected(await a.controller.flush());assert.equal(a.controller.state.expectedEndInput,'x'.repeat(33));assert.equal(await a.controller.save(),false);a.controller.retry();rejected(await a.controller.flush());assert.equal(a.controller.state.expectedEndInput,'x'.repeat(33));assert.equal(await readFile(join(a.directory,'settings.json'),'utf8'),before);assert.equal(await a.controller.discard(),true);assert.equal(a.controller.state.expectedEndInput,'18:00')
 })

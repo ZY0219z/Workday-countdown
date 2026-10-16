@@ -222,7 +222,7 @@ test('all response DTO examples and failure results are JSON round-trip data', (
       excludesToday: true, isActualAttendance: false, quality: { ...quality, incompleteYears: [] } }, nextRest: null, salary: null, countdown: null, progress: null, warnings: [] }
   const responses: ContractResponses = {
     'config.read': { config: saved, warnings: [] }, 'config.save': { config: saved, warnings: [] },
-    'settingsDraft.read': draft, 'settingsDraft.update': draft, 'settingsDraft.discard': draft,
+    'settingsDraft.read': draft, 'settingsDraft.update': draft, 'settingsDraft.discard': draft, 'settingsDraft.setExpectedEnd':draft,
     'snapshot.read': snapshot, 'snapshot.subscribe': null, 'snapshot.unsubscribe': null, 'window.perform': null, 'app.quit': null,
     'data.previewImport': { previewToken: 'token', sourceKind: 'python-v1', sourceHash: 'a'.repeat(64), expectedRevision: 0,
       choices: [{ field: 'schedule.startTime', current: '09:00', incoming: '08:30', issues: [] }], undatedOvertimeMinutes: 80 },
@@ -345,3 +345,13 @@ function checkMiniSurface(api: MiniWindowApi): void {
   void request
 }
 void checkMiniSurface
+
+test('expected-end capability is main-only, bounded scratch data with no arbitrary target date or path',()=>{
+  const request={expectedRevision:1,targetKey:'a'.repeat(64),input:'19:'}
+  unwrap(validateContractRequest('main','settingsDraft.setExpectedEnd',request))
+  unwrap(validateContractRequest('main','settingsDraft.setExpectedEnd',{...request,input:''}))
+  unwrap(validateContractRequest('main','settingsDraft.setExpectedEnd',{...request,input:null}))
+  reject(validateContractRequest('mini','settingsDraft.setExpectedEnd',request),'FORBIDDEN')
+  for(const extra of [{shiftDate:'2026-10-15'},{path:'C:/arbitrary'},{windowId:1}])reject(validateContractRequest('main','settingsDraft.setExpectedEnd',{...request,...extra}))
+  reject(validateContractRequest('main','settingsDraft.setExpectedEnd',{...request,input:'a'.repeat(33)}))
+})

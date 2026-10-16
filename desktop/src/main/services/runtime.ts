@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { AppConfig, ConfigSnapshot, ContractRequests, JsonObject, Result, SettingsDraftSession, SnapshotWarning } from '../../shared/contracts'
-import { success } from '../../shared/validation'
-import { validateDraftFields } from '../../shared/config-schema'
+import { success, validateStructure } from '../../shared/validation'
+import { validateDraftFields, editableConfigValidator } from '../../shared/config-schema'
 import { checkExpectedRevision, validateContractRequest } from '../../shared/capabilities'
 import { createSettingsDraft, updateSettingsDraft, beginDraftSave, finishDraftSave, prepareDraftSave } from '../../shared/settings-draft'
 import { createDashboardEngine } from '../../domain/dashboard'
@@ -16,10 +16,14 @@ import type { SnapshotService } from './snapshot-service'
 import type { RefreshCoordinator } from './clock'
 import { createDefaultAppConfig } from '../../shared/config-schema'
 import { editableConfig } from './config-validation'
+import { createCalendar } from '../../domain/calendar'
+import { currentOvertimeShift, expectedEndOvertime, shiftEndLabel } from '../../domain/expected-end'
+import type { EditableConfig, ExpectedEndContext } from '../../shared/contracts'
 export interface Runtime {
   snapshots:SnapshotService;refresh:RefreshCoordinator
   start():Promise<Result<null>>;readConfig():Result<ConfigSnapshot>;readDraft():Result<SettingsDraftSession>
   updateDraft(request:ContractRequests['settingsDraft.update']):Result<SettingsDraftSession>
+  setExpectedEnd(request:ContractRequests['settingsDraft.setExpectedEnd']):Result<SettingsDraftSession>
   discardDraft():Result<SettingsDraftSession>;save(request:ContractRequests['config.save']):Promise<Result<ConfigSnapshot>>
   applyImport(request:ContractRequests['data.applyImport']):Promise<Result<ConfigSnapshot>>
   previewImport(request:ContractRequests['data.previewImport']):Promise<Result<import('../../shared/contracts').ImportPreview>>
@@ -36,6 +40,7 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
   let config:ConfigSnapshot|null=null,state:ConfigLoadState|null=null,draft:SettingsDraftSession=empty(),busy=false,disposed=false,calendarRevision=0,calendarKey=''
   let defaultSettings:import('../../shared/contracts').EditableConfig|null=null,defaultPersistence:SettingsDraftSession['defaultPersistence']|null=null
   let defaultTask:ReturnType<typeof setImmediate>|null=null
+  let expectedEndEdit:SettingsDraftSession['expectedEndEdit']|null=null
   const snapshots=createSnapshotService(options.clock,c=>{
     const engine=createDashboardEngine(c,options.calendars,options.zones,options.maxHistoryDays)
     if(!engine.ok)return engine
@@ -46,7 +51,34 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
     }})
   })
   const refresh=createRefreshCoordinator(snapshots,options.timers)
-  const identity=()=>createHash('sha256').update(JSON.stringify([draft.saved?.revision??0,draft.draft,draft.save.status])).digest('hex')
+  const identity=()=>createHash('sha256').update(JSON.stringify([draft.saved?.revision??0,draft.draft,draft.save.status,expectedEndEdit])).digest('hex')
+  const dirty=()=>draft.dirty||expectedEndEdit!==null
+  function overtimeTarget(settings:EditableConfig){
+    const now=options.clock.read();if(!now.ok)return now
+    const years=[]
+    for(const year of settings.calendar.enabledYears){const loaded=options.calendars.readYear(year);if(!loaded.ok)return loaded;if(loaded.data)years.push(loaded.data)}
+    const calendar=createCalendar({workWeek:settings.schedule.workWeek,overrides:settings.calendar.overrides},years);if(!calendar.ok)return calendar
+    const context={calendar:calendar.data,zones:options.zones,timeZoneId:now.data.timeZoneId}
+    const shift=currentOvertimeShift(settings,now.data,context);if(!shift.ok)return shift
+    const normalEnd=shiftEndLabel(shift.data.normalEndsAt,context),finalEnd=shiftEndLabel(shift.data.finalEndsAt,context)
+    if(!normalEnd.ok)return normalEnd;if(!finalEnd.ok)return finalEnd
+    const targetKey=createHash('sha256').update(JSON.stringify([config?.config.revision??0,shift.data.shiftDate,now.data.timeZoneId])).digest('hex')
+    return success({shift:shift.data,context,view:{available:true as const,targetKey,shiftDate:shift.data.shiftDate,normalEnd:normalEnd.data,finalEnd:finalEnd.data,minutes:shift.data.overtimeMinutes}})
+  }
+  function expectedEndContext():ExpectedEndContext{
+    const settings=validateStructure(draft.draft,editableConfigValidator)
+    if(!settings.ok)return {available:false,message:'请先填写有效的工作时间和日期设置，再调整今天预计下班。'}
+    const target=overtimeTarget(settings.data)
+    if(!target.ok)return {available:false,message:target.error.message}
+    const view:Extract<ExpectedEndContext,{available:true}>=target.data.view
+    if(expectedEndEdit&&expectedEndEdit.targetKey!==view.targetKey)return {available:false,message:'班次或时区已变化，保留了旧班次未保存输入；请通过取消/返回明确放弃后重新填写。'}
+    if(expectedEndEdit?.targetKey===view.targetKey){
+      const preview=expectedEndOvertime(settings.data,target.data.shift,expectedEndEdit.input,target.data.context)
+      if(preview.ok){const minutes=preview.data.entries.find(entry=>entry.shiftDate===view.shiftDate)?.minutes??0
+        const label=shiftEndLabel(target.data.shift.normalEndsAt+minutes*60_000,target.data.context);if(label.ok)view.previewEnd=label.data}
+    }
+    return view
+  }
   function setSnapshot(value:AppConfig):Result<null>{
     const key=JSON.stringify([value.calendar,value.schedule.workWeek])
     if(key!==calendarKey){calendarRevision++;calendarKey=key}
@@ -58,6 +90,7 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
     const changed=setSnapshot(value.config)
     config=clone(value);draft=next.data
     defaultSettings=null;defaultPersistence=null
+    expectedEndEdit=null
     if(!changed.ok)config.warnings.push({field:'$.snapshot',reason:'FORMAT',message:'配置已保存，但快照准备不可用；没有保留旧有效快照。'})
     return success(null)
   }
@@ -87,7 +120,17 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
       refresh.start();return success(null)
     },
     readConfig():Result<ConfigSnapshot>{return config?success(clone(config)):state?.status==='future'?{ok:false,error:state.error}:unavailable(state?.status==='missing'?'正式配置尚未初始化；必须显式提供完整设置并保存。':'正式配置无效或未加载，未自动覆盖。')},
-    readDraft():Result<SettingsDraftSession>{return disposed?unavailable():success(clone({...draft,configurationStatus:state?.status??'unloaded',...(defaultPersistence?{defaultPersistence}:{})}))},
+    readDraft():Result<SettingsDraftSession>{return disposed?unavailable():success(clone({...draft,dirty:dirty(),expectedEnd:expectedEndContext(),...(expectedEndEdit?{expectedEndEdit}:{}),configurationStatus:state?.status??'unloaded',...(defaultPersistence?{defaultPersistence}:{})}))},
+    setExpectedEnd(request:ContractRequests['settingsDraft.setExpectedEnd']):Result<SettingsDraftSession>{
+      const checked=validateContractRequest('main','settingsDraft.setExpectedEnd',request);if(!checked.ok)return checked
+      if(busy||disposed)return unavailable('设置正在保存或服务已退出。')
+      const revision=checkExpectedRevision(checked.data.expectedRevision,config?.config.revision??0);if(!revision.ok)return revision
+      const context=expectedEndContext()
+      if(!context.available)return unavailable(context.message)
+      if(checked.data.targetKey!==context.targetKey)return unavailable('当前班次或时区已变化，未应用旧输入；请放弃旧草稿后重新填写。')
+      expectedEndEdit={targetKey:context.targetKey,input:checked.data.input}
+      return methods.readDraft()
+    },
     updateDraft(request:ContractRequests['settingsDraft.update']):Result<SettingsDraftSession>{
       if(busy||disposed)return unavailable('设置正在保存或服务已退出。')
       const revision=checkExpectedRevision(request.expectedRevision,config?.config.revision??0);if(!revision.ok)return revision
@@ -101,12 +144,19 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
     },
     discardDraft():Result<SettingsDraftSession>{
       if(busy||disposed)return unavailable('保存未结束，不能放弃。')
-      const next=config?createSettingsDraft(config.config):success(initialDraft());if(!next.ok)return next;draft=next.data;return methods.readDraft()
+      const next=config?createSettingsDraft(config.config):success(initialDraft());if(!next.ok)return next;draft=next.data;expectedEndEdit=null;return methods.readDraft()
     },
     async save(request:ContractRequests['config.save']):Promise<Result<ConfigSnapshot>>{
       const valid=validateContractRequest('main','config.save',request);if(!valid.ok)return valid
       if(busy||disposed)return unavailable('设置正在保存或服务已退出。')
       const revision=checkExpectedRevision(valid.data.expectedRevision,config?.config.revision??0);if(!revision.ok)return revision
+      if(expectedEndEdit){
+        const target=overtimeTarget(valid.data.settings);if(!target.ok)return target
+        if(target.data.view.targetKey!==expectedEndEdit.targetKey)return unavailable('当前班次或时区已变化，未应用旧输入；请放弃旧草稿后重新填写。')
+        const converted=expectedEndOvertime(valid.data.settings,target.data.shift,expectedEndEdit.input,target.data.context)
+        if(!converted.ok)return converted
+        valid.data.settings.overtime=converted.data
+      }
       const edit=methods.updateDraft({draft:valid.data.settings as unknown as JsonObject,expectedRevision:valid.data.expectedRevision});if(!edit.ok)return edit
       if(draft.saved){const begin=beginDraftSave(draft as import('../../shared/contracts').DraftState,config!.config.revision);if(!begin.ok)return begin;draft=begin.data}else draft.save={status:'saving'}
       busy=true
@@ -125,7 +175,7 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
     },
     async applyImport(request:ContractRequests['data.applyImport']):Promise<Result<ConfigSnapshot>>{
       if(!options.migration)return unavailable('可信文件选择与导入来源尚未接入。')
-      if(busy||draft.dirty||disposed)return unavailable('请先保存或明确放弃当前草稿。')
+      if(busy||dirty()||disposed)return unavailable('请先保存或明确放弃当前草稿。')
       busy=true;try{const result=await options.writes.run(()=>options.migration!.apply(request));if(result.ok){state={status:'ready',config:result.data.config};const applied=accept(result.data);if(!applied.ok)return applied;refresh.wake(true);return methods.readConfig()}return result}finally{busy=false}
     },
     previewImport:(request:ContractRequests['data.previewImport'])=>options.migration?options.migration.preview(request):Promise.resolve(unavailable<import('../../shared/contracts').ImportPreview>('可信文件选择尚未接入；未读取或导入任何来源。')),
@@ -134,7 +184,7 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
     calendarMetadata:()=>success(options.calendars.listMetadata()),
     exportConfig:()=>options.migration?options.migration.exportConfig():Promise.resolve(unavailable<null>('可信导出目标选择尚未接入。')),
     exitAdapter: {
-      async read(){return success({dirty:draft.dirty,saving:busy||draft.save.status==='saving',identity:identity()})},
+      async read(){return success({dirty:dirty(),saving:busy||draft.save.status==='saving',identity:identity()})},
       confirm:options.confirm,
       async save(expected:string):Promise<Result<null>>{
         if(identity()!==expected)return unavailable('草稿已改变，请重新确认。')
