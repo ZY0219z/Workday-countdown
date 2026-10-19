@@ -26,7 +26,7 @@ onBeforeUnmount(()=>{void api.window.unsubscribePresentation()})
   <section ref="host" class="workday-ui mini-shell" aria-label="迷你倒计时" :data-visible="visible">
     <header class="mini-header">
       <span class="mini-state" :data-tone="badge.tone" role="status">{{ badge.label }}</span>
-      <nav aria-label="迷你窗口操作"><button type="button" :aria-pressed="preferences?.alwaysOnTop??false" :disabled="busy||!preferences" @click="command({action:'setMiniTop',enabled:!preferences?.alwaysOnTop})">置顶</button><button type="button" aria-label="隐藏迷你窗" title="隐藏到托盘" :disabled="busy" @click="command({action:'hideMini'})">×</button></nav>
+      <nav aria-label="迷你窗口操作"><button type="button" :aria-pressed="preferences?.alwaysOnTop??false" :disabled="busy||!preferences" @click="command({action:'setMiniTop',enabled:!preferences?.alwaysOnTop})">置顶</button><button type="button" class="mini-close" aria-label="隐藏迷你窗" title="隐藏到托盘" :disabled="busy" @click="command({action:'hideMini'})"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 4 8 8m0-8-8 8" /></svg></button></nav>
     </header>
     <div class="mini-countdown"><span class="mini-label">{{ display.heading }}</span><strong v-if="display.text" role="timer" aria-live="off">{{ display.text }}</strong><strong v-else class="mini-empty">{{ display.emptyLabel }}</strong></div>
     <div class="mini-bottom"><div class="mini-progress"><progress v-if="percent!==null" :value="percent" max="100" aria-label="工作进度" /><span>{{ percent===null?'无工作进度':percent.toFixed(1).replace(/\.0$/,'')+'%' }}</span></div><button type="button" class="mini-open" :disabled="busy" @click="command({action:'showMain'})">打开主窗口</button></div>
@@ -35,19 +35,23 @@ onBeforeUnmount(()=>{void api.window.unsubscribePresentation()})
 </template>
 <style>
 html,body,#app { margin:0;width:100%;height:100%;min-width:0; }
-.mini-shell { min-height:100%;padding:6px 9px;border:1px solid var(--we-border);border-radius:var(--we-radius-card);display:flex;flex-direction:column;gap:2px;overflow-wrap:anywhere; }
-.mini-header { display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:20px;app-region:drag;-webkit-app-region:drag;user-select:none; }
+.mini-shell { min-height:100%;padding:5px 9px;border:1px solid var(--we-border);border-radius:var(--we-radius-card);display:flex;flex-direction:column;justify-content:space-between;gap:2px;overflow-wrap:anywhere; }
+.mini-header { display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:24px;app-region:drag;-webkit-app-region:drag;user-select:none; }
 .mini-state { color:var(--we-positive-text);background:var(--we-positive-bg);font-size:11px;font-weight:650;border-radius:20px;padding:0 6px;white-space:nowrap; }
 .mini-state[data-tone="neutral"] { color:var(--we-neutral-text);background:var(--we-neutral-bg); }
 .mini-state[data-tone="warning"] { color:var(--we-warning-text);background:var(--we-warning-bg); }
 .mini-state[data-tone="danger"] { color:var(--we-danger-text);background:var(--we-danger-bg); }
-.mini-header nav { display:flex;gap:6px; }
-.mini-shell button { font:inherit;font-size:11px;line-height:18px;min-height:20px;padding:0 5px;background:var(--we-surface);color:var(--we-text);border:1px solid var(--we-control-border);border-radius:5px;cursor:pointer;app-region:no-drag;-webkit-app-region:no-drag; }
+.mini-header nav { display:flex;align-items:center;gap:4px; }
+.mini-shell button { display:inline-flex;align-items:center;justify-content:center;font:inherit;font-size:11px;line-height:20px;min-height:24px;padding:0 6px;background:var(--we-surface);color:var(--we-text);border:1px solid var(--we-border);border-radius:7px;cursor:pointer;app-region:no-drag;-webkit-app-region:no-drag; }
+.mini-shell .mini-close { width:24px;padding:0;color:var(--we-muted);background:var(--we-subtle); }
+.mini-close svg { width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round; }
+.mini-shell button:hover:not(:disabled) { background:var(--we-accent-soft);border-color:var(--we-accent);color:var(--we-accent); }
+.mini-shell button:active:not(:disabled) { background:var(--we-track); }
 .mini-shell button[aria-pressed="true"] { color:var(--we-button-text);background:var(--we-button);border-color:var(--we-button); }
 .mini-shell button:focus-visible { outline:2px solid var(--we-accent);outline-offset:1px; }
 .mini-countdown { display:flex;align-items:baseline;justify-content:space-between;gap:6px; }
 .mini-label { font-size:10px;flex:none;color:var(--we-muted); }
-.mini-countdown strong { font:650 clamp(24px,10vw,30px)/1.15 var(--we-font-numeric);font-variant-numeric:tabular-nums;letter-spacing:-.5px;white-space:nowrap; }
+.mini-countdown strong { font:650 clamp(24px,10vw,30px)/1.1 var(--we-font-numeric);font-variant-numeric:tabular-nums;letter-spacing:-.5px;white-space:nowrap; }
 .mini-shell:has(.mini-warning) .mini-countdown strong:not(.mini-empty) { font-size:26px;line-height:1.05; }
 .mini-countdown .mini-empty { font-size:14px;white-space:normal; }
 .mini-bottom { display:flex;justify-content:space-between;align-items:center;gap:8px; }

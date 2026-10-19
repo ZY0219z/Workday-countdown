@@ -35,7 +35,7 @@ onBeforeUnmount(()=>{stopObserving?.();observer?.disconnect()})
 .fish-progress-native{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);}
 .fish-track{position:relative;height:64px;width:100%;}
 .fish-water{position:absolute;top:29px;height:32px;left:0;right:0;border-radius:12px;background:var(--we-track);overflow:hidden;}
-.fish-fill{height:100%;background:var(--we-accent);overflow:hidden;position:relative;container-type:inline-size;}
+.fish-fill{height:100%;background:var(--we-accent);overflow:hidden;position:relative;}
 /* Python: three 32px sprites, centres at (flow + i * 20) / 60 of the fill. */
 .fish-waves{position:absolute;inset:0;overflow:hidden;}
 .fish-wave-path{position:absolute;inset:0;transform:translateX(16.6667%);}
@@ -58,8 +58,8 @@ onBeforeUnmount(()=>{stopObserving?.();observer?.disconnect()})
 @keyframes fish-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.5px)}}
 @keyframes wave-travel{0%{transform:translateX(0);opacity:0}5%{opacity:1}90%{opacity:1}100%{transform:translateX(100%);opacity:0}}
 @keyframes wave-sway{0%,100%{transform:translate(-1px,0)}25%{transform:translate(1px,-4px)}75%{transform:translate(-2px,4px)}}
-/* Three full-size sprites would overlap in a very short fill. Keep it quiet. */
-@container(max-width:95px){.fish-waves{visibility:hidden;}.fish-wave-path,.fish-wave{animation:none!important;}}
+/* Even a short positive fill keeps the original sprites: its bounds and the
+   cat exclusion clip, rather than a progress threshold, limit visible pixels. */
 @media(prefers-reduced-motion:reduce){.fish-marker{transition:none;}.fish-mascot,.fish-wave-path,.fish-wave{animation:none!important;}}
 @media(forced-colors:active){.fish-water{background:Canvas;border:1px solid CanvasText;}.fish-fill{background:Highlight;forced-color-adjust:none;}.fish-waves{visibility:hidden;}.fish-wave-path,.fish-wave{animation:none!important;}}
 </style>

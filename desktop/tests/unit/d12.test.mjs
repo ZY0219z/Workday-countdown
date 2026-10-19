@@ -3,10 +3,11 @@ import assert from 'node:assert/strict'
 import {fixtures,render,progressRatio,fishPosition,fishCanAnimate,createThemeController,createIpcRouter,createV2Bridge,validateContractRequest,V2_CHANNELS,WINDOW_VISIBILITY_PUSH,windowPresentationVisible,MAIN_WINDOW_DEFAULT_SIZE,MAIN_WINDOW_MINIMUM_SIZE,restoreWindowBounds} from '../../test-results/d12-ssr/components.mjs'
 const f=fixtures(),ok=data=>({ok:true,data})
 test('compact default bounds share one source, preserve saved bounds and clamp to small work areas',()=>{
-  assert.deepEqual(MAIN_WINDOW_DEFAULT_SIZE,{width:720,height:660});assert.deepEqual(MAIN_WINDOW_MINIMUM_SIZE,{width:480,height:520})
+  assert.deepEqual(MAIN_WINDOW_DEFAULT_SIZE,{width:720,height:640});assert.deepEqual(MAIN_WINDOW_MINIMUM_SIZE,{width:480,height:520})
   const displays=[{id:1,workArea:{x:0,y:0,width:1920,height:1080},scaleFactor:1}],defaults={x:0,y:0,...MAIN_WINDOW_DEFAULT_SIZE}
   assert.deepEqual(restoreWindowBounds(null,displays,1,defaults,MAIN_WINDOW_MINIMUM_SIZE).data.bounds,defaults)
   const saved={x:20,y:30,width:900,height:700};assert.deepEqual(restoreWindowBounds(saved,displays,1,defaults,MAIN_WINDOW_MINIMUM_SIZE).data.bounds,saved)
+  const oldDefault={x:20,y:30,width:720,height:660};assert.deepEqual(restoreWindowBounds(oldDefault,displays,1,defaults,MAIN_WINDOW_MINIMUM_SIZE).data.bounds,oldDefault)
   const small=restoreWindowBounds(null,[{id:1,workArea:{x:0,y:0,width:400,height:300},scaleFactor:2}],1,defaults,MAIN_WINDOW_MINIMUM_SIZE).data;assert.equal(small.bounds.height,300);assert.equal(small.minimum.height,300)
 })
 test('progress uses one original cat on the track, gated waves and only necessary copy',async()=>{

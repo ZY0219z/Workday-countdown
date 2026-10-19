@@ -75,6 +75,26 @@ export async function runD12Visual({page,browser,check,goto,group,screenshot,dir
     const occlusion=await page.evaluate(()=>{const group=document.querySelector('.fish-waves'),fill=document.querySelector('.fish-fill').getBoundingClientRect(),cat=document.querySelector('.fish-marker').getBoundingClientRect(),clip=getComputedStyle(group).clipPath;return{clip,fillRight:fill.right,catLeft:cat.left}});assert.match(occlusion.clip,/inset/);assert.ok(Math.abs(occlusion.fillRight-parseFloat(occlusion.clip.split(' ')[1])-occlusion.catLeft)<1);assert.equal(await marker.evaluate(el=>{const b=el.getBoundingClientRect();return el.contains(document.elementFromPoint(b.x+b.width/2,b.y+b.height/2))}),true)
     await writeFile(resolve(directory,'wave-live-motion.json'),JSON.stringify({clock:'real browser timeline, freely running between samples',frames,hashes,fill,cat,clip,occlusion},null,2))
   })
+  await check('D14 regression: positive low progress keeps original waves visible without a fill-width threshold',async()=>{
+    const samples=[]
+    for(const p of [1,5,10,15]){
+      await percent(p);await position(p);await expect(page.locator('.fish-wave')).toHaveCount(3)
+      assert.equal(await page.locator('.fish-waves').evaluate(el=>getComputedStyle(el).visibility),'visible')
+      const water=await page.locator('.fish-water').boundingBox(),cat=await marker.boundingBox(),fill=await page.locator('.fish-fill').boundingBox()
+      const clip={x:water.x,y:water.y,width:Math.floor(cat.x-water.x),height:water.height};assert.ok(clip.width>0)
+      const frames=[]
+      for(const time of [450,1050]){
+        await page.locator('.fish-wave-path,.fish-wave').evaluateAll((elements,time)=>{for(const el of elements)for(const a of el.getAnimations()){a.pause();a.currentTime=time}},time)
+        const bytes=await page.screenshot({clip,animations:'allow'});await writeFile(resolve(directory,`low-progress-${p}-t${time}.png`),bytes)
+        const white=await page.evaluate(async url=>{const img=new Image();img.src=url;await img.decode();const canvas=document.createElement('canvas');canvas.width=img.width;canvas.height=img.height;const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0);const data=ctx.getImageData(0,0,canvas.width,canvas.height).data;let count=0;for(let i=0;i<data.length;i+=4)if(data[i]>200&&data[i+1]>200&&data[i+2]>200)count++;return count},'data:image/png;base64,'+bytes.toString('base64'))
+        frames.push({time,white,hash:createHash('sha256').update(bytes).digest('hex')})
+      }
+      assert.ok(frames.some(f=>f.white>0),'actual low-fill pixels must contain the original white sprite, not just an invisible DOM layer');assert.notEqual(frames[0].hash,frames[1].hash,'low-fill wave-only frames must change')
+      if(p===5)await screenshot('dashboard-low-progress.png');samples.push({percent:p,fillWidth:fill.width,clip,frames})
+    }
+    await writeFile(resolve(directory,'low-progress-waves.json'),JSON.stringify(samples,null,2))
+    await percent(62.5);await position(62.5);await page.locator('.fish-wave-path,.fish-wave').evaluateAll(elements=>{for(const el of elements)for(const a of el.getAnimations())a.play()})
+  })
   await check('each wave wraps invisibly at the edge while the original cat keeps its gentle vertical motion',async()=>{
     const path=page.locator('.fish-wave-path').first(),originalStart=await path.evaluate(el=>el.getAnimations()[0].startTime)
     const edges=[];for(const time of [1,2999]){await path.evaluate((el,time)=>{const a=el.getAnimations()[0];a.pause();a.currentTime=time},time);edges.push(await path.evaluate(el=>Number(getComputedStyle(el).opacity)))}assert.ok(edges.every(alpha=>alpha<.01));await path.evaluate((el,start)=>{const a=el.getAnimations()[0];a.startTime=start;a.play()},originalStart)

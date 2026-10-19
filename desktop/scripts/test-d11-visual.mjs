@@ -10,7 +10,7 @@ import {chromium,expect} from '@playwright/test'
 // by browser initScript. No fixture switches or alternate API in shipped code.
 await build({configFile:false,plugins:[vue()],logLevel:'warn',build:{ssr:'tests/unit/d11-components.entry.mjs',outDir:'test-results/d11-ssr',emptyOutDir:false,rollupOptions:{output:{entryFileNames:'components.mjs'}}}})
 const {fixtures,MAIN_WINDOW_DEFAULT_SIZE}=await import(pathToFileURL(resolve('test-results/d11-ssr/components.mjs')).href),fixture=fixtures()
-const d12=process.argv.includes('--d12'),root=resolve('out/renderer'),directory=resolve(d12?'test-results/d12-r4-visual':'test-results/d11-visual');await mkdir(directory,{recursive:true})
+const d12=process.argv.includes('--d12'),root=resolve('out/renderer'),directory=resolve(process.argv.includes('--ui-polish')?`test-results/d14-ui-polish/${d12?'waves':'main'}`:d12?'test-results/d12-r4-visual':'test-results/d11-visual');await mkdir(directory,{recursive:true})
 const files=await readdir(root,{recursive:true,withFileTypes:true}),assets=new Map(files.filter(file=>file.isFile()).map(file=>{const full=resolve(file.parentPath,file.name);return ['/'+relative(root,full).split(sep).join('/'),full]}))
 let activePage
 const browser=await chromium.launch({channel:'msedge',headless:true,chromiumSandbox:true}),checks=[],errors=[],requests=[]
@@ -48,6 +48,13 @@ try{
   if(d12){const {installD12Instrumentation,runD12Visual}=await import('./test-d12-visual.mjs');await installD12Instrumentation(page);await runD12Visual({page,browser,check,goto,group,screenshot,directory,fixture,defaultSize:MAIN_WINDOW_DEFAULT_SIZE})}else{
   await goto()
   await check('formal dashboard consumes a real D09 fixture with dominant timer and static original image',async()=>{await expect(page.locator('[role=timer]')).toHaveText('03:00:00');await expect(page.locator('.dashboard-metrics .we-metric')).toHaveCount(3);await expect(page.getByRole('heading',{name:'累计计划工作日'})).toHaveCount(0);await expect(page.locator('.dashboard > p')).toHaveCount(0);await expect(page.getByRole('img',{name:'原始蓝色摸鱼猫抱灰鱼（静态）'})).toBeVisible();await screenshot('d11-r4-dashboard-ocean-light.png')})
+  await check('D14 polished header keeps aligned friendly targets, focus and a compact three-card dashboard',async()=>{
+    await page.setViewportSize({width:MAIN_WINDOW_DEFAULT_SIZE.width,height:MAIN_WINDOW_DEFAULT_SIZE.height-60})
+    const layout=await page.evaluate(()=>({width:innerWidth,height:innerHeight,scroll:document.documentElement.scrollHeight,bottom:document.querySelector('.dashboard-metrics').getBoundingClientRect().bottom,buttons:[...document.querySelectorAll('.app-header-actions button')].map(el=>{const b=el.getBoundingClientRect(),s=getComputedStyle(el);return{x:b.x,y:b.y,width:b.width,height:b.height,radius:s.borderRadius}}),cards:[...document.querySelectorAll('.dashboard-metrics .we-metric')].map(el=>el.getBoundingClientRect().top)}))
+    assert.ok(layout.scroll<=layout.height);assert.ok(layout.height-layout.bottom>=16&&layout.height-layout.bottom<48);assert.equal(new Set(layout.cards).size,1);assert.equal(layout.buttons[0].y,layout.buttons[1].y);assert.ok(layout.buttons.every(b=>b.height>=34&&b.width>=34&&b.radius==='10px'))
+    for(const button of await page.locator('.app-header-actions button').all()){await button.focus();await expect(button).toBeFocused();assert.notEqual(await button.evaluate(el=>getComputedStyle(el).outlineStyle),'none');await button.hover()}
+    await page.locator('.app-header h1').click();await screenshot('dashboard-polished.png');await writeFile(resolve(directory,'polished-layout.json'),JSON.stringify(layout,null,2));await page.setViewportSize(MAIN_WINDOW_DEFAULT_SIZE)
+  })
   await check('D13 fixed settings notification opens main settings and preserves composing raw input',async()=>{
     await page.evaluate(()=>window.__d13.openSettings());const input=page.getByLabel('上班时间',{exact:true});await expect(input).toBeVisible();await input.fill('08:');await expect(page.locator('[data-workday-root]')).toHaveAttribute('data-pending','false')
     await input.dispatchEvent('compositionstart');await input.evaluate(element=>element.value='输入中');await page.evaluate(()=>window.__d13.openSettings());await expect(input).toHaveValue('输入中');await expect(page.locator('[data-workday-root]')).toHaveAttribute('data-pending','true')

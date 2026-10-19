@@ -17,7 +17,7 @@ export { createV2Bridge } from '../../src/shared/bridge.ts'
 export { validateContractRequest } from '../../src/shared/capabilities.ts'
 export { createDefaultAppConfig } from '../../src/shared/config-schema.ts'
 export { salaryMonthLabel } from '../../src/renderer/src/ui/dashboard-display.ts'
-export {MAIN_WINDOW_DEFAULT_SIZE} from '../../src/main/windows/window-bounds.ts'
+export {MAIN_WINDOW_DEFAULT_SIZE,MINI_WINDOW_DEFAULT_SIZE,MINI_WINDOW_MINIMUM_SIZE} from '../../src/main/windows/window-bounds.ts'
 const value=result=>{if(!result.ok)throw Error(JSON.stringify(result));return result.data}
 export function fixtures(){
   const calendars=value(loadBundledCalendarStore()),zones=createIntlTimeZoneAdapter()

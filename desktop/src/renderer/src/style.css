@@ -1,10 +1,10 @@
 html,body,#app { margin:0;min-width:0;min-height:100%; }
-.app-shell { min-height:100vh;padding:var(--we-space-5); }
+.app-shell { min-height:100vh;padding:var(--we-space-4);padding-bottom:var(--we-space-3); }
 .app-content { max-width:920px;margin:0 auto; }
 .app-header { display:flex;align-items:center;justify-content:space-between;gap:var(--we-space-3);margin-bottom:var(--we-space-5);flex-wrap:wrap; }
 .app-header h1 { font-size:22px;letter-spacing:-.02em;white-space:nowrap; }
 .app-actions { display:flex;flex-wrap:wrap;gap:var(--we-space-2); }
-.app-menu { width:40px;height:40px;font-size:24px;line-height:1; }.app-default-note { font-size:var(--we-text-small);margin-bottom:var(--we-space-2)!important; }
+.app-default-note { font-size:var(--we-text-small);margin-bottom:var(--we-space-2)!important; }
 .app-error { color:var(--we-danger-text);font-size:var(--we-text-body);overflow-wrap:anywhere;margin-bottom:var(--we-space-3)!important; }
 .app-notice { color:var(--we-text);padding:var(--we-space-2);background:var(--we-subtle);margin-bottom:var(--we-space-3)!important; }
 .app-settings { padding:var(--we-space-5); }
@@ -12,4 +12,10 @@ html,body,#app { margin:0;min-width:0;min-height:100%; }
 .app-modal { width:min(100%,480px);max-height:100%;overflow:auto;padding:var(--we-space-5);display:grid;gap:var(--we-space-4); }
 @media(max-width:520px){.app-shell{padding:var(--we-space-3)}.app-settings{padding:var(--we-space-3)}}
 
-.app-header-actions { display:flex;align-items:center;gap:var(--we-space-2); }
+.app-header-actions { display:flex;align-items:center;gap:6px; }
+.app-header-actions .we-button { display:inline-flex;align-items:center;justify-content:center;min-height:34px;height:34px;border-color:var(--we-border);border-radius:10px;font-size:12px;font-weight:600;line-height:1;padding:0 12px; }
+.app-header-actions .app-mini { color:var(--we-accent);background:var(--we-accent-soft); }
+.app-header-actions .app-menu { width:34px;padding:0;color:var(--we-muted);background:transparent; }
+.app-menu svg { width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round; }
+.app-header-actions .we-button:hover:not(:disabled) { border-color:var(--we-accent);background:var(--we-accent-soft);color:var(--we-accent); }
+.app-header-actions .we-button:active:not(:disabled) { background:var(--we-track); }
