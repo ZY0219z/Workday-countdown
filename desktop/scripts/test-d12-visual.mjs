@@ -116,7 +116,13 @@ export async function runD12Visual({page,browser,check,goto,group,screenshot,dir
   })
   await check('native-hidden DTO stops GIF even while document remains visible; resume snaps to latest value',async()=>{
     assert.equal(await page.evaluate(()=>document.visibilityState),'visible');const old=await animated.elementHandle();await page.evaluate(()=>window.__d12.visibility(false));await stopped();assert.equal(await old.evaluate(img=>img.getAttribute('src')),null)
-    await percent(75);await position(75);await page.evaluate(()=>window.__d11.tick(9));await expect(page.getByRole('timer')).toHaveText('00:00:09');await page.evaluate(()=>window.__d12.visibility(true));await expect(animated).toBeVisible();await percent(25);await expect(marker).not.toHaveClass(/fish-marker--moving/);await position(25)
+    // D14 releases the hidden renderer's time subscription. Its DOM must stay
+    // frozen, then the FIRST fresh result on resume still jumps without motion.
+    await expect.poll(()=>page.evaluate(()=>window.__d13.subscriptions())).toBe(0)
+    const prior=await progress.getAttribute('value'),timer=await page.getByRole('timer').innerText()
+    await percent(75);await page.evaluate(()=>window.__d11.tick(9));await expect(progress).toHaveAttribute('value',prior);await expect(page.getByRole('timer')).toHaveText(timer);await stopped()
+    await page.evaluate(()=>window.__d12.visibility(true));await expect(animated).toBeVisible();await position(75);await expect(page.getByRole('timer')).toHaveText('00:00:09');await expect(marker).not.toHaveClass(/fish-marker--moving/)
+    await percent(25);await position(25)
   })
   await check('system or application motion reduction removes the GIF source and any transition',async()=>{
     await page.emulateMedia({reducedMotion:'reduce'});await stopped();await percent(70);assert.equal(await marker.evaluate(el=>getComputedStyle(el).transitionDuration),'0s');await position(70)

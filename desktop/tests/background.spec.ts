@@ -13,7 +13,7 @@ import type { AppConfig, Result, MainWindowApi } from '../src/shared/contracts'
 import type { ExitChoice } from '../src/main/lifecycle/quit-coordinator'
 import {MAIN_WINDOW_DEFAULT_SIZE,MAIN_WINDOW_MINIMUM_SIZE} from '../src/main/windows/window-bounds'
 import { V2_CHANNELS } from '../src/shared/ipc'
-type TestApp=App & {__workdayD08Test:{background:boolean;windows:{beginQuit():void};quit:{requestQuit():Promise<Result<null>>};chooseExit(choice:ExitChoice|null):void;selectFile(kind:'import'|'export',name:string):void;interactiveAttempts():string[];tray:{close():Promise<Result<null>>;menu():Promise<Result<null>>;chooseHide(value:boolean|null):void;settings():Result<null>;items():Array<{label?:string;type?:string;enabled?:boolean}>;click(label:string):void;available():boolean;icon():{empty:boolean;size:{width:number;height:number}}}}}
+type TestApp=App & {__workdayD08Test:{background:boolean;mini:{bounds():import('../src/shared/contracts').WindowBounds|null;prepare():Promise<Result<null>>;stageBounds(bounds:import('../src/shared/contracts').WindowBounds):Result<null>};snapshotSubscribers():number;windows:{beginQuit():void};quit:{requestQuit():Promise<Result<null>>};chooseExit(choice:ExitChoice|null):void;selectFile(kind:'import'|'export',name:string):void;interactiveAttempts():string[];tray:{close():Promise<Result<null>>;menu():Promise<Result<null>>;chooseHide(value:boolean|null):void;settings():Result<null>;items():Array<{label?:string;type?:string;enabled?:boolean}>;click(label:string):void;available():boolean;icon():{empty:boolean;size:{width:number;height:number}}}}}
 // Native-hidden integration stimulates real DOM handlers. Pixel hit-testing and
 // stable rendering frames are verified by real Headless clicks, not by showing
 // Electron or forcing native focus. Disabled/DOM visibility assertions remain.
@@ -371,7 +371,7 @@ test('failed scratch synchronization still offers explicit quit continue/discard
 test('D13 bundled icon decodes and menu uses real Snapshot without showing native UI',async()=>{
   const page=await launch();expect(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.tray.icon())).toEqual({empty:false,size:{width:32,height:32}})
   value(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.tray.menu()))
-  const items=await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.tray.items());expect(items).toHaveLength(5);expect(items[0].enabled).toBe(false);expect(items[0].label).not.toContain('undefined');expect(items.slice(1).map(i=>i.label??i.type)).toEqual(['打开主窗口','打开设置','separator','退出程序'])
+  const items=await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.tray.items());expect(items).toHaveLength(7);expect(items[0].enabled).toBe(false);expect(items[0].label).not.toContain('undefined');expect(items.slice(1).map(i=>i.label??i.type)).toEqual(['打开主窗口','打开设置','显示迷你窗','隐藏迷你窗','separator','退出程序'])
   expect(await page.evaluate(()=>typeof window.workdayV2.window.onOpenSettings)).toBe('function');expect(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.interactiveAttempts())).toEqual([]);await hidden()
 })
 
@@ -402,14 +402,87 @@ for(const choice of ['save','discard','continueEditing'] as const)test('D13 back
   else{const closed=application!.waitForEvent('close');await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.tray.click('退出程序'));await closed;await expect.poll(()=>child.exitCode).toBe(0);application=undefined;expect(JSON.parse(readFileSync(formal(),'utf8')).schedule.endTime).toBe(choice==='save'?'19:00':'18:00')}
 })
 
-test('D13 short owned hidden-Electron observation records CPU and PWS without claiming G05',async()=>{
-  const page=await launch(),cores=cpus().length
+async function observeOwnedResources(page:Awaited<ReturnType<typeof launch>>,outputPath:string,scope:string){
+  const cores=cpus().length
   const metrics=()=>application!.evaluate(({app})=>app.getAppMetrics().map(p=>({pid:p.pid,type:p.type,cpu:p.cpu})))
   await page.waitForTimeout(1000);let previous=await metrics(),at=performance.now();const samples=[]
   for(let i=0;i<5;i++){await page.waitForTimeout(1000);const current=await metrics(),now=performance.now(),times=new Map(previous.map(p=>[p.pid,p.cpu.cumulativeCPUUsage]));expect(current.every(p=>typeof p.cpu.cumulativeCPUUsage==='number')).toBe(true);const cpuPercent=current.reduce((n,p)=>n+Math.max(0,p.cpu.cumulativeCPUUsage!-(times.get(p.pid)??p.cpu.cumulativeCPUUsage!)),0)/((now-at)/1000*cores)*100;samples.push({cpuPercent,pids:current.map(p=>p.pid),intervalMs:now-at});previous=current;at=now}
   const ids=previous.map(p=>p.pid),filter=ids.map(id=>`IDProcess=${id}`).join(' OR ')
   const output=execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-WindowStyle','Hidden','-Command',`$ErrorActionPreference='Stop'; @(Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -Filter '${filter}' | Select-Object IDProcess,WorkingSetPrivate) | ConvertTo-Json -Compress`],{windowsHide:true,timeout:15000,encoding:'utf8'})
   const rows=[JSON.parse(output)].flat();expect(rows.map(row=>row.IDProcess).sort()).toEqual([...ids].sort())
-  const result={scope:'real hidden Electron app.getAppMetrics PID set; memory tray adapter; NOT real tray-only G05',warmupSeconds:1,sampleSeconds:5,logicalCores:cores,samples,meanCpuPercent:samples.reduce((n,s)=>n+s.cpuPercent,0)/samples.length,privateWorkingSetMiB:rows.reduce((n,row)=>n+Number(row.WorkingSetPrivate),0)/1048576,memoryRows:rows,processInfo:previous}
-  writeFileSync('test-results/d13-hidden-resources.json',JSON.stringify(result,null,2));console.log('D13 short observation:',JSON.stringify({meanCpuPercent:result.meanCpuPercent,privateWorkingSetMiB:result.privateWorkingSetMiB,logicalCores:cores,scope:result.scope}));await hidden()
+  const result={scope,warmupSeconds:1,sampleSeconds:5,logicalCores:cores,samples,meanCpuPercent:samples.reduce((n,s)=>n+s.cpuPercent,0)/samples.length,privateWorkingSetMiB:rows.reduce((n,row)=>n+Number(row.WorkingSetPrivate),0)/1048576,memoryRows:rows,processInfo:previous}
+  writeFileSync(outputPath,JSON.stringify(result,null,2));console.log('Owned short observation:',JSON.stringify({meanCpuPercent:result.meanCpuPercent,privateWorkingSetMiB:result.privateWorkingSetMiB,logicalCores:cores,scope:result.scope}));await hidden()
+}
+test('D13 short owned hidden-Electron observation records CPU and PWS without claiming G05',async()=>{const page=await launch();await observeOwnedResources(page,'test-results/d13-hidden-resources.json','real hidden Electron app.getAppMetrics PID set; memory tray adapter; NOT real tray-only G05')})
+
+async function prepareMini(){
+  value(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.mini.prepare()))
+  const pages=await application!.windows(),page=pages.find(p=>new URL(p.url()).pathname.endsWith('/mini.html'))!
+  expect(page).toBeTruthy();await expect(page.getByRole('region',{name:'迷你倒计时'})).toBeVisible()
+  expect(await application!.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().map(w=>({visible:w.isVisible(),focusable:w.isFocusable(),focused:w.isFocused()})))).toEqual([{visible:false,focusable:false,focused:false},{visible:false,focusable:false,focused:false}]);return page
+}
+function miniSeed(){const config=fixture();config.desktop.miniEnabled=true;config.desktop.bounds.mini=null;seed(config);return config}
+
+test('D14 startup is main only; real hidden mini has fixed role, exact URL and zero configuration capabilities',async()=>{
+  miniSeed();const mainPage=await launch();expect((await application!.windows()).length).toBe(1);const page=await prepareMini()
+  expect(await page.evaluate(()=>({role:window.workdayV2.role,config:typeof window.workdayV2.config,data:typeof window.workdayV2.data,calendar:typeof window.workdayV2.calendar,draft:typeof window.workdayV2.settingsDraft,node:typeof globalThis.require}))).toEqual({role:'mini',config:'undefined',data:'undefined',calendar:'undefined',draft:'undefined',node:'undefined'})
+  const security=await application!.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().map(w=>{const p=(w.webContents as unknown as {getLastWebPreferences():WebPreferences}).getLastWebPreferences();return {sandbox:p.sandbox,isolation:p.contextIsolation,node:p.nodeIntegration,web:p.webSecurity}}));expect(security.every(p=>p.sandbox&&p.isolation&&p.web&&!p.node)).toBe(true)
+  const first=value(await mainPage.evaluate(()=>window.workdayV2.snapshot.read())),second=value(await page.evaluate(()=>window.workdayV2.snapshot.read()));expect(second.configRevision).toBe(first.configRevision);expect(second.calendarRevision).toBe(first.calendarRevision);expect(second.timeZoneId).toBe(first.timeZoneId);expect(second.localDate).toBe(first.localDate);expect(second.countdown?.targetAt).toBe(first.countdown?.targetAt)
+  const rejections=await application!.evaluate(async({ipcMain,BrowserWindow},channels)=>{const contents=BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().endsWith('/mini.html'))!.webContents,handlers=(ipcMain as unknown as {_invokeHandlers:Map<string,(event:unknown,input:unknown)=>Promise<Result<unknown>>>})._invokeHandlers;return Promise.all(channels.map(channel=>handlers.get(channel)!({sender:contents,senderFrame:contents.mainFrame},null)))},[V2_CHANNELS['config.read'],V2_CHANNELS['config.save'],V2_CHANNELS['data.previewImport'],V2_CHANNELS['data.previewRecovery'],V2_CHANNELS['calendar.applyImport']]);expect(rejections.every(r=>!r.ok&&r.error.code==='FORBIDDEN')).toBe(true)
+  await expect.poll(()=>application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.snapshotSubscribers())).toBe(0);await hidden()
+})
+
+test('D14 native mini bounds are compact; hidden top toggle and X never focus or quit',async()=>{
+  miniSeed();await launch(true,undefined,true);const page=await prepareMini()
+  const windowState=()=>application!.evaluate(({BrowserWindow})=>{const w=BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().endsWith('/mini.html'))!;return {bounds:w.getBounds(),content:w.getContentBounds(),top:w.isAlwaysOnTop(),visible:w.isVisible()}})
+  let state=await windowState();expect({width:state.content.width,height:state.content.height}).toEqual({width:280,height:132});expect(state.top).toBe(false)
+  await activate(page.getByRole('button',{name:'置顶',exact:true}));await expect(page.getByRole('button',{name:'置顶',exact:true})).toHaveAttribute('aria-pressed','true');state=await windowState();expect(state.top).toBe(true);expect(state.visible).toBe(false)
+  const layout=await page.evaluate(()=>({width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,scrollHeight:document.documentElement.scrollHeight}));expect(layout.scrollWidth).toBeLessThanOrEqual(layout.width);expect(layout.scrollHeight).toBeLessThanOrEqual(layout.height)
+  await application!.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().endsWith('/mini.html'))!.setBounds({width:240,height:112}));await expect.poll(()=>page.evaluate(()=>innerWidth+':'+innerHeight)).toBe('240:112');expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth&&document.documentElement.scrollHeight<=innerHeight)).toBe(true)
+  await application!.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().endsWith('/mini.html'))!.close());expect(application!.process().exitCode).toBe(null);expect((await application!.windows()).length).toBe(2);expect(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.interactiveAttempts())).toEqual([]);await hidden()
+})
+
+test('D14 Main composing marker rejects entry, and preparing hidden mini retains raw settings draft',async()=>{
+  miniSeed();const page=await launch();await settings(page);await page.getByLabel('上班时间',{exact:true}).fill('08:');await settled(page);const before=value(await page.evaluate(()=>window.workdayV2.settingsDraft.read()))
+  await page.getByLabel('上班时间',{exact:true}).dispatchEvent('compositionstart');expect(await page.evaluate(()=>window.workdayV2.window.perform({action:'showMini'}))).toMatchObject({ok:false,error:{code:'IO_BUSY'}});expect((await application!.windows()).length).toBe(1)
+  await page.getByLabel('上班时间',{exact:true}).dispatchEvent('compositionend');await settled(page);await prepareMini();expect(value(await page.evaluate(()=>window.workdayV2.settingsDraft.read())).draft).toEqual(before.draft);await expect(page.getByLabel('上班时间',{exact:true})).toHaveValue('08:');expect(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.interactiveAttempts())).toEqual([])
+})
+
+test('D14 mini uses real Vite page; iframe and alternate pages cannot borrow its registered permissions',async()=>{
+  miniSeed();await launch(true,await developmentUrl());const page=await prepareMini();expect(new URL(page.url()).protocol).toBe('http:')
+  await page.evaluate(()=>{const frame=document.createElement('iframe');frame.src='/mini.html?role=main';document.body.append(frame)});await expect.poll(()=>page.frames().length).toBe(2);const frame=page.frames().find(f=>f!==page.mainFrame())!;await expect.poll(()=>frame.evaluate(()=>typeof window.workdayV2)).toBe('undefined')
+  const result=await application!.evaluate(async({BrowserWindow})=>{const w=BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().endsWith('/mini.html'))!;await w.loadURL(w.webContents.getURL()+'?role=main');return w.webContents.executeJavaScript('window.workdayV2.window.readPresentation()')});expect(result).toMatchObject({ok:false,error:{code:'FORBIDDEN'}});await hidden()
+})
+
+test('D14 repeated hidden preparation reuses one native mini and saved appearance reaches its readonly DTO',async()=>{
+  miniSeed();const mainPage=await launch(),page=await prepareMini();for(let i=0;i<12;i++)value(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.mini.prepare()));expect((await application!.windows()).length).toBe(2)
+  await group(mainPage,'appearance');await mainPage.getByLabel('配色',{exact:true}).selectOption('coral');await settled(mainPage);await activate(mainPage.getByRole('button',{name:'保存设置',exact:true}));await expect(mainPage.getByRole('region',{name:'工作日仪表盘'})).toBeVisible();await expect(page.locator('.mini-shell')).toHaveAttribute('data-accent','coral');expect(value(await page.evaluate(()=>window.workdayV2.window.readPresentation())).appearance.accent).toBe('coral');await hidden()
+})
+
+test('D14 staged mini location persists with normal save, keeps draft/Main bounds and restarts hidden',async()=>{
+  const config=miniSeed();config.desktop.bounds.main={x:10,y:15,width:720,height:660};seed(config);const mainPage=await launch(true,undefined,true);await prepareMini();await settings(mainPage);await mainPage.getByLabel('每月发薪日',{exact:true}).fill('11');await settled(mainPage)
+  const bounds={x:120,y:80,width:280,height:132};await application!.evaluate(({BrowserWindow},bounds)=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().endsWith('/mini.html'))!.setBounds(bounds),bounds);await expect.poll(()=>application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.mini.bounds())).toEqual(bounds);expect(JSON.parse(readFileSync(formal(),'utf8')).desktop.bounds.mini).toBe(null);await expect(mainPage.getByLabel('每月发薪日',{exact:true})).toHaveValue('11');await activate(mainPage.getByRole('button',{name:'保存设置',exact:true}));await expect(mainPage.getByRole('region',{name:'工作日仪表盘'})).toBeVisible();const saved=JSON.parse(readFileSync(formal(),'utf8'));expect(saved.desktop.bounds.mini).toEqual(bounds);expect(saved.desktop.bounds.main).toEqual(config.desktop.bounds.main)
+  await settings(mainPage);const child=application!.process(),closed=application!.waitForEvent('close');await activate(mainPage.getByRole('button',{name:'退出程序',exact:true}));await closed;await expect.poll(()=>child.exitCode).toBe(0);application=undefined
+  await launch(false,undefined,true);expect((await application!.windows()).length).toBe(1);await prepareMini();const restored=await application!.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().endsWith('/mini.html'))!.getBounds());expect(restored).toEqual(bounds);await hidden()
+})
+
+test('D14 actual Windows scale keeps native bounds inside workArea and all content accessible',async()=>{
+  miniSeed();await launch();const page=await prepareMini()
+  const native=await application!.evaluate(({BrowserWindow,screen})=>{const w=BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().endsWith('/mini.html'))!,bounds=w.getBounds(),display=screen.getDisplayMatching(bounds);return {bounds,content:w.getContentBounds(),workArea:display.workArea,scaleFactor:display.scaleFactor}})
+  const {bounds:b,workArea:a}=native;expect(b.x).toBeGreaterThanOrEqual(a.x);expect(b.y).toBeGreaterThanOrEqual(a.y);expect(b.x+b.width).toBeLessThanOrEqual(a.x+a.width);expect(b.y+b.height).toBeLessThanOrEqual(a.y+a.height);expect(b.width).toBeGreaterThanOrEqual(240);expect(b.height).toBeGreaterThanOrEqual(112);expect(b.width).toBeLessThanOrEqual(280);expect(b.height).toBeLessThanOrEqual(132)
+  const layout=await page.evaluate(()=>({width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,scrollHeight:document.documentElement.scrollHeight}));expect(layout.scrollWidth).toBeLessThanOrEqual(layout.width);expect(layout.scrollHeight).toBeLessThanOrEqual(layout.height);writeFileSync('test-results/d14-native-layout.json',JSON.stringify({native,layout,hidden:true,notVisibleDpiAcceptance:true},null,2));await hidden()
+})
+
+test('D14 two real hidden Renderers resource observation includes Main and all metric PIDs',async()=>{miniSeed();const page=await launch();await prepareMini();await observeOwnedResources(page,'test-results/d14-hidden-resources.json','two real hidden Electron renderers + Main/GPU/utility app.getAppMetrics PID set; memory tray; NOT visible-mini G05')})
+
+test('D14 explicit imported bounds replace staged location without being overwritten by a later save',async()=>{
+  const config=miniSeed(),page=await launch();value(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.mini.stageBounds({x:99,y:99,width:280,height:132})))
+  config.desktop.bounds.mini={x:130,y:100,width:280,height:132};writeFileSync(join(profile,'source.json'),JSON.stringify(config));await file('import','source.json')
+  const preview=value(await page.evaluate(()=>window.workdayV2.data.previewImport({sourceKind:'v2'})));value(await page.evaluate(p=>window.workdayV2.data.applyImport({previewToken:p.previewToken,expectedRevision:p.expectedRevision,selectedFields:['desktop.bounds'],undatedOvertimeShiftDate:null}),{previewToken:preview.previewToken,expectedRevision:preview.expectedRevision}))
+  await page.reload();await settled(page);await settings(page);await page.getByLabel('每月发薪日',{exact:true}).fill('11');await settled(page);await activate(page.getByRole('button',{name:'保存设置',exact:true}));await expect(page.getByRole('region',{name:'工作日仪表盘'})).toBeVisible();expect(JSON.parse(readFileSync(formal(),'utf8')).desktop.bounds.mini).toEqual(config.desktop.bounds.mini);await hidden()
+})
+
+test('D14 failed exit save keeps both windows and draft; authorized exit overrides mini unload veto',async()=>{
+  miniSeed();const mainPage=await launch(),small=await prepareMini();await small.evaluate(()=>{window.onbeforeunload=()=>false});await settings(mainPage);await mainPage.getByLabel('下班时间',{exact:true}).fill('08:00');await settled(mainPage);await choose('save');await activate(mainPage.getByRole('button',{name:'退出程序',exact:true}));await expect(mainPage.locator('.app-error')).toBeVisible();expect(application!.process().exitCode).toBe(null);expect((await application!.windows()).length).toBe(2);await expect(mainPage.getByLabel('下班时间',{exact:true})).toHaveValue('08:00')
+  await mainPage.getByLabel('下班时间',{exact:true}).fill('19:00');await settled(mainPage);const child=application!.process(),closed=application!.waitForEvent('close');await activate(mainPage.getByRole('button',{name:'退出程序',exact:true}));await closed;await expect.poll(()=>child.exitCode).toBe(0);application=undefined;expect(JSON.parse(readFileSync(formal(),'utf8')).schedule.endTime).toBe('19:00')
 })

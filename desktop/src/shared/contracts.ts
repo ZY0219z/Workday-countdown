@@ -178,6 +178,8 @@ export type WindowCommand = { action: 'showMain' } | { action: 'showMini' } | { 
 export type MiniWindowCommand = Exclude<WindowCommand, { action: 'showMini' }>
 // Presentation only; own registered window, no native handles or window IDs.
 export interface WindowVisibility { visible: boolean; sequence: number }
+// Read-only display preferences, never the full editable configuration.
+export interface WindowPresentation { appearance: AppConfig['appearance']; miniEnabled:boolean; alwaysOnTop:boolean; sequence:number }
 export interface ImportPreview {
   previewToken: string
   sourceKind: MigrationSource
@@ -211,6 +213,7 @@ export interface ContractRequests {
   'snapshot.unsubscribe': null
   'window.perform': WindowCommand
   'window.readVisibility': null
+  'window.readPresentation': null
   'app.quit': null
   'data.previewImport': { sourceKind: MigrationSource }
   'data.applyImport': { previewToken: string; expectedRevision: number; selectedFields: ImportField[]; undatedOvertimeShiftDate: LocalDate | null; confirmPreviouslyImported?: boolean }
@@ -233,6 +236,7 @@ export interface ContractResponses {
   'snapshot.unsubscribe': null
   'window.perform': null
   'window.readVisibility': WindowVisibility
+  'window.readPresentation': WindowPresentation
   'app.quit': null
   'data.previewImport': ImportPreview
   'data.applyImport': ConfigSnapshot
@@ -260,6 +264,9 @@ export interface WindowVisibilityApi {
   readVisibility(): Promise<Result<WindowVisibility>>
   subscribeVisibility(listener: (result: Result<WindowVisibility>) => void): Promise<Result<null>>
   unsubscribeVisibility(): Promise<Result<null>>
+  readPresentation(): Promise<Result<WindowPresentation>>
+  subscribePresentation(listener:(result:Result<WindowPresentation>)=>void):Promise<Result<null>>
+  unsubscribePresentation():Promise<Result<null>>
 }
 export interface MainWindowApi extends CommonApi {
   readonly role: 'main'

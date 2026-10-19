@@ -23,6 +23,7 @@ export function createWindowManager(createMain: () => ManagedWindow) {
   let miniEnabled = false, quitting = false, creating = false, switching = false, disposed = false
   let recovery: TrayRecovery | null = null, releaseRecovery: (() => void) | null = null
   let recoveryGeneration: object | null = null, hiddenMain = false
+  let navigation=0 // Invalidate an asynchronous mini entry after a later user action.
   const listeners = new Map<ManagedWindow, Array<[string, () => void]>>()
   const alive = (window: ManagedWindow | null): ManagedWindow | null => window && !window.isDestroyed() ? window : null
   const available = () => { try { return !!recovery?.isAvailable() } catch { return false } }
@@ -54,11 +55,13 @@ export function createWindowManager(createMain: () => ManagedWindow) {
     finally { creating = false }
   }
   function showMain(): Result<null> {
+    navigation++
     const window = ensureMain()
     if (!window.ok) return window
+    const previousMini=alive(mini),miniWasVisible=previousMini?.isVisible()
     switching = true
     try { alive(mini)?.hide(); hiddenMain = false; if (window.data.isMinimized()) window.data.restore(); window.data.show(); window.data.focus(); return success(null) }
-    catch { return unavailable() }
+    catch { if(!window.data.isVisible()&&miniWasVisible)try{previousMini?.show()}catch{/* Recovery failure is returned, never fabricated. */};return unavailable() }
     finally { switching = false }
   }
   function showMini(): Result<null> {
@@ -71,20 +74,23 @@ export function createWindowManager(createMain: () => ManagedWindow) {
   return {
     ensureMain, showMain, showMini,
     getMain: () => alive(main),
+    getMini: () => alive(mini),
+    navigation:()=>navigation,
     registerMini(window: ManagedWindow): Result<null> {
       if (quitting || disposed || window.isDestroyed() || alive(mini) || window === alive(main)) return unavailable()
       switching = true
       try { window.hide(); mini = window; attach(window, 'mini'); return success(null) }
       finally { switching = false; reconcile() }
     },
-    setMiniEnabled(enabled: boolean): Result<null> { if (quitting || disposed || typeof enabled !== 'boolean') return unavailable(); miniEnabled = enabled; return enabled ? success(null) : showMain() },
-    setMiniTop(enabled: boolean): Result<null> { if (quitting || disposed || !alive(mini) || typeof enabled !== 'boolean') return unavailable(); mini!.setAlwaysOnTop(enabled); return success(null) },
+    setMiniEnabled(enabled: boolean): Result<null> { if (quitting || disposed || typeof enabled !== 'boolean') return unavailable(); miniEnabled = enabled; return !enabled&&alive(mini)?.isVisible()?showMain():success(null) },
+    setMiniTop(enabled: boolean): Result<null> { if (quitting || disposed || !alive(mini) || typeof enabled !== 'boolean') return unavailable(); try{mini!.setAlwaysOnTop(enabled);return success(null)}catch{return unavailable()} },
     hideMain(): Result<null> {
       if (quitting || disposed || !alive(main)) return unavailable()
       if (!available() && !alive(mini)?.isVisible()) { showMain(); return { ok: false, error: { code: 'UNAVAILABLE', message: '托盘恢复能力不可用，主窗口保持可见。' } } }
+      navigation++
       hiddenMain = true; main!.hide(); return success(null)
     },
-    hideMini(): Result<null> { if (quitting || disposed || !alive(mini)) return unavailable(); if (!available()) return showMain(); mini!.hide(); return success(null) },
+    hideMini(): Result<null> { navigation++;if (quitting || disposed || !alive(mini)) return unavailable(); if (!available()) return showMain(); mini!.hide(); return success(null) },
     registerTrayRecovery(port: TrayRecovery): Result<() => void> {
       if (quitting || disposed) return unavailable()
       let release: () => void

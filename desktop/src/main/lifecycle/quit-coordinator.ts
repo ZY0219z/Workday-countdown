@@ -88,6 +88,7 @@ export function createQuitCoordinator(options: QuitOptions) {
       return active
     },
     isAuthorized: () => authorized,
+    isPending: () => active!==null,
     dispose() { disposed = true; draft = null; for (const [timer, resolve] of timers) { clearTimeout(timer); resolve({ ok: false, error: { code: 'CANCELLED', message: '退出协调器已释放。' } }) }; timers.clear() }
   }
 }

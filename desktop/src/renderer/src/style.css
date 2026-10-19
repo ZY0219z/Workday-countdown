@@ -11,3 +11,5 @@ html,body,#app { margin:0;min-width:0;min-height:100%; }
 .app-modal-backdrop { position:fixed;inset:0;background:rgb(0 0 0 / 45%);z-index:10;display:grid;place-items:center;padding:var(--we-space-4);overflow:auto; }
 .app-modal { width:min(100%,480px);max-height:100%;overflow:auto;padding:var(--we-space-5);display:grid;gap:var(--we-space-4); }
 @media(max-width:520px){.app-shell{padding:var(--we-space-3)}.app-settings{padding:var(--we-space-3)}}
+
+.app-header-actions { display:flex;align-items:center;gap:var(--we-space-2); }

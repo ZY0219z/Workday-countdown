@@ -76,8 +76,8 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
           <p class="we-muted">即时预览；取消或放弃恢复已保存主题。系统或应用任一减少动画设置生效，暂停动画并保留静态形象。</p><FieldErrors :issues="issues" path="$.appearance" />
         </section>
         <section v-if="active==='desktop'" class="settings-panel">
-          <h3>窗口与托盘偏好</h3><label>关闭主窗口<select v-model="form.desktop.closeAction" class="we-control" @change="update"><option value="hideToTray">隐藏到托盘</option><option value="quit">退出程序</option></select></label><label class="we-check"><input v-model="form.desktop.miniEnabled" type="checkbox" @change="update" />迷你窗偏好</label><label class="we-check"><input v-model="form.desktop.alwaysOnTop" type="checkbox" @change="update" />迷你窗置顶偏好</label>
-          <p class="settings-deferred">关闭行为按已保存设置执行；隐藏到托盘保留输入，托盘“退出程序”仍保护未保存设置。最小化保留任务栏。托盘不可用时不会隐藏。迷你窗尚未开放，上方迷你选项仅保存偏好。</p><FieldErrors :issues="issues" path="$.desktop" />
+          <h3>窗口与托盘偏好</h3><label>关闭主窗口<select v-model="form.desktop.closeAction" class="we-control" @change="update"><option value="hideToTray">隐藏到托盘</option><option value="quit">退出程序</option></select></label><label class="we-check"><input v-model="form.desktop.miniEnabled" type="checkbox" @change="update" />启用迷你窗</label><label class="we-check"><input v-model="form.desktop.alwaysOnTop" type="checkbox" @change="update" />迷你窗置顶偏好</label>
+          <p class="settings-deferred">关闭行为按已保存设置执行；隐藏到托盘保留输入，托盘“退出程序”仍保护未保存设置。最小化保留任务栏。托盘不可用时不会隐藏。迷你窗启用并保存后，可从主窗口或托盘主动进入；每次启动仍打开主窗口。拖动位置随下次保存设置记住；置顶按钮本次操作不自动写入偏好。</p><FieldErrors :issues="issues" path="$.desktop" />
         </section>
         <section v-if="active==='data'" class="settings-panel"><DataSettings :api="api" :blocked="dirty||busy" @applied="emit('imported')" @busy="value=>emit('dataBusy',value)" /></section>
         </details>

@@ -1,6 +1,6 @@
-import type { Capability, ContractRequests, ContractResponses, MainWindowApi, MiniWindowApi, Result, DashboardSnapshot, WindowVisibility } from './contracts'
+import type { Capability, ContractRequests, ContractResponses, MainWindowApi, MiniWindowApi, Result, DashboardSnapshot, WindowVisibility, WindowPresentation } from './contracts'
 import { CONTRACT_VERSION } from './contracts'
-import { V2_CHANNELS, SNAPSHOT_PUSH, WINDOW_VISIBILITY_PUSH, OPEN_SETTINGS_PUSH, ipcFailure,readIpcResult } from './ipc'
+import { V2_CHANNELS, SNAPSHOT_PUSH, WINDOW_VISIBILITY_PUSH, WINDOW_PRESENTATION_PUSH, OPEN_SETTINGS_PUSH, ipcFailure,readIpcResult } from './ipc'
 import { validateStructure, v } from './validation'
 export interface BridgeTransport {invoke(channel:string,input:unknown):Promise<unknown>;listen(channel:string,listener:(payload:unknown)=>void):()=>void}
 export function createV2Bridge(role:'main',transport:BridgeTransport):MainWindowApi
@@ -15,6 +15,9 @@ export function createV2Bridge(role:'main'|'mini',transport:BridgeTransport):Mai
   const visibilityListeners=new Set<(result:Result<WindowVisibility>)=>void>();let stopVisibility:(()=>void)|null=null,visibilitySequence=-1
   function visibilityResult(payload:unknown):Result<WindowVisibility>{const result=readIpcResult<unknown>(payload);return result.ok?validateStructure(result.data,v.object<WindowVisibility>({visible:v.boolean,sequence:v.number(1,Number.MAX_SAFE_INTEGER)})):result}
   function emitVisibility(result:Result<WindowVisibility>){if(result.ok){if(result.data.sequence<=visibilitySequence)return;visibilitySequence=result.data.sequence}for(const listener of visibilityListeners)try{listener(result)}catch{/* Consumer isolation. */}}
+  const presentationListeners=new Set<(result:Result<WindowPresentation>)=>void>();let stopPresentation:(()=>void)|null=null,presentationSequence=-1
+  function presentationResult(payload:unknown):Result<WindowPresentation>{const result=readIpcResult<unknown>(payload);return result.ok?validateStructure(result.data,v.object<WindowPresentation>({appearance:v.object({mode:v.enum(['system','light','dark'] as const),accent:v.enum(['ocean','coral'] as const),reduceMotion:v.boolean}),miniEnabled:v.boolean,alwaysOnTop:v.boolean,sequence:v.number(1,Number.MAX_SAFE_INTEGER)})):result}
+  function emitPresentation(result:Result<WindowPresentation>){if(result.ok){if(result.data.sequence<=presentationSequence)return;presentationSequence=result.data.sequence}for(const listener of presentationListeners)try{listener(result)}catch{/* Consumer isolation. */}}
   const common={contractVersion:CONTRACT_VERSION,role,
     snapshot:Object.freeze({read:()=>call('snapshot.read',null),subscribe:(listener:(result:Result<DashboardSnapshot>)=>void)=>serial(async()=>{
       if(typeof listener!=='function')return ipcFailure()
@@ -26,6 +29,14 @@ export function createV2Bridge(role:'main'|'mini',transport:BridgeTransport):Mai
       return {ok:true as const,data:null}
     }),unsubscribe:()=>serial(async()=>{listeners.clear();const removed=detach(),result=await call('snapshot.unsubscribe',null);return removed?result:ipcFailure()})}),
     app:Object.freeze({quit:()=>call('app.quit',null)}),window:Object.freeze({perform:(request:ContractRequests['window.perform'])=>call('window.perform',request),
+      readPresentation:async()=>presentationResult(await call('window.readPresentation',null)),
+      subscribePresentation:(listener:(result:Result<WindowPresentation>)=>void)=>serial(async()=>{
+        if(typeof listener!=='function')return ipcFailure();presentationListeners.add(listener)
+        try{if(!stopPresentation)stopPresentation=transport.listen(WINDOW_PRESENTATION_PUSH,payload=>emitPresentation(presentationResult(payload)))
+          const result=presentationResult(await call('window.readPresentation',null));emitPresentation(result);if(!result.ok){presentationListeners.clear();const stop=stopPresentation;stopPresentation=null;stop?.();return result}return {ok:true as const,data:null}
+        }catch{presentationListeners.clear();const stop=stopPresentation;stopPresentation=null;try{stop?.()}catch{}return ipcFailure()}
+      }),
+      unsubscribePresentation:()=>serial(async()=>{presentationListeners.clear();presentationSequence=-1;const stop=stopPresentation;stopPresentation=null;try{stop?.();return {ok:true as const,data:null}}catch{return ipcFailure()}}),
       readVisibility:async()=>visibilityResult(await call('window.readVisibility',null)),
       subscribeVisibility:(listener:(result:Result<WindowVisibility>)=>void)=>serial(async()=>{
         if(typeof listener!=='function')return ipcFailure();visibilityListeners.add(listener)

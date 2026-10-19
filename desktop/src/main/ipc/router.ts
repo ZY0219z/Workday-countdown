@@ -1,14 +1,16 @@
-import type { Capability, ContractRequests, ContractResponses, Result, WindowRole } from '../../shared/contracts'
+import type { Capability, ContractRequests, ContractResponses, Result, WindowRole, WindowPresentation } from '../../shared/contracts'
 import { validateContractRequest } from '../../shared/capabilities'
-import { V2_CHANNELS, SNAPSHOT_PUSH, WINDOW_VISIBILITY_PUSH, OPEN_SETTINGS_PUSH, safeResult, ipcFailure } from '../../shared/ipc'
+import { V2_CHANNELS, SNAPSHOT_PUSH, WINDOW_VISIBILITY_PUSH, WINDOW_PRESENTATION_PUSH, OPEN_SETTINGS_PUSH, safeResult, ipcFailure } from '../../shared/ipc'
 import type { Runtime } from '../services/runtime'
 export interface IpcEvent {sender:object;senderFrame:unknown}
 export interface RegisteredWindow {
   sender:object;frame:()=>unknown;url:()=>string;destroyed:()=>boolean;visible:()=>boolean;push:(channel:string,result:unknown)=>void
 }
 export interface IpcPort {handle(channel:string,callback:(event:IpcEvent,input:unknown)=>Promise<unknown>):void;removeHandler(channel:string):void}
-export function createIpcRouter(ipc:IpcPort,runtime:Runtime,operations:{window:(request:ContractRequests['window.perform'])=>Result<null>;quit:()=>Promise<Result<null>>}) {
+export function createIpcRouter(ipc:IpcPort,runtime:Runtime,operations:{window:(request:ContractRequests['window.perform'])=>Result<null>|Promise<Result<null>>;quit:()=>Promise<Result<null>>;presentation?:()=>Result<Omit<WindowPresentation,'sequence'>>}) {
   const windows=new Map<object,{role:WindowRole;port:RegisteredWindow;url:string;visibilitySequence:number}>();let disposed=false
+  let presentationSequence=0
+  function presentation():Result<WindowPresentation>{const result=operations.presentation?.();return result?.ok?{ok:true,data:{...result.data,sequence:++presentationSequence}}:result??{ok:false,error:{code:'UNAVAILABLE',message:'窗口外观尚未就绪。'}}}
   function visibility(known:NonNullable<ReturnType<typeof identify>>){return {visible:known.port.visible(),sequence:++known.visibilitySequence}}
   function release(sender:object){runtime.refresh.unsubscribe(sender);windows.delete(sender)}
   function identify(event:IpcEvent){try{const known=windows.get(event.sender);return known&&!known.port.destroyed()&&event.senderFrame&&event.senderFrame===known.port.frame()&&known.port.url()===known.url?known:null}catch{return null}}
@@ -27,8 +29,9 @@ export function createIpcRouter(ipc:IpcPort,runtime:Runtime,operations:{window:(
         case 'snapshot.read':result=await runtime.snapshots.read();break
         case 'snapshot.subscribe':runtime.refresh.subscribe(event.sender,{visible:known.port.visible,push:value=>{if(identify(event)===known)known.port.push(SNAPSHOT_PUSH,safeResult(value));else runtime.refresh.unsubscribe(event.sender)}});result={ok:true,data:null};break
         case 'snapshot.unsubscribe':runtime.refresh.unsubscribe(event.sender);result={ok:true,data:null};break
-        case 'window.perform':result=operations.window(request.data as ContractRequests['window.perform']);break
+        case 'window.perform':result=await operations.window(request.data as ContractRequests['window.perform']);break
         case 'window.readVisibility':result={ok:true,data:visibility(known)};break
+        case 'window.readPresentation':result=presentation();break
         case 'app.quit':result=await operations.quit();break
         case 'data.previewImport':result=await runtime.previewImport(request.data as ContractRequests['data.previewImport']);break
         case 'data.applyImport':result=await runtime.applyImport(request.data as ContractRequests['data.applyImport']);break
@@ -44,6 +47,7 @@ export function createIpcRouter(ipc:IpcPort,runtime:Runtime,operations:{window:(
   for(const method of Object.keys(V2_CHANNELS) as Capability[])ipc.handle(V2_CHANNELS[method],(event,input)=>invoke(method,event,input))
   return {register(role:WindowRole,port:RegisteredWindow,exactUrl:string){if(disposed||windows.has(port.sender)||!exactUrl)throw new Error('Window registration invalid');windows.set(port.sender,{role,port,url:exactUrl,visibilitySequence:0});return()=>release(port.sender)},
     revokeSubscription(sender:object){runtime.refresh.unsubscribe(sender)},
+    presentationChanged(){const result=safeResult(presentation());for(const known of windows.values())try{if(!known.port.destroyed()&&known.port.frame()&&known.port.url()===known.url)known.port.push(WINDOW_PRESENTATION_PUSH,result)}catch{/* No raw event or navigation capability. */}},
     openSettings():Result<null>{
       if(disposed)return {ok:false,error:{code:'UNAVAILABLE',message:'窗口服务已退出。'}}
       for(const known of windows.values())try{if(known.role==='main'&&!known.port.destroyed()&&known.port.frame()&&known.port.url()===known.url){known.port.push(OPEN_SETTINGS_PUSH,safeResult({ok:true,data:{action:'openSettings'}}));return {ok:true,data:null}}}catch{/* Keep exact trusted-page guards. */}

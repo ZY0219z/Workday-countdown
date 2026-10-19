@@ -33,6 +33,7 @@ export function createTrayController(options:{
   acknowledgeNotice():void
   feedback(message:string):void
   exiting():boolean
+  mini?:{enabled():boolean;visible():boolean;show():Promise<Result<null>>;hide():Result<null>}
 }) {
   let native:TrayPort|null=null,releaseRecovery:(()=>void)|null=null,disposed=false,exiting=false,acknowledged=false
   let closing:Promise<Result<null>>|null=null,menu:Promise<Result<null>>|null=null
@@ -79,6 +80,10 @@ export function createTrayController(options:{
         {label:trayStatus(result),enabled:false},
         {label:'打开主窗口',click:guarded(restoreMain)},
         {label:'打开设置',click:guarded(()=>{const shown=restoreMain();if(shown.ok){const opened=options.openSettings();if(!opened.ok)fail(opened.error.message)}})},
+        ...(options.mini?[
+          {label:'显示迷你窗',enabled:options.mini.enabled(),click:guarded(async()=>{const result=await options.mini!.show();if(!result.ok)fail(result.error.message);return result})},
+          {label:'隐藏迷你窗',enabled:options.mini.visible(),click:guarded(()=>{const result=options.mini!.hide();if(!result.ok)fail(result.error.message);return result})}
+        ]:[]),
         {type:'separator'},
         {label:'退出程序',click:guarded(()=>requestExit().catch(()=>fail('退出调用失败，窗口与草稿保留。')))}
       ])

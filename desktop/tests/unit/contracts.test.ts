@@ -223,7 +223,7 @@ test('all response DTO examples and failure results are JSON round-trip data', (
   const responses: ContractResponses = {
     'config.read': { config: saved, warnings: [] }, 'config.save': { config: saved, warnings: [] },
     'settingsDraft.read': draft, 'settingsDraft.update': draft, 'settingsDraft.discard': draft, 'settingsDraft.setExpectedEnd':draft,
-    'snapshot.read': snapshot, 'snapshot.subscribe': null, 'snapshot.unsubscribe': null, 'window.perform': null, 'window.readVisibility':{visible:false,sequence:1}, 'app.quit': null,
+    'snapshot.read': snapshot, 'snapshot.subscribe': null, 'snapshot.unsubscribe': null, 'window.perform': null, 'window.readVisibility':{visible:false,sequence:1}, 'window.readPresentation':{appearance:saved.appearance,miniEnabled:false,alwaysOnTop:false,sequence:1}, 'app.quit': null,
     'data.previewImport': { previewToken: 'token', sourceKind: 'python-v1', sourceHash: 'a'.repeat(64), expectedRevision: 0,
       choices: [{ field: 'schedule.startTime', current: '09:00', incoming: '08:30', issues: [] }], undatedOvertimeMinutes: 80 },
     'data.applyImport': { config: saved, warnings: [] }, 'data.export': null,

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { AppConfig, ConfigSnapshot, ContractRequests, JsonObject, Result, SettingsDraftSession, SnapshotWarning } from '../../shared/contracts'
-import { success, validateStructure } from '../../shared/validation'
+import { success, validateStructure, v } from '../../shared/validation'
 import { validateDraftFields, editableConfigValidator } from '../../shared/config-schema'
 import { checkExpectedRevision, validateContractRequest } from '../../shared/capabilities'
 import { createSettingsDraft, updateSettingsDraft, beginDraftSave, finishDraftSave, prepareDraftSave } from '../../shared/settings-draft'
@@ -18,7 +18,7 @@ import { createDefaultAppConfig } from '../../shared/config-schema'
 import { editableConfig } from './config-validation'
 import { createCalendar } from '../../domain/calendar'
 import { currentOvertimeShift, expectedEndOvertime, shiftEndLabel } from '../../domain/expected-end'
-import type { EditableConfig, ExpectedEndContext } from '../../shared/contracts'
+import type { EditableConfig, ExpectedEndContext, WindowBounds } from '../../shared/contracts'
 export interface Runtime {
   snapshots:SnapshotService;refresh:RefreshCoordinator
   start():Promise<Result<null>>;readConfig():Result<ConfigSnapshot>;readDraft():Result<SettingsDraftSession>
@@ -26,6 +26,8 @@ export interface Runtime {
   setExpectedEnd(request:ContractRequests['settingsDraft.setExpectedEnd']):Result<SettingsDraftSession>
   discardDraft():Result<SettingsDraftSession>;save(request:ContractRequests['config.save']):Promise<Result<ConfigSnapshot>>
   acknowledgeTrayNotice():void
+  stageMiniBounds(bounds:WindowBounds):Result<null>
+  onConfigSaved(listener:()=>void):()=>void
   applyImport(request:ContractRequests['data.applyImport']):Promise<Result<ConfigSnapshot>>
   previewImport(request:ContractRequests['data.previewImport']):Promise<Result<import('../../shared/contracts').ImportPreview>>
   previewRecovery():Promise<Result<import('../../shared/contracts').ImportPreview>>
@@ -45,6 +47,8 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
   // Main-only acknowledgement. Persist with the next normal, revision-checked
   // save, never issue an independent write over a renderer's unsynced draft.
   let trayNoticePending=false
+  let pendingMiniBounds:WindowBounds|null=null
+  const savedListeners=new Set<()=>void>()
   const snapshots=createSnapshotService(options.clock,c=>{
     const engine=createDashboardEngine(c,options.calendars,options.zones,options.maxHistoryDays)
     if(!engine.ok)return engine
@@ -97,11 +101,14 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
     defaultSettings=null;defaultPersistence=null
     expectedEndEdit=null
     if(!changed.ok)config.warnings.push({field:'$.snapshot',reason:'FORMAT',message:'配置已保存，但快照准备不可用；没有保留旧有效快照。'})
+    for(const listener of savedListeners)try{listener()}catch{/* A window cannot invalidate a completed safe save. */}
     return success(null)
   }
   const methods:Runtime={
     snapshots,refresh,
     acknowledgeTrayNotice(){if(!disposed)trayNoticePending=true},
+    onConfigSaved(listener){if(!disposed)savedListeners.add(listener);return()=>{savedListeners.delete(listener)}},
+    stageMiniBounds(bounds){if(disposed)return unavailable();const valid=validateStructure(bounds,v.object<WindowBounds>({x:v.number(-Number.MAX_SAFE_INTEGER,Number.MAX_SAFE_INTEGER),y:v.number(-Number.MAX_SAFE_INTEGER,Number.MAX_SAFE_INTEGER),width:v.number(1,10000),height:v.number(1,10000)}));if(!valid.ok)return valid;pendingMiniBounds=valid.data;return success(null)},
     async start():Promise<Result<null>>{
       const loaded=await options.store.load();if(!loaded.ok)return loaded;state=loaded.data
       if(state.config){const read=await options.store.read();if(!read.ok)return read;const applied=accept(read.data);if(!applied.ok)return applied}
@@ -157,6 +164,8 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
       if(busy||disposed)return unavailable('设置正在保存或服务已退出。')
       const revision=checkExpectedRevision(valid.data.expectedRevision,config?.config.revision??0);if(!revision.ok)return revision
       if(trayNoticePending)valid.data.settings.desktop.tray.firstHideNoticeAcknowledged=true
+      const geometry=pendingMiniBounds
+      if(geometry)valid.data.settings.desktop.bounds.mini=clone(geometry)
       if(expectedEndEdit){
         const target=overtimeTarget(valid.data.settings);if(!target.ok)return target
         if(target.data.view.targetKey!==expectedEndEdit.targetKey)return unavailable('当前班次或时区已变化，未应用旧输入；请放弃旧草稿后重新填写。')
@@ -169,7 +178,7 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
       busy=true
       try{
         const result=await options.writes.run(()=>config?options.store.save(valid.data):options.store.initializeSettings(valid.data.settings))
-        if(result.ok){state={status:'ready',config:result.data.config};const applied=accept(result.data);if(!applied.ok)return applied;draft.save={status:'saved',revision:result.data.config.revision};refresh.wake();return methods.readConfig()}
+        if(result.ok){state={status:'ready',config:result.data.config};if(pendingMiniBounds===geometry)pendingMiniBounds=null;const applied=accept(result.data);if(!applied.ok)return applied;draft.save={status:'saved',revision:result.data.config.revision};refresh.wake();return methods.readConfig()}
         if(draft.saved){const finished=finishDraftSave(draft as import('../../shared/contracts').DraftState,result);if(finished.ok)draft=finished.data}
         else {draft.save={status:'failed',error:result.error};if(result.error.code==='VALIDATION')draft.issues=result.error.issues}
         return result
@@ -183,7 +192,7 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
     async applyImport(request:ContractRequests['data.applyImport']):Promise<Result<ConfigSnapshot>>{
       if(!options.migration)return unavailable('可信文件选择与导入来源尚未接入。')
       if(busy||dirty()||disposed)return unavailable('请先保存或明确放弃当前草稿。')
-      busy=true;try{const result=await options.writes.run(()=>options.migration!.apply(request));if(result.ok){state={status:'ready',config:result.data.config};const applied=accept(result.data);if(!applied.ok)return applied;refresh.wake(true);return methods.readConfig()}return result}finally{busy=false}
+      busy=true;try{const result=await options.writes.run(()=>options.migration!.apply(request));if(result.ok){if(request.selectedFields.includes('desktop.bounds'))pendingMiniBounds=null;state={status:'ready',config:result.data.config};const applied=accept(result.data);if(!applied.ok)return applied;refresh.wake(true);return methods.readConfig()}return result}finally{busy=false}
     },
     previewImport:(request:ContractRequests['data.previewImport'])=>options.migration?options.migration.preview(request):Promise.resolve(unavailable<import('../../shared/contracts').ImportPreview>('可信文件选择尚未接入；未读取或导入任何来源。')),
     previewRecovery:()=>options.migration?options.migration.previewRecovery():Promise.resolve(unavailable('备份恢复服务未接入。')),
@@ -202,7 +211,7 @@ export function createRuntime(options:ConfigValidationContext & {store:ConfigSto
       },
       async discard(expected:string){if(identity()!==expected)return unavailable<null>('草稿已改变，未放弃。');const discarded=methods.discardDraft();return discarded.ok?success(null):discarded}
     } satisfies ExitDraftAdapter,
-    dispose(){disposed=true;if(defaultTask)clearImmediate(defaultTask);refresh.dispose();snapshots.dispose()}
+    dispose(){disposed=true;savedListeners.clear();if(defaultTask)clearImmediate(defaultTask);refresh.dispose();snapshots.dispose()}
   }
   return methods
 }

@@ -7,14 +7,14 @@ import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 
 const suite=process.argv[2]??'lifecycle'
-assert.ok(['lifecycle','d09','d11-services','d11-performance','d13'].includes(suite))
+assert.ok(['lifecycle','d09','d11-services','d11-performance','d13','d14'].includes(suite))
 const scratch = mkdtempSync(join(tmpdir(), 'workday-d08-'))
 after(() => {
   assert.ok(isAbsolute(scratch) && scratch.startsWith(join(tmpdir(), 'workday-d08-')))
   rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
 })
 const files = [
-  ...['contracts', 'validation', 'formats', 'config-schema', 'capabilities', 'settings-draft'].map(name => `src/shared/${name}.ts`),
+  ...['contracts', 'preload-role', 'validation', 'formats', 'config-schema', 'capabilities', 'settings-draft'].map(name => `src/shared/${name}.ts`),
   ...['local-date', 'local-time', 'time-zone', 'clock', 'annual-calendar', 'calendar', 'calculation-quality', 'schedule', 'overtime', 'progress', 'salary', 'expected-end'].map(name => `src/domain/${name}.ts`),
   ...['intl-time-zone', 'system-clock'].map(name => `src/adapters/${name}.ts`),
   ...['calendar-store','config-validation','config-files','config-store','migration-files','migration-service'].map(name => `src/main/services/${name}.ts`), ...['app-identity','single-instance','windows/window-bounds','windows/window-manager','lifecycle/operation-barrier','lifecycle/quit-coordinator','lifecycle/poc-draft','lifecycle/background-testing'].map(name => `src/main/${name}.ts`), 'src/shared/settings.ts', 'tests/unit/config-fixtures.ts', 'tests/unit/lifecycle.test.ts'
@@ -22,6 +22,7 @@ const files = [
 if(suite!=='lifecycle')files.push(...['src/domain/dashboard.ts','src/domain/time-zone-cache.ts','src/domain/employment.ts','src/domain/rest-day.ts',
   'src/shared/ipc.ts','src/shared/bridge.ts','src/main/services/snapshot-service.ts','src/main/services/clock.ts','src/main/services/runtime.ts','src/main/ipc/router.ts',`tests/unit/${suite}.test.ts`])
 if(suite==='d11-services')files.push('src/renderer/src/ui/settings-editor.ts','src/renderer/src/ui/settings-controller.ts')
+if(suite==='d14')files.push('src/main/windows/mini-controller.ts','src/main/tray/tray-controller.ts')
 if(suite==='d13')files.push('src/main/tray/tray-controller.ts','src/main/tray/background-tray.ts')
 for (const file of files) {
   const output = ts.transpileModule(readFileSync(file, 'utf8'), {

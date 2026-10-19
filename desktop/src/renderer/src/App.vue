@@ -6,6 +6,7 @@ import SettingsView from './views/SettingsView.vue'
 import { createSettingsController } from './ui/settings-controller'
 import { useTheme } from './composables/useTheme'
 import { useWindowVisibility } from './composables/useWindowVisibility'
+import { useSnapshotFeed } from './composables/useSnapshotFeed'
 import type { EditorSettings } from './ui/settings-editor'
 
 const api=window.workdayV2,host=ref<HTMLElement|null>(null),settingsOpen=ref(false),loading=ref(true),snapshot=shallowRef<DashboardSnapshot|null>(null),metadata=ref<CalendarDatasetMetadata[]>([])
@@ -53,17 +54,25 @@ async function quit(){
 }
 async function imported(){await load();await refreshSnapshot();error.value='';}
 function trap(event:KeyboardEvent){if(event.key==='Escape'){event.preventDefault();void chooseLeave('continue');return}if(event.key!=='Tab')return;const buttons=[...dialogRef.value!.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];if(!buttons.length)return;const first=buttons[0],last=buttons[buttons.length-1];if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}}
-async function initialize(){
-  loading.value=true;error.value=''
-  try{if(!await load()){settingsOpen.value=true;return}settingsOpen.value=state.value.dirty||(!state.value.session?.saved&&!state.value.session?.defaultPersistence)
-    let refreshingDefaults=false,defaultsAgain=false
-    const subscribed=await api.snapshot.subscribe(result=>{if(!result.ok){snapshot.value=null;return}const value=result.data;if(value.configRevision<(state.value.session?.saved?.revision??0))return;if(snapshot.value&&value.sequence<snapshot.value.sequence)return;const boundary=snapshot.value&&(value.localDate!==snapshot.value.localDate||value.timeZoneId!==snapshot.value.timeZoneId||value.activeShift?.shiftDate!==snapshot.value.activeShift?.shiftDate);snapshot.value=value
+async function miniMode(){
+  error.value=''
+  if(composing.value||confirmLeave.value){error.value='请先完成输入或当前确认，再切换迷你模式。';return}
+  if(!state.value.session?.saved?.desktop.miniEnabled){error.value='请在更多设置 → 窗口与托盘启用迷你窗并保存。';return}
+  const synced=await controller.flush();await nextTick()
+  if(!synced.ok||pending.value){error.value='设置尚未同步，输入保留；请完成同步后再切换。';return}
+  const result=await api.window.perform({action:'showMini'});if(!result.ok)error.value='迷你模式未打开，主窗口与设置保留；请完成同步后重试。'
+}
+let refreshingDefaults=false,defaultsAgain=false
+const feed=useSnapshotFeed(api.snapshot,()=>windowVisible.value||defaultPending.value,result=>{if(!result.ok){snapshot.value=null;return}const value=result.data;if(value.configRevision<(state.value.session?.saved?.revision??0))return;if(snapshot.value&&value.sequence<snapshot.value.sequence)return;const boundary=snapshot.value&&(value.localDate!==snapshot.value.localDate||value.timeZoneId!==snapshot.value.timeZoneId||value.activeShift?.shiftDate!==snapshot.value.activeShift?.shiftDate);snapshot.value=value
       if((state.value.session?.defaultPersistence&&!state.value.dirty||settingsOpen.value&&boundary&&!state.value.notice)&&!composing.value&&state.value.pending===0&&!state.value.unsynced&&!state.value.busy){
         defaultsAgain=true
         if(!refreshingDefaults){refreshingDefaults=true;void(async()=>{do{defaultsAgain=false;await controller.load()}while(defaultsAgain)})().finally(()=>{refreshingDefaults=false})}
       }
-    })
-    if(!subscribed.ok)error.value=subscribed.error.message
+})
+async function initialize(){
+  loading.value=true;error.value=''
+  try{if(!await load()){settingsOpen.value=true;return}settingsOpen.value=state.value.dirty||(!state.value.session?.saved&&!state.value.session?.defaultPersistence)
+    await feed.start()
   }catch{settingsOpen.value=true;error.value='IPC 初始化失败，请重新连接配置；尚未取得草稿时不能编辑或保存。'}finally{loading.value=false}
 }
 onMounted(initialize)
@@ -72,7 +81,7 @@ onBeforeUnmount(()=>{stopTraySettings?.();controller.dispose();void api.snapshot
 <template>
   <div ref="host" class="workday-ui app-shell" data-workday-root :data-pending="String(pending)" @compositionstart="composing=true" @compositionend="composing=false">
     <div class="app-content" :inert="confirmLeave">
-      <header class="app-header"><h1>今天你摸鱼了吗</h1><button type="button" class="we-button app-menu" :aria-label="settingsOpen?'返回倒计时':'设置'" :title="settingsOpen?'返回倒计时':'设置'" :aria-expanded="settingsOpen" aria-controls="settings-panel" :disabled="loading||defaultPending" @click="settingsOpen?leave():openSettings()"><span aria-hidden="true">☰</span></button></header>
+      <header class="app-header"><h1>今天你摸鱼了吗</h1><div class="app-header-actions"><button type="button" class="we-button app-mini" :disabled="loading||syncing||defaultPending" @click="miniMode">迷你模式</button><button type="button" class="we-button app-menu" :aria-label="settingsOpen?'返回倒计时':'设置'" :title="settingsOpen?'返回倒计时':'设置'" :aria-expanded="settingsOpen" aria-controls="settings-panel" :disabled="loading||defaultPending" @click="settingsOpen?leave():openSettings()"><span aria-hidden="true">☰</span></button></div></header>
       <p v-if="errorText" role="alert" class="app-error">{{ errorText }}</p>
       <button v-if="!loading&&!state.session" type="button" class="we-button" @click="initialize">重新连接配置</button>
       <button v-if="state.unsynced && state.pending===0" type="button" class="we-button" @click="error='';controller.retry()">重试同步草稿</button>

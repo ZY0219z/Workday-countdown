@@ -4,6 +4,9 @@ import { issue, success, v, validateStructure, validationFailure } from '../../s
 // Outer native window sizes in DIP; saved bounds still take precedence.
 export const MAIN_WINDOW_DEFAULT_SIZE=Object.freeze({width:720,height:660})
 export const MAIN_WINDOW_MINIMUM_SIZE=Object.freeze({width:480,height:520})
+// Frameless mini: outer and content DIP sizes coincide.
+export const MINI_WINDOW_DEFAULT_SIZE=Object.freeze({width:280,height:132})
+export const MINI_WINDOW_MINIMUM_SIZE=Object.freeze({width:240,height:112})
 
 export interface DisplayArea { id: number; workArea: WindowBounds; scaleFactor: number }
 export interface BoundsWindow {

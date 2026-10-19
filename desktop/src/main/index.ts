@@ -7,7 +7,9 @@ import { APPLICATION_ID, APPLICATION_NAME, resolveApplicationPaths } from './app
 import { acquireSingleInstance } from './single-instance'
 import { createWindowManager, windowPresentationVisible } from './windows/window-manager'
 import type { WindowManager } from './windows/window-manager'
-import { restoreWindowBounds, applyRestoredBounds, MAIN_WINDOW_DEFAULT_SIZE, MAIN_WINDOW_MINIMUM_SIZE } from './windows/window-bounds'
+import type { WindowBounds, WindowRole } from '../shared/contracts'
+import { createMiniController, type MiniController } from './windows/mini-controller'
+import { restoreWindowBounds, applyRestoredBounds, MAIN_WINDOW_DEFAULT_SIZE, MAIN_WINDOW_MINIMUM_SIZE, MINI_WINDOW_DEFAULT_SIZE, MINI_WINDOW_MINIMUM_SIZE } from './windows/window-bounds'
 import { createOperationBarrier } from './lifecycle/operation-barrier'
 import { createQuitCoordinator } from './lifecycle/quit-coordinator'
 import type { ExitChoice } from './lifecycle/quit-coordinator'
@@ -31,6 +33,8 @@ const devUrl = !app.isPackaged ? process.env.ELECTRON_RENDERER_URL : undefined
 // electron-vite supplies a slash-less HTTP origin; Chromium canonicalizes it.
 // Canonicalize only our trusted target, never an incoming sender URL/origin.
 const rendererUrl = devUrl ? new URL(devUrl).href : pathToFileURL(rendererFile).href
+const miniFile=join(__dirname,'../renderer/mini.html')
+const miniUrl=devUrl?new URL('mini.html',rendererUrl).href:pathToFileURL(miniFile).href
 // Packaged EXEs NEVER accept test profile overrides, injected exit choices or
 // background window substitutes, regardless of environment/command-line input.
 const testMode = !app.isPackaged && process.env.WORKDAY_ESCAPE_TEST_MODE === '1'
@@ -59,13 +63,15 @@ else if (instance.data.primary) {
     let exitChoiceForTest: ExitChoice | null = null
     let hideChoiceForTest:boolean|null=null,tray:TrayController|undefined,testTray:ReturnType<typeof createBackgroundTray>|undefined
     let settingsRequested=false
+    let mini:MiniController|undefined,miniBounds:WindowBounds|null=null
     let feedbackOpen = false
     let interactiveAttempts: string[] = []
+    const miniInteractiveAttempts:string[][]=[]
     const main = () => windows?.getMain() as BrowserWindow | null
     const quit = createQuitCoordinator({ waitMilliseconds: 3000, confirmationMilliseconds: 120000,
       waitForWrites: writes.drain, restoreMain: () => { if (!background) windows?.showMain() },
       commitQuit() {
-        writes.seal(); windows!.beginQuit(); tray?.dispose(); instance.data.beginQuit()
+        writes.seal(); windows!.beginQuit(); mini?.dispose(); tray?.dispose(); instance.data.beginQuit()
         setImmediate(() => app.quit()) // Permit the existing IPC reply to settle.
         return success(null)
       }
@@ -115,9 +121,10 @@ else if (instance.data.primary) {
     if(!loadedRuntime.ok)throw new Error('正式服务启动失败。')
     const router=createIpcRouter(ipcMain,runtime,{
       quit:()=>requestQuit(false),
+      presentation:()=>mini?mini.presentation():{ok:false,error:{code:'UNAVAILABLE',message:'窗口外观尚未就绪。'}},
       window(command){
         if(!windows)return {ok:false,error:{code:'UNAVAILABLE',message:'窗口尚未创建。'}}
-        switch(command.action){case 'showMain':return windows.showMain();case 'showMini':return windows.showMini();case 'hideMini':return windows.hideMini();case 'setMiniTop':return windows.setMiniTop(command.enabled)}
+        switch(command.action){case 'showMain':return windows.showMain();case 'showMini':return mini!.show();case 'hideMini':return mini!.hide();case 'setMiniTop':return mini!.setTop(command.enabled)}
       }
     })
     const areas = () => screen.getAllDisplays().map(display => ({ id: display.id, workArea: display.workArea, scaleFactor: display.scaleFactor }))
@@ -128,17 +135,10 @@ else if (instance.data.primary) {
       if (!result.ok) throw new Error(result.error.message)
       return result.data
     }
-    windows = createWindowManager(() => {
-      const savedConfig = runtime.readConfig()
-      const initial = bounds(savedConfig.ok ? savedConfig.data.config.desktop.bounds.main : null)
-      const window = new BrowserWindow({ ...initial.bounds, minWidth: initial.minimum.width, minHeight: initial.minimum.height,
-        title: 'Workday Escape', show: false, focusable: !background, autoHideMenuBar: true,
-        webPreferences: { preload: join(__dirname, '../preload/index.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true }
-      })
-      if (background) interactiveAttempts = blockInteractiveWindowOperations(window)
-      const releaseWindow=router.register('main',{sender:window.webContents,frame:()=>window.webContents.mainFrame,url:()=>window.webContents.mainFrame.url,
+    function bindPage(window:BrowserWindow,role:WindowRole,url:string){
+      const releaseWindow=router.register(role,{sender:window.webContents,frame:()=>window.webContents.mainFrame,url:()=>window.webContents.mainFrame.url,
         destroyed:()=>window.isDestroyed()||window.webContents.isDestroyed(),visible:()=>windowPresentationVisible(window),
-        push:(channel,result)=>{if(!window.isDestroyed())window.webContents.send(channel,result)}},rendererUrl)
+        push:(channel,result)=>{if(!window.isDestroyed())window.webContents.send(channel,result)}},url)
       window.once('closed',releaseWindow)
       window.webContents.on('did-start-navigation',(_event,_url,_inPlace,isMainFrame)=>{if(isMainFrame)router.revokeSubscription(window.webContents)})
       const presentationChanged=()=>{router.visibilityChanged();if(windowPresentationVisible(window))runtime.refresh.wake()}
@@ -150,6 +150,16 @@ else if (instance.data.primary) {
       window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
       window.webContents.session.setPermissionCheckHandler(() => false)
       window.webContents.on('will-prevent-unload', event => { if (quit.isAuthorized()) event.preventDefault() })
+    }
+    windows = createWindowManager(() => {
+      const savedConfig = runtime.readConfig()
+      const initial = bounds(savedConfig.ok ? savedConfig.data.config.desktop.bounds.main : null)
+      const window = new BrowserWindow({ ...initial.bounds, minWidth: initial.minimum.width, minHeight: initial.minimum.height,
+        title: 'Workday Escape', show: false, focusable: !background, autoHideMenuBar: true,
+        webPreferences: { preload: join(__dirname, '../preload/index.cjs'), additionalArguments:['--workday-window-role=main'], contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true }
+      })
+      if (background) interactiveAttempts = blockInteractiveWindowOperations(window)
+      bindPage(window,'main',rendererUrl)
       window.once('ready-to-show', () => { if (!quit.isAuthorized()) { if (!background) { windows!.showMain(); void repairBounds() }; instance.data.markReady() } })
       window.webContents.on('did-finish-load',()=>{if(settingsRequested){settingsRequested=false;router.openSettings()}})
       window.on('close', event => { if (!quit.isAuthorized()) { event.preventDefault(); if(tray)void tray.closeMain();else void requestQuit(true) } })
@@ -157,7 +167,37 @@ else if (instance.data.primary) {
       void loaded.catch(() => { if (!quit.isAuthorized() && !window.isDestroyed()) { startupError('页面加载失败，应用将退出；配置未被更改。'); app.exit(1) } })
       return window
     })
-    tray=createTrayController({windows,
+    const miniRestoration=(saved:unknown)=>{
+      const area=screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
+      return restoreWindowBounds(saved,areas(),screen.getPrimaryDisplay().id,{x:area.x+area.width-MINI_WINDOW_DEFAULT_SIZE.width-16,y:area.y+16,...MINI_WINDOW_DEFAULT_SIZE},MINI_WINDOW_MINIMUM_SIZE)
+    }
+    mini=createMiniController({windows,exiting:()=>quit.isAuthorized()||quit.isPending(),
+      async repair(window){const native=window as BrowserWindow,target=miniRestoration(native.getBounds());return target.ok?applyRestoredBounds(native,target.data):target},
+      config(){const read=runtime.readConfig();return read.ok?success(read.data.config):read},
+      async pending(){const window=main();if(!window||window.isDestroyed()||window.webContents.isLoading())return success(true)
+        try{return success(await window.webContents.executeJavaScript(`document.querySelector('[data-workday-root]')?.getAttribute('data-pending')`)!=='false')}catch{return success(true)}},
+      changed:()=>router.presentationChanged(),destroy:window=>(window as BrowserWindow).destroy(),
+      async create(){
+        const saved=runtime.readConfig();if(!saved.ok)return saved
+        const restored=miniRestoration(miniBounds??saved.data.config.desktop.bounds.mini);if(!restored.ok)return restored
+        const window=new BrowserWindow({...restored.data.bounds,minWidth:restored.data.minimum.width,minHeight:restored.data.minimum.height,
+          frame:false,useContentSize:true,show:false,focusable:!background,skipTaskbar:true,maximizable:false,minimizable:false,fullscreenable:false,autoHideMenuBar:true,title:'Workday Escape · 迷你倒计时',backgroundColor:'#f0f7fd',paintWhenInitiallyHidden:false,
+          webPreferences:{preload:join(__dirname,'../preload/index.cjs'),additionalArguments:['--workday-window-role=mini'],contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true}})
+        if(background)miniInteractiveAttempts.push(blockInteractiveWindowOperations(window))
+        bindPage(window,'mini',miniUrl)
+        window.on('close',event=>{if(!quit.isAuthorized()){event.preventDefault();const result=mini!.hide();if(!result.ok){windows!.showMain();console.error('迷你窗口未隐藏，恢复主窗口。')}}})
+        const remember=()=>{if(window.isDestroyed()||quit.isAuthorized())return;miniBounds=window.getBounds();runtime.stageMiniBounds(miniBounds)}
+        // Native programmatic/DPI corrections need move/resize too; moved and
+        // resized are end-of-user-interaction events on Windows. All four only
+        // replace an in-memory rectangle, never write files while dragging.
+        window.on('move',remember);window.on('resize',remember);window.on('moved',remember);window.on('resized',remember)
+        try{await (devUrl?window.loadURL(miniUrl):window.loadFile(miniFile));const applied=await applyRestoredBounds(window,restored.data);if(!applied.ok){window.destroy();return applied}return success(window)}
+        catch{if(!window.isDestroyed())window.destroy();return {ok:false,error:{code:'UNAVAILABLE',message:'迷你页面加载失败，主窗口与设置保留。'}}}
+      }
+    })
+    mini.preferencesChanged()
+    const releasePreferences=runtime.onConfigSaved(()=>{mini!.preferencesChanged();router.presentationChanged()})
+    tray=createTrayController({windows,mini,
       create(){if(background){readTrayIcon();testTray=createBackgroundTray();return testTray}return createNativeTray()},
       config(){const read=runtime.readConfig();return read.ok?success(read.data.config):read},
       snapshot:()=>runtime.snapshots.read(),quit:()=>requestQuit(true),exiting:quit.isAuthorized,
@@ -195,6 +235,8 @@ else if (instance.data.primary) {
         const restored = bounds(window.isMinimized() || window.isMaximized() ? window.getNormalBounds() : window.getBounds())
         const appliedBounds = await applyRestoredBounds(window, restored)
         if (!appliedBounds.ok) windows!.showMain()
+        const small=windows!.getMini() as BrowserWindow|null
+        if(small){const target=miniRestoration(small.getBounds());if(!target.ok)return target;const applied=await applyRestoredBounds(small,target.data);if(!applied.ok){if(!background)windows!.showMain();return applied}}
         return appliedBounds
       })().catch(() => { windows!.showMain(); return { ok: false, error: { code: 'UNAVAILABLE', message: '显示器位置恢复失败，主窗口保留。' } } }).finally(() => { repairing = null })
       return repairing
@@ -213,12 +255,14 @@ else if (instance.data.primary) {
       if (boundsTimer) clearTimeout(boundsTimer)
       screen.removeListener('display-removed', displayChanged); screen.removeListener('display-metrics-changed', displayChanged); screen.removeListener('display-added', displayChanged)
       app.removeListener('activate', activated); app.removeListener('before-quit', beforeQuit); app.removeListener('window-all-closed', allClosed)
-      powerMonitor.removeListener('resume',resumed);tray?.dispose();router.dispose();runtime.dispose()
+      powerMonitor.removeListener('resume',resumed);releasePreferences();mini?.dispose();tray?.dispose();router.dispose();runtime.dispose()
       windows!.dispose(); quit.dispose(); instance.data.dispose()
     })
     if (paths.data.testProfile) Object.defineProperty(app, '__workdayD08Test', { value: {
       windows, quit, paths: paths.data, repairBounds, background,
-      interactiveAttempts: () => interactiveAttempts.slice(),
+      snapshotSubscribers:()=>runtime.refresh.subscriberCount(),
+      interactiveAttempts: () => interactiveAttempts.concat(...miniInteractiveAttempts),
+      mini:{bounds:()=>miniBounds,async prepare(){const result=await mini!.prepare();return result.ok?success(null):result},controller:mini,stageBounds:(bounds:WindowBounds)=>runtime.stageMiniBounds(bounds)},
       chooseExit(choice: ExitChoice | null) { exitChoiceForTest = choice },
       tray:{close:()=>tray!.closeMain(),menu:()=>tray!.openMenu(),chooseHide(value:boolean|null){hideChoiceForTest=value},
         settings:()=>router.openSettings(),items:()=>testTray?.items().map(({label,type,enabled})=>({label,type,enabled})),
