@@ -5,3 +5,8 @@ export interface ResourceSummary {
   completeness:string;environment:unknown;samples:Array<{elapsedSeconds:number;intervalSeconds:number;valid:boolean;cpuPercent:number|null;pwsMiB:number|null}>
 }
 export function summarizeResourceLog(text:string):ResourceSummary
+export interface MetricObservation {at:number;metrics:Array<{pid:number;creationTime:number;type:string}>}
+export function verifyMetricCoverage(text:string,observations:MetricObservation[]):{
+  status:'COMPLETE'|'INCOMPLETE';observedIdentities:number;scope:string;issues:string[]
+  missing:Array<{pid:number;creationTime:number|null;type:string;reason:string;firstSeenAt:number;lastSeenAt:number}>
+}

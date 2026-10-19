@@ -1,6 +1,33 @@
 import assert from 'node:assert/strict'
 
 const mean=values=>values.reduce((a,b)=>a+b,0)/values.length
+// Preserve sub-millisecond creation times (Date.parse alone truncates them).
+function creationEpoch(utc){
+  if(typeof utc!=='string')return NaN
+  const match=/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.(\d{1,7})Z$/.exec(utc)
+  return match?Date.parse(match[1]+'Z')+Number('0.'+match[2])*1000:NaN
+}
+export function verifyMetricCoverage(text,observations){
+  const native=[],missing=new Map(),observed=new Set(),issues=[]
+  for(const line of text.trim().split(/\r?\n/)){
+    const record=JSON.parse(line)
+    if(record.kind==='frame')for(const process of record.processes)native.push(process)
+  }
+  for(const point of observations)for(const metric of point.metrics){
+    const key=metric.pid+'/'+metric.creationTime;observed.add(key)
+    const candidates=native.filter(process=>process.pid===metric.pid)
+    // Electron's epoch double and Windows' 100ns FileTime round differently.
+    // One microsecond allows floating-point rounding, not a PID-reuse window.
+    const matched=Number.isFinite(metric.creationTime)&&candidates.some(process=>Math.abs(creationEpoch(process.createdUtc)-metric.creationTime)<=.001)
+    if(matched)continue
+    const reason=!Number.isFinite(metric.creationTime)?'MISSING_CREATION_TIME':candidates.length?'CREATION_MISMATCH':'NOT_CAPTURED'
+    const prior=missing.get(key)
+    missing.set(key,{pid:metric.pid,creationTime:metric.creationTime??null,type:metric.type,reason,firstSeenAt:prior?.firstSeenAt??point.at,lastSeenAt:point.at})
+  }
+  if(!observations.length||observations.some(point=>!point.metrics.length))issues.push('missing app metric observations')
+  return {status:missing.size||issues.length?'INCOMPLETE':'COMPLETE',observedIdentities:observed.size,missing:[...missing.values()],issues,
+    scope:'PID + creation-time cross-check only; polling cannot prove absence of other unobserved short-lived children'}
+}
 export function summarizeResourceLog(text){
   const records=[],issues=[]
   for(const [index,line]of text.trim().split(/\r?\n/).entries())try{records.push(JSON.parse(line))}catch{issues.push(`invalid JSON line ${index+1}`)}
@@ -10,7 +37,17 @@ export function summarizeResourceLog(text){
   const samples=[],identities=new Set(),events=[]
   for(const frame of records.filter(r=>r.kind==='frame')){
     events.push(...frame.events);for(const p of frame.processes)identities.add(p.key)
-    if(frame.phase!=='sample')continue
+    // A failed discovery/PWS read during warmup must not disappear merely
+    // because the final sampling counters happened to look healthy.
+    if(frame.phase!=='sample'){
+      issues.push(...frame.errors)
+      for(const p of frame.processes){
+        if(!Number.isFinite(p.cpuSeconds)||p.cpuSeconds<0)issues.push(`missing warmup/baseline CPU ${p.key}`)
+        if(p.exited&&p.exitCode!==0)issues.push(`nonzero or unknown exit code ${p.key}: ${p.exitCode}`)
+        if(!p.exited&&(!Number.isFinite(p.pwsBytes)||p.pwsBytes<0))issues.push(`missing warmup/baseline PWS ${p.key}`)
+      }
+      continue
+    }
     if(!previous){issues.push('sample without baseline');continue}
     const seconds=frame.elapsedSeconds-previous.elapsedSeconds,prior=new Map(previous.processes.map(p=>[p.key,p])),seen=new Set()
     let cpuSeconds=0,pwsBytes=0,valid=true
