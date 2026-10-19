@@ -486,3 +486,26 @@ test('D14 failed exit save keeps both windows and draft; authorized exit overrid
   miniSeed();const mainPage=await launch(),small=await prepareMini();await small.evaluate(()=>{window.onbeforeunload=()=>false});await settings(mainPage);await mainPage.getByLabel('下班时间',{exact:true}).fill('08:00');await settled(mainPage);await choose('save');await activate(mainPage.getByRole('button',{name:'退出程序',exact:true}));await expect(mainPage.locator('.app-error')).toBeVisible();expect(application!.process().exitCode).toBe(null);expect((await application!.windows()).length).toBe(2);await expect(mainPage.getByLabel('下班时间',{exact:true})).toHaveValue('08:00')
   await mainPage.getByLabel('下班时间',{exact:true}).fill('19:00');await settled(mainPage);const child=application!.process(),closed=application!.waitForEvent('close');await activate(mainPage.getByRole('button',{name:'退出程序',exact:true}));await closed;await expect.poll(()=>child.exitCode).toBe(0);application=undefined;expect(JSON.parse(readFileSync(formal(),'utf8')).schedule.endTime).toBe('19:00')
 })
+
+test('D15 100 real hidden IPC subscription cycles keep two windows, equal snapshots and dirty draft',async()=>{
+  test.setTimeout(60000)
+  miniSeed();const mainPage=await launch(),small=await prepareMini();await settings(mainPage);await mainPage.getByLabel('上班时间',{exact:true}).fill('08:');await settled(mainPage)
+  const before=value(await mainPage.evaluate(()=>window.workdayV2.settingsDraft.read())),file=readFileSync(formal(),'utf8')
+  const checkpoints=[]
+  for(let i=0;i<100;i++){
+    for(const page of [mainPage,small]){
+      value(await page.evaluate(()=>window.workdayV2.snapshot.subscribe(()=>{})))
+      expect(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.snapshotSubscribers())).toBe(1)
+      value(await page.evaluate(()=>window.workdayV2.snapshot.read()));value(await page.evaluate(()=>window.workdayV2.snapshot.unsubscribe()))
+    }
+    expect(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.snapshotSubscribers())).toBe(0)
+    if(i%25===24)checkpoints.push({cycle:i+1,...await application!.evaluate(({app,BrowserWindow})=>({subscribers:(app as TestApp).__workdayD08Test.snapshotSubscribers(),windows:BrowserWindow.getAllWindows().map(w=>({id:w.id,visible:w.isVisible(),focused:w.isFocused(),listeners:w.eventNames().reduce((n,key)=>n+w.listenerCount(key),0)})),metrics:app.getAppMetrics().map(p=>({pid:p.pid,type:p.type,memory:p.memory}))}))})
+  }
+  for(const page of [mainPage,small])value(await page.evaluate(()=>{(globalThis as any).__d15Seen=[];return window.workdayV2.snapshot.subscribe(result=>{if(result.ok)(globalThis as any).__d15Seen.push(result.data)})}))
+  const shared=value(await mainPage.evaluate(()=>window.workdayV2.snapshot.read()))
+  for(const page of [mainPage,small]){await expect.poll(()=>page.evaluate(sequence=>(globalThis as any).__d15Seen.some((s:{sequence:number})=>s.sequence===sequence),shared.sequence)).toBe(true);expect(await page.evaluate(sequence=>(globalThis as any).__d15Seen.find((s:{sequence:number})=>s.sequence===sequence),shared.sequence)).toEqual(shared);value(await page.evaluate(()=>window.workdayV2.snapshot.unsubscribe()))}
+  expect(value(await mainPage.evaluate(()=>window.workdayV2.settingsDraft.read()))).toEqual(before);await expect(mainPage.getByLabel('上班时间',{exact:true})).toHaveValue('08:');expect(readFileSync(formal(),'utf8')).toBe(file)
+  for(const point of checkpoints){expect(point.windows).toHaveLength(2);expect(point.windows.every(w=>!w.visible&&!w.focused)).toBe(true);expect(point.windows.map(w=>({id:w.id,listeners:w.listeners}))).toEqual(checkpoints[0].windows.map(w=>({id:w.id,listeners:w.listeners})))}
+  writeFileSync('test-results/d15-hidden-100-cycles.json',JSON.stringify({scope:'actual native-hidden IPC cycles; NOT GUI switching; native memory fields are not PWS certification',checkpoints},null,2))
+  expect(await application!.evaluate(({app})=>(app as TestApp).__workdayD08Test.interactiveAttempts())).toEqual([]);await hidden()
+})

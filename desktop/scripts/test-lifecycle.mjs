@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 
 const suite=process.argv[2]??'lifecycle'
-assert.ok(['lifecycle','d09','d11-services','d11-performance','d13','d14'].includes(suite))
+assert.ok(['lifecycle','d09','d11-services','d11-performance','d13','d14','d15'].includes(suite))
 const scratch = mkdtempSync(join(tmpdir(), 'workday-d08-'))
 after(() => {
   assert.ok(isAbsolute(scratch) && scratch.startsWith(join(tmpdir(), 'workday-d08-')))
@@ -22,7 +22,7 @@ const files = [
 if(suite!=='lifecycle')files.push(...['src/domain/dashboard.ts','src/domain/time-zone-cache.ts','src/domain/employment.ts','src/domain/rest-day.ts',
   'src/shared/ipc.ts','src/shared/bridge.ts','src/main/services/snapshot-service.ts','src/main/services/clock.ts','src/main/services/runtime.ts','src/main/ipc/router.ts',`tests/unit/${suite}.test.ts`])
 if(suite==='d11-services')files.push('src/renderer/src/ui/settings-editor.ts','src/renderer/src/ui/settings-controller.ts')
-if(suite==='d14')files.push('src/main/windows/mini-controller.ts','src/main/tray/tray-controller.ts')
+if(['d14','d15'].includes(suite))files.push('src/main/windows/mini-controller.ts','src/main/tray/tray-controller.ts')
 if(suite==='d13')files.push('src/main/tray/tray-controller.ts','src/main/tray/background-tray.ts')
 for (const file of files) {
   const output = ts.transpileModule(readFileSync(file, 'utf8'), {

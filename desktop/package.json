@@ -29,6 +29,8 @@
     "test:d13": "node scripts/test-d13.mjs",
     "test:d14": "node scripts/test-d14.mjs",
     "test:d14:visual": "npm run build && node scripts/test-d14-visual.mjs",
+    "test:d15": "node scripts/test-d15.mjs",
+    "test:d15:performance": "playwright test --config=playwright.performance.config.ts",
     "test:d12:visual": "npm run build && node scripts/test-d11-visual.mjs --d12",
     "profile:d11": "node scripts/test-lifecycle.mjs d11-performance",
     "test:d10": "node scripts/test-d10.mjs",

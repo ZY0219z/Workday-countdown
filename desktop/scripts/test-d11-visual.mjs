@@ -10,7 +10,7 @@ import {chromium,expect} from '@playwright/test'
 // by browser initScript. No fixture switches or alternate API in shipped code.
 await build({configFile:false,plugins:[vue()],logLevel:'warn',build:{ssr:'tests/unit/d11-components.entry.mjs',outDir:'test-results/d11-ssr',emptyOutDir:false,rollupOptions:{output:{entryFileNames:'components.mjs'}}}})
 const {fixtures,MAIN_WINDOW_DEFAULT_SIZE}=await import(pathToFileURL(resolve('test-results/d11-ssr/components.mjs')).href),fixture=fixtures()
-const d12=process.argv.includes('--d12'),root=resolve('out/renderer'),directory=resolve(process.argv.includes('--ui-polish')?`test-results/d14-ui-polish/${d12?'waves':'main'}`:d12?'test-results/d12-r4-visual':'test-results/d11-visual');await mkdir(directory,{recursive:true})
+const d12=process.argv.includes('--d12'),root=resolve('out/renderer'),directory=resolve(process.argv.includes('--d15')?`test-results/d15-headless/${d12?'waves':'main'}`:process.argv.includes('--ui-polish')?`test-results/d14-ui-polish/${d12?'waves':'main'}`:d12?'test-results/d12-r4-visual':'test-results/d11-visual');await mkdir(directory,{recursive:true})
 const files=await readdir(root,{recursive:true,withFileTypes:true}),assets=new Map(files.filter(file=>file.isFile()).map(file=>{const full=resolve(file.parentPath,file.name);return ['/'+relative(root,full).split(sep).join('/'),full]}))
 let activePage
 const browser=await chromium.launch({channel:'msedge',headless:true,chromiumSandbox:true}),checks=[],errors=[],requests=[]
