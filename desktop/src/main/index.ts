@@ -200,7 +200,9 @@ else if (instance.data.primary) {
     tray=createTrayController({windows,mini,
       create(){if(background){readTrayIcon();testTray=createBackgroundTray();return testTray}return createNativeTray()},
       config(){const read=runtime.readConfig();return read.ok?success(read.data.config):read},
-      snapshot:()=>runtime.snapshots.read(),quit:()=>requestQuit(true),exiting:quit.isAuthorized,
+      // TrayController reports failed Results; keep the coordinator's recovery
+      // and avoid a second Main-owned warning for the same tray request.
+      snapshot:()=>runtime.snapshots.read(),quit:()=>requestQuit(false),exiting:quit.isAuthorized,
       openSettings(){const window=main();if(!window||window.isDestroyed())return {ok:false,error:{code:'UNAVAILABLE',message:'主窗口不可用。'}};if(window.webContents.isLoading()){settingsRequested=true;return success(null)}return router.openSettings()},
       async confirmFirstHide(message){
         if(background)return hideChoiceForTest===null?{ok:false,error:{code:'UNAVAILABLE',message:'后台隐藏需要显式测试选择，不弹出提示。'}}:success(hideChoiceForTest)

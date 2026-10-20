@@ -64,6 +64,88 @@ test('menu failure revokes recovery and restores the hidden main',async()=>{cons
 test('each menu reads a fresh Snapshot, with no extra polling',async()=>{let reads=0;const h=setup({snapshot:async()=>{reads++;return snap('working',reads*60)}});value(h.controller.ensure());assert.equal(reads,0);value(await h.controller.openMenu());assert.ok(h.icons[0].items[0].label?.includes('1 分'));value(await h.controller.openMenu());assert.ok(h.icons[0].items[0].label?.includes('2 分'));assert.equal(reads,2);h.controller.dispose()})
 test('disposed async menu cannot publish or invoke stale native commands',async()=>{let finish!:(snapshot:Result<DashboardSnapshot>)=>void;const h=setup({snapshot:()=>new Promise(resolve=>{finish=resolve})});value(h.controller.ensure());const opening=h.controller.openMenu();h.controller.dispose();finish(snap());rejected(await opening,'UNAVAILABLE');assert.equal(h.icons[0].menus,0)})
 test('concurrent tray exit calls do not duplicate confirmation or writes',async()=>{let finish!:(result:Result<null>)=>void,calls=0;const h=setup({quit:()=>{calls++;return new Promise(resolve=>{finish=resolve})}});const first=h.controller.requestExit();rejected(await h.controller.requestExit(),'UNAVAILABLE');assert.equal(calls,1);finish(success(null));value(await first);h.controller.dispose()})
+
+test('tray menu reports a resolved business failure once and preserves its Result',async()=>{
+  const failure:Result<null>={ok:false,error:{code:'IO_BUSY',message:'设置正在同步或保存，请稍后再退出。'}}
+  const h=setup({quit:async()=>failure})
+  try{
+    value(h.controller.ensure());value(await h.controller.openMenu())
+    const result=await h.icons[0].items.find(item=>item.label==='退出程序')!.click!()
+    assert.equal(result,failure);assert.equal(h.window.destroyed,false)
+    assert.deepEqual(h.feedback,['退出程序失败：'+failure.error.message])
+  }finally{h.controller.dispose()}
+})
+
+for(const scenario of ['clean','continueEditing','save','discard','saveFailure','syncFailure'] as const)test(`tray menu through the real quit coordinator: ${scenario}`,async()=>{
+  let coordinator!:ReturnType<typeof createQuitCoordinator>
+  const h=setup({quit:()=>coordinator.requestQuit(),exiting:()=>coordinator.isAuthorized()})
+  const state={dirty:!['clean','syncFailure'].includes(scenario),saving:false,identity:'tray-draft'}
+  const calls={commit:0,confirm:0,save:0,discard:0}
+  coordinator=createQuitCoordinator({waitMilliseconds:500,confirmationMilliseconds:500,
+    waitForWrites:async()=>scenario==='syncFailure'?{ok:false,error:{code:'IO_BUSY',message:'设置同步尚未完成。'}}:success(null),
+    restoreMain(){value(h.windows.showMain())},commitQuit(){calls.commit++;h.windows.beginQuit();h.controller.dispose();return success(null)}})
+  coordinator.registerDraft({read:async()=>success({...state}),confirm:async()=>{calls.confirm++;return success(scenario==='discard'?'discard':scenario==='continueEditing'?'continueEditing':'save')},
+    async save(){calls.save++;if(scenario==='saveFailure')return {ok:false,error:{code:'IO_DENIED',message:'设置保存失败。'}};state.dirty=false;return success(null)},
+    async discard(){calls.discard++;state.dirty=false;return success(null)}})
+  try{
+    value(await h.controller.closeMain());value(await h.controller.openMenu());assert.equal(h.window.visible,false)
+    const result=await h.icons[0].items.find(item=>item.label==='退出程序')!.click!() as Result<null>
+    const failed=['continueEditing','saveFailure','syncFailure'].includes(scenario)
+    assert.equal(result.ok,!failed);assert.equal(coordinator.isAuthorized(),!failed);assert.equal(calls.commit,failed?0:1)
+    assert.equal(calls.confirm,scenario==='clean'||scenario==='syncFailure'?0:1)
+    if(failed){
+      rejected(result,scenario==='continueEditing'?'CANCELLED':scenario==='saveFailure'?'IO_DENIED':'IO_BUSY')
+      assert.equal(h.window.visible,true);assert.equal(h.window.destroyed,false)
+      assert.equal(state.dirty,scenario!=='syncFailure')
+      assert.equal(h.feedback.length,scenario==='continueEditing'?0:1)
+    }else{assert.equal(state.dirty,false);assert.equal(h.feedback.length,0)}
+    assert.equal(calls.save,scenario==='save'||scenario==='saveFailure'?1:0)
+    assert.equal(calls.discard,scenario==='discard'?1:0)
+  }finally{h.controller.dispose();coordinator.dispose()}
+})
+
+test('old exit menu callbacks cannot quit after disposal, destruction, replacement or external quit',async()=>{
+  for(const invalidation of ['dispose','destroy','replace','quitting']){
+    const h=setup()
+    try{
+      value(h.controller.ensure());value(await h.controller.openMenu())
+      const stale=h.icons[0].items.find(item=>item.label==='退出程序')!.click!
+      if(invalidation==='dispose')h.controller.dispose()
+      else if(invalidation==='quitting')h.exiting=true
+      else{h.icons[0].destroyed=true;if(invalidation==='replace')value(h.controller.ensure())}
+      assert.equal(stale(),undefined);assert.equal(h.counts().quits,0);assert.equal(h.feedback.length,0)
+    }finally{h.controller.dispose()}
+  }
+})
+
+test('repeated exit menu clicks while a request is pending invoke quit only once',async()=>{
+  let finish!:(result:Result<null>)=>void,calls=0
+  const h=setup({quit:()=>{calls++;return new Promise(resolve=>{finish=resolve})}})
+  try{
+    value(h.controller.ensure());value(await h.controller.openMenu())
+    const click=h.icons[0].items.find(item=>item.label==='退出程序')!.click!,first=click() as Promise<Result<null>>
+    assert.equal(click(),undefined);assert.equal(calls,1);assert.equal(h.feedback.length,0)
+    finish(success(null));value(await first);assert.equal(calls,1);assert.equal(h.feedback.length,0)
+  }finally{h.controller.dispose()}
+})
+
+test('quit menu exceptions produce safe feedback without exposing exception details',async()=>{
+  const h=setup({quit:async()=>{throw Error('private fixture path')}})
+  try{
+    value(h.controller.ensure());value(await h.controller.openMenu())
+    const result=await h.icons[0].items.find(item=>item.label==='退出程序')!.click!() as Result<null>
+    rejected(result,'UNAVAILABLE');assert.deepEqual(h.feedback,['退出调用失败，窗口与草稿保留。'])
+    assert.equal(h.window.destroyed,false)
+  }finally{h.controller.dispose()}
+})
+
+test('a failed quit completing after tray disposal does not publish stale feedback',async()=>{
+  let finish!:(result:Result<null>)=>void
+  const h=setup({quit:()=>new Promise(resolve=>{finish=resolve})})
+  value(h.controller.ensure());value(await h.controller.openMenu())
+  const pending=h.icons[0].items.find(item=>item.label==='退出程序')!.click!() as Promise<Result<null>>
+  h.controller.dispose();finish(unavailable);rejected(await pending,'UNAVAILABLE');assert.equal(h.feedback.length,0)
+})
 test('second-instance restoration reuses the main that was hidden by the tray',async()=>{const h=setup(),events=new EventEmitter();const instance=value(acquireSingleInstance({on:events.on.bind(events),off:events.off.bind(events),requestSingleInstanceLock:()=>true,releaseSingleInstanceLock(){},quit(){}},()=>{h.windows.showMain()}));instance.markReady();value(await h.controller.closeMain());events.emit('second-instance',{},['--untrusted']);assert.equal(h.window.visible,true);assert.equal(value(h.windows.ensureMain()),h.window);instance.dispose();h.controller.dispose()})
 for(const state of ['rest','finished','beforeWork','break','overtime','incomplete'])test(`tray status formats ${state} using provided Snapshot only`,()=>{const snapshot=snap(state);if(snapshot.ok&&['rest','finished'].includes(state))snapshot.data.countdown=null;assert.ok(trayStatus(snapshot).length>0);assert.ok(!trayStatus(snapshot).includes('undefined'))})
 test('snapshot errors are explicitly unavailable, not a fabricated zero countdown',()=>assert.equal(trayStatus(unavailable),'倒计时暂不可用'))

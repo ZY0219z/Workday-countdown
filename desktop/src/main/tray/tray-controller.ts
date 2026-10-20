@@ -51,7 +51,11 @@ export function createTrayController(options:{
   async function requestExit():Promise<Result<null>>{
     if(!active())return unavailable('退出已在处理中。')
     exiting=true
-    try{return await options.quit()}finally{exiting=false}
+    try{
+      const result=await options.quit()
+      if(!result.ok&&result.error.code!=='CANCELLED'&&!disposed&&!options.exiting())fail('退出程序失败：'+result.error.message)
+      return result
+    }finally{exiting=false}
   }
   function ensure():Result<null>{
     if(!active())return unavailable('应用正在退出。')
