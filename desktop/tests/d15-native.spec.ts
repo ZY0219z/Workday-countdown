@@ -198,13 +198,21 @@ test('D15 native resources main: visible main only, 30+120 seconds',async()=>{
   await measureNativeResources(['main'],true)
 })
 
-async function measureNativeResources(modes:ReadonlyArray<'main'|'mini'|'tray'>,directMain=false){
+test('D15 native resources mini: visible mini only, 30+120 seconds',async()=>{
+  await measureNativeResources(['mini'],true)
+})
+
+test('D15 native resources tray: real tray-only, 30+120 seconds',async()=>{
+  await measureNativeResources(['tray'],true)
+})
+
+async function measureNativeResources(modes:ReadonlyArray<'main'|'mini'|'tray'>,independent=false){
   // Ten hidden samples took 12.67s on this machine. Leave a bounded margin for
   // actual CIM collection intervals, without changing 30+120 or any G05 budget.
-  test.setTimeout(directMain?270000:780000);const summaries=[]
-  if(directMain){
+  test.setTimeout(independent?270000:780000);const summaries=[]
+  if(independent){
     // Instantiate the second Renderer while its native window stays hidden.
-    // Main-only sampling never shows Mini or closes/hides/restores Main.
+    // Independent cases enter only their own mode; no Main resource prerequisite.
     result(await app.evaluate(({app})=>(app as any).__workdayD08Test.mini.prepare()))
     await exclusive('main')
   }else{await showMini();await showMain()}
@@ -225,30 +233,40 @@ async function measureNativeResources(modes:ReadonlyArray<'main'|'mini'|'tray'>,
       }
     }
   })
-  if(!directMain)await prepareResourceMain({
+  if(!independent)await prepareResourceMain({
     closeMain:()=>app.evaluate(({app})=>(app as any).__workdayD08Test.tray.close()),
     confirmHide:()=>dialog('知道了，隐藏到托盘'),assertTrayOnly:()=>exclusive(null),
     showMain:()=>app.evaluate(({app})=>(app as any).__workdayD08Test.windows.showMain()),assertMain:()=>exclusive('main'),
     record:(event,data)=>phase('resource-'+event,data)
   })
-  const inputHwnd=directMain?(await nativeState()).find(w=>w.url==='main')!.hwnd.replace('0x',''):undefined
-  const initialInput=directMain?await rpc({action:'input',hwnd:inputHwnd}):null
-  if(directMain){
-    const prepared=await app.evaluate(({app})=>{const api=(app as any).__workdayD08Test;return {at:Date.now(),state:api.windows.state(),trayAvailable:api.tray.available(),metrics:app.getAppMetrics(),trace:(app as any).__d15Trace}})
-    const snapshot=result(await page.evaluate(()=>window.workdayV2.snapshot.read()))
-    expect(snapshot.state).toBe('working');expect(prepared.state).toBe('mainVisible');expect(prepared.trayAvailable).toBe(true)
-    expect(prepared.metrics.filter((m:any)=>m.type==='Tab').length).toBe(2)
-    await expect(page.locator('.fish-waves--flowing')).toHaveCount(1)
-    const timer=page.locator('[role=timer]').first(),timerBefore=await timer.innerText()
-    await expect(timer).not.toHaveText(timerBefore)
-    await page.screenshot({path:join(root,'main-prepared.png')})
-    save('main-prepared',{...prepared,windows:await nativeState(),input:initialInput,family:await rpc({action:'family'}),mainIdentity,launcherPid:appProcess.pid,snapshotState:snapshot.state,timerBefore,timerAfter:await timer.innerText()})
-  }
   for(const mode of modes){
     if(mode==='mini'){const start=performance.now();await showMini();const ms=performance.now()-start;expect(ms).toBeLessThanOrEqual(1000);save('mini-restore',{milliseconds:ms})}
-    if(mode==='tray'){await (await miniPage()).getByRole('button',{name:'隐藏迷你窗',exact:true}).click();await exclusive(null)}
+    if(mode==='tray'){
+      if(independent)result(await app.evaluate(({app})=>(app as any).__workdayD08Test.windows.hideMain()))
+      else await (await miniPage()).getByRole('button',{name:'隐藏迷你窗',exact:true}).click()
+      await exclusive(null)
+      await expect.poll(()=>app.evaluate(({app})=>(app as any).__workdayD08Test.snapshotSubscribers())).toBe(0)
+    }
     const file=join(root,mode+'-verified-resources.jsonl'),feed=join(root,mode+'-metric-hints.jsonl'),observations:any[]=[]
     const expectedId=(await nativeState()).find(w=>w.url===mode)?.id
+    const renderer=mode==='mini'?await miniPage():page
+    const inputHwnd=independent?(await nativeState()).find(w=>w.url===(mode==='mini'?'mini':'main'))!.hwnd.replace('0x',''):undefined
+    const initialInput=independent?await rpc({action:'input',hwnd:inputHwnd}):null
+    if(independent){
+      const prepared=await app.evaluate(({app})=>{const api=(app as any).__workdayD08Test;return {at:Date.now(),state:api.windows.state(),trayAvailable:api.tray.available(),metrics:app.getAppMetrics(),trace:(app as any).__d15Trace}})
+      const snapshot=result(await renderer.evaluate(()=>window.workdayV2.snapshot.read()))
+      expect(snapshot.state).toBe('working');expect(prepared.state).toBe(mode==='tray'?'trayOnly':mode+'Visible');expect(prepared.trayAvailable).toBe(true)
+      expect(prepared.metrics.filter((m:any)=>m.type==='Tab').length).toBe(2)
+      expect(resourceModeIssues({windows:await nativeState(),trayAvailable:prepared.trayAvailable,subscribers:await app.evaluate(({app})=>(app as any).__workdayD08Test.snapshotSubscribers())},mode,expectedId)).toEqual([])
+      let timerBefore:string|null=null,timerAfter:string|null=null
+      if(mode!=='tray'){
+        if(mode==='main')await expect(renderer.locator('.fish-waves--flowing')).toHaveCount(1)
+        const timer=renderer.locator('[role=timer]').first();await expect(timer).toBeVisible();timerBefore=await timer.innerText()
+        await expect(timer).not.toHaveText(timerBefore);timerAfter=await timer.innerText()
+        await renderer.screenshot({path:join(root,mode+'-prepared.png')})
+      }
+      save(mode+'-prepared',{...prepared,windows:await nativeState(),input:initialInput,family:await rpc({action:'family'}),mainIdentity,launcherPid:appProcess.pid,snapshotState:snapshot.state,timerBefore,timerAfter,physicalTrayClickVerified:false})
+    }
     const modeFailures:Array<{at:number;issues:string[]}>=[]
     const environmentNotes:any[]=[],environmentIssues:any[]=[]
     phase('resource-mode-start',{mode,expectedId})
@@ -256,39 +274,39 @@ async function measureNativeResources(modes:ReadonlyArray<'main'|'mini'|'tray'>,
     const sampling=promisify(execFile)('powershell.exe',['-NoProfile','-NonInteractive','-WindowStyle','Hidden','-File',resolve('scripts/measure-owned-processes.ps1'),'-RootProcessId',String(appProcess.pid),'-ElectronProcessId',String(mainPid),'-OutputFile',file,'-MetricsFile',feed,'-Mode',mode,'-WarmupSeconds','30','-SampleSeconds','120'],{windowsHide:true,timeout:240000,maxBuffer:1048576})
     let complete=false,failure:unknown,interrupted=false,nextInputCheck=0,previousInput=initialInput,activity:ResourceInputActivity|undefined;void sampling.then(()=>{complete=true},e=>{failure=e;complete=true})
     while(!complete){
-      const point=await app.evaluate(({app,BrowserWindow})=>({at:Date.now(),windows:BrowserWindow.getAllWindows().map(w=>({id:w.id,visible:w.isVisible(),minimized:w.isMinimized()})),subscribers:(app as any).__workdayD08Test.snapshotSubscribers(),trayAvailable:(app as any).__workdayD08Test.tray.available(),metrics:app.getAppMetrics()}))
+      const point=await app.evaluate(({app,BrowserWindow})=>({at:Date.now(),windows:BrowserWindow.getAllWindows().map(w=>({id:w.id,visible:w.isVisible(),minimized:w.isMinimized()})),state:(app as any).__workdayD08Test.windows.state(),subscribers:(app as any).__workdayD08Test.snapshotSubscribers(),trayAvailable:(app as any).__workdayD08Test.tray.available(),metrics:app.getAppMetrics()}))
       observations.push(point);writeFileSync(feed,JSON.stringify({at:point.at,metrics:point.metrics})+'\n',{flag:'a'})
       const issues=resourceModeIssues(point,mode,expectedId)
       if(issues.length){if(!modeFailures.length)save(mode+'-first-mode-failure',{point,issues,trace:await app.evaluate(({app})=>(app as any).__d15Trace)});modeFailures.push({at:point.at,issues})}
-      if(directMain&&Date.now()>=nextInputCheck){
+      if(independent&&Date.now()>=nextInputCheck){
         const input=await rpc({action:'input',hwnd:inputHwnd});nextInputCheck=Date.now()+1000
-        input.renderer=await page.evaluate(()=>({at:Date.now(),visibility:document.visibilityState,hidden:document.hidden,wavesFlowing:!!document.querySelector('.fish-waves--flowing'),gifPlaying:!!document.querySelector('.moyu-animated[src]')}))
+        input.renderer=await renderer.evaluate(()=>({at:Date.now(),visibility:document.visibilityState,hidden:document.hidden,timer:document.querySelector('[role=timer]')?.textContent??null,wavesFlowing:!!document.querySelector('.fish-waves--flowing'),gifPlaying:!!document.querySelector('.moyu-animated[src]')}))
         const assessment=classifyResourceInput(input,previousInput,activity);activity=assessment.activity;previousInput=input
         input.assessment=assessment
-        writeFileSync(join(root,'main-native-input.jsonl'),JSON.stringify(input)+'\n',{flag:'a'})
+        writeFileSync(join(root,mode+'-native-input.jsonl'),JSON.stringify(input)+'\n',{flag:'a'})
         if(assessment.changed)environmentNotes.push({at:input.at,input,point,reason:'input changed without proven GUI interference'})
         if(assessment.uncertainReasons.length)environmentIssues.push({at:input.at,reasons:assessment.uncertainReasons})
-        if(input.renderer.hidden||input.renderer.visibility!=='visible'||!input.renderer.wavesFlowing||!input.renderer.gifPlaying)environmentIssues.push({at:input.at,reasons:['representative Renderer visibility or animation load changed'],renderer:input.renderer})
-        if(assessment.stopReasons.length){save('main-external-interference',{initialInput,input,point,inputIssues:assessment.stopReasons});interrupted=true}
+        if(mode!=='tray'&&(input.renderer.hidden||input.renderer.visibility!=='visible'||mode==='main'&&(!input.renderer.wavesFlowing||!input.renderer.gifPlaying)))environmentIssues.push({at:input.at,reasons:['representative Renderer visibility or animation load changed'],renderer:input.renderer})
+        if(assessment.stopReasons.length){save(mode+'-external-interference',{initialInput,input,point,inputIssues:assessment.stopReasons});interrupted=true}
       }
-      if(directMain&&(issues.length||interrupted)){
+      if(independent&&(issues.length||interrupted)){
         interrupted=true;phase('resource-interrupted',{mode,samplerPid:sampling.child.pid,modeIssues:issues})
         sampling.child.kill() // Only this owned sampler; never count forced cleanup as PASS.
         break
       }
       await new Promise(r=>setTimeout(r,250))
     }
-    if(interrupted){await sampling.catch(error=>{failure=error});save('main-interrupted',{at:Date.now(),failure:String(failure),modeFailures,observations,environmentNotes,environmentIssues,trace:await app.evaluate(({app})=>(app as any).__d15Trace)});throw Error('Main resource sampling stopped on mode or explicit desktop safety failure; evidence is INCOMPLETE')}
+    if(interrupted){await sampling.catch(error=>{failure=error});save(mode+'-interrupted',{at:Date.now(),failure:String(failure),modeFailures,observations,environmentNotes,environmentIssues,trace:await app.evaluate(({app})=>(app as any).__d15Trace)});throw Error(mode+' resource sampling stopped on mode or explicit desktop safety failure; evidence is INCOMPLETE')}
     await sampling;if(failure)throw failure
     const raw=readFileSync(file,'utf8'),protocol=summarizeResourceLog(raw),coverage=verifyMetricCoverage(raw,observations)
     const summary={...protocol,status:protocol.status==='COMPLETE'&&coverage.status==='COMPLETE'?'COMPLETE':'INCOMPLETE',coverage}
-    const environmentQuality=directMain?{status:environmentIssues.length?'INCONCLUSIVE':'COMPLETE',notes:environmentNotes,issues:environmentIssues}:undefined
+    const environmentQuality=independent?{status:environmentIssues.length?'INCONCLUSIVE':'COMPLETE',notes:environmentNotes,issues:environmentIssues}:undefined
     save(mode+'-verified-summary',{summary,observations,modeFailures,environmentQuality,trace:await app.evaluate(({app})=>(app as any).__d15Trace)});summaries.push({mode,...summary,environmentQuality})
     expect(modeFailures,'mode must remain correct throughout warmup and sampling').toEqual([])
     expect(coverage.status,JSON.stringify(coverage.missing)).toBe('COMPLETE')
     for(const point of observations){expect(point.trayAvailable).toBe(true);expect(point.windows.filter((w:any)=>w.visible&&!w.minimized).map((w:any)=>w.id)).toEqual(mode==='tray'?[]:[expectedId]);expect(point.subscribers).toBeLessThanOrEqual(1)}
     expect(summary.status,JSON.stringify(summary.issues)).toBe('COMPLETE');await exclusive(mode==='tray'?null:mode);console.log('D15 native resource',mode,JSON.stringify({cpu:summary.meanCpuPercent,p95:summary.p95CpuPercent,pws:summary.pws}))
-    if(directMain)expect(environmentIssues,'ENVIRONMENT_INCONCLUSIVE: unresolved sustained activity or Renderer workload change').toEqual([])
+    if(independent)expect(environmentIssues,'ENVIRONMENT_INCONCLUSIVE: unresolved sustained activity or Renderer workload change').toEqual([])
   }
-  save(directMain?'main-g05-result':'three-modes',summaries);for(const s of summaries){expect(s.meanCpuPercent!).toBeLessThanOrEqual(s.mode==='tray'?.5:2);expect(s.pws!.maxMiB).toBeLessThanOrEqual(s.mode==='tray'?200:250)}
+  save(independent?modes[0]+'-g05-result':'three-modes',summaries);for(const s of summaries){expect(s.meanCpuPercent!).toBeLessThanOrEqual(s.mode==='tray'?.5:2);expect(s.pws!.maxMiB).toBeLessThanOrEqual(s.mode==='tray'?200:250)}
 }

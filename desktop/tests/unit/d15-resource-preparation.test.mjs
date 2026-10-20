@@ -1,6 +1,14 @@
 import {test} from 'node:test'
 import assert from 'node:assert/strict'
-import {prepareResourceMain,resourceModeIssues,classifyResourceInput} from '../helpers/d15-resource-preparation.mjs'
+import {prepareResourceMain,resourceModeIssues,classifyResourceInput,newResourceRunDirectories} from '../helpers/d15-resource-preparation.mjs'
+
+test('blocked preflight never claims any historical resource directory',()=>{
+  assert.deepEqual(newResourceRunDirectories([],['historical-main'],false),[])
+})
+
+test('launched resource run can only select directories absent from its initial snapshot',()=>{
+  assert.deepEqual(newResourceRunDirectories(['historical-main'],['historical-main','new-mini'],true),['new-mini'])
+})
 
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b});return {promise,resolve,reject}}
 const tick=()=>new Promise(resolve=>setImmediate(resolve))
@@ -40,6 +48,14 @@ test('missing tray, expected identity or accumulated subscriptions cannot pass',
   assert.ok(resourceModeIssues({...point([window(1)]),trayAvailable:false},'main',1).length)
   assert.ok(resourceModeIssues(point([window(1)]),'main').length)
   assert.ok(resourceModeIssues({...point([window(1)]),subscribers:2},'main',1).length)
+})
+
+test('tray-only rejects a minimized window even when no window is visible',()=>{
+  assert.ok(resourceModeIssues({...point([window(1,false,true),window(2,false)]),subscribers:0},'tray').includes('unexpected minimized window'))
+})
+
+test('tray-only requires all Snapshot subscriptions to be released',()=>{
+  assert.ok(resourceModeIssues(point([window(1,false),window(2,false)]),'tray').includes('tray-only retained Snapshot subscription'))
 })
 
 const foreground=(pid,tick=100,at=1000,name='fixture')=>({lastInputTick:tick,at,foreground:{pid,name}})

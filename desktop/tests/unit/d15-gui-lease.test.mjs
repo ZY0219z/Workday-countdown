@@ -1,6 +1,6 @@
 import {test} from 'node:test'
 import assert from 'node:assert/strict'
-import {validD15Lease,validD15GuiScope,d15CrashScenario,d15DesktopTask,d15DesktopScenario,d15DesktopTitles,d15DesktopGrep,d15MainTask,d15MainTitle,d15MainGrep} from '../../scripts/d15-gui-authorization.mjs'
+import {validD15Lease,validD15GuiScope,d15CrashScenario,d15DesktopTask,d15DesktopScenario,d15DesktopTitles,d15DesktopGrep,d15MainTask,d15MainTitle,d15MainGrep,d15ResourceCases,d15ResourceGrep} from '../../scripts/d15-gui-authorization.mjs'
 const context={desktop:'D:/owned',head:'current',now:10000,platform:'win32'}
 const lease={task:'D15-crash-recheck-2026-10-19',scenario:d15CrashScenario,desktop:context.desktop,head:context.head,created:9999,expires:11000,remaining:1,groups:['d15-native.spec.ts']}
 const scoped={grep:new RegExp(d15CrashScenario+'$'),repeatEach:1,retries:0}
@@ -38,3 +38,20 @@ test('Main-only lease and exact configuration accept only Main resource sampling
   assert.equal(validD15GuiScope([{...scoped,testMatch:'**/d15-native.spec.ts',grep:d15DesktopGrep()}],[d15MainTitle]),false)
 })
 for(const [name,change]of Object.entries({extra:{scenarios:[d15MainTitle,d15DesktopTitles[5]]},wrongScenario:{scenario:d15DesktopScenario},wrongTitle:{scenarios:[d15DesktopTitles[5]]},missing:{scenarios:undefined},expired:{expires:10000},tooLong:{expires:310000},head:{head:'stale'},repository:{desktop:'other'},reusable:{remaining:2},group:{groups:['desktop.spec.ts']}}))test('Main-only gate rejects '+name,()=>assert.equal(validD15Lease({...mainLease,...change},context),false))
+
+for(const [mode,item]of Object.entries(d15ResourceCases)){
+  const permit={...lease,task:item.task,scenario:item.title,scenarios:[item.title]}
+  test(mode+' resource permit accepts its own exact one-shot case and rejects Main/the other mode',()=>{
+    assert.equal(validD15Lease(permit,context),true)
+    const project={...scoped,testMatch:'**/d15-native.spec.ts',grep:d15ResourceGrep(mode)}
+    assert.equal(validD15GuiScope([project],[item.title]),true)
+    assert.equal(d15ResourceGrep(mode).test('  d15-native.spec.ts '+item.title),true)
+    for(const title of [d15MainTitle,d15CrashScenario,...d15DesktopTitles,...Object.values(d15ResourceCases).filter(x=>x!==item).map(x=>x.title)]){
+      assert.equal(d15ResourceGrep(mode).test(title),false)
+      assert.equal(validD15Lease({...permit,scenario:title,scenarios:[title]},context),false)
+      assert.equal(validD15GuiScope([project],[title]),false)
+    }
+  })
+  for(const [name,change]of Object.entries({extra:{scenarios:[item.title,d15MainTitle]},duplicate:{scenarios:[item.title,item.title]},missing:{scenarios:undefined},expired:{expires:10000},future:{created:10001},tooLong:{expires:310000},head:{head:'stale'},repository:{desktop:'other'},reusable:{remaining:2},group:{groups:['desktop.spec.ts']}}))test(mode+' resource permit rejects '+name,()=>assert.equal(validD15Lease({...permit,...change},context),false))
+}
+test('independent resource grep rejects an unknown mode',()=>assert.throws(()=>d15ResourceGrep('main'),/Unknown/))

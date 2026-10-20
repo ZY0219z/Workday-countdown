@@ -1,5 +1,10 @@
 // Test orchestration only. A native button Invoke is not completion of the
 // asynchronous close-to-tray operation. Never restore over a pending close.
+export function newResourceRunDirectories(before,after,started){
+  // A blocked preflight has no run. Never attach an older test's evidence.
+  return started?after.filter(directory=>!before.includes(directory)):[]
+}
+
 export async function prepareResourceMain(port){
   port.record('close-request')
   const closing=Promise.resolve().then(port.closeMain)
@@ -20,11 +25,13 @@ export async function prepareResourceMain(port){
 export function resourceModeIssues(point,mode,expectedId){
   const issues=[]
   if(point.trayAvailable!==true)issues.push('native tray unavailable')
+  if(point.windows.some(w=>w.minimized))issues.push('unexpected minimized window')
   const visible=point.windows.filter(w=>w.visible&&!w.minimized).map(w=>w.id)
   const expected=mode==='tray'?[]:[expectedId]
   if(!['main','mini','tray'].includes(mode)||mode!=='tray'&&!Number.isInteger(expectedId)||
     visible.length!==expected.length||visible.some((id,i)=>id!==expected[i]))issues.push('resource mode visibility changed')
   if(!Number.isInteger(point.subscribers)||point.subscribers<0||point.subscribers>1)issues.push('invalid snapshot subscriber count')
+  if(mode==='tray'&&point.subscribers!==0)issues.push('tray-only retained Snapshot subscription')
   return issues
 }
 
