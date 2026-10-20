@@ -10,6 +10,7 @@ import {seedFormalProfile} from './helpers/formal-fixture'
 import {summarizeResourceLog,verifyMetricCoverage} from '../scripts/lib/resource-summary.mjs'
 import {verifyOwnedExit,type NativeExitState} from './helpers/d15-exit-verdict.mjs'
 import {createNativeRpc,collectCleanup,type NativeRpc} from './helpers/d15-native-rpc.mjs'
+import {prepareResourceMain,resourceModeIssues,classifyResourceInput,type ResourceInputActivity} from './helpers/d15-resource-preparation.mjs'
 
 let root:string
 const nativeElectron=createRequire(resolve('package.json'))('electron') as string
@@ -46,7 +47,9 @@ test.beforeEach(async({},info)=>{
   root=info.outputPath('evidence');mkdirSync(root,{recursive:true})
   app=undefined!;appProcess=undefined!;driver=undefined!;profile=undefined!;mainPid=0;mainIdentity=undefined;nativeRpc=undefined
   profile=mkdtempSync(join(tmpdir(),'workday-desktop-d15-'));seedFormalProfile(profile)
-  const file=join(profile,'lifecycle/settings.json'),config=JSON.parse(readFileSync(file,'utf8'));config.desktop.miniEnabled=true;writeFileSync(file,JSON.stringify(config))
+  // The desktop session is after 18:00. Keep this isolated fixture working
+  // until 23:59 so Main/Mini G05 includes the normal working animation load.
+  const file=join(profile,'lifecycle/settings.json'),config=JSON.parse(readFileSync(file,'utf8'));config.desktop.miniEnabled=true;config.schedule.endTime='23:59';writeFileSync(file,JSON.stringify(config))
   app=await electron.launch({args:['.','--user-data-dir='+profile],env});appProcess=app.process();page=await app.firstWindow();await settled()
   writeFileSync(join(root,'owned-profiles.jsonl'),JSON.stringify({profile,launcher:appProcess.pid,at:Date.now()})+'\n',{flag:'a'})
   mainPid=await app.evaluate(()=>process.pid)
@@ -58,7 +61,7 @@ test.beforeEach(async({},info)=>{
   nativeRpc=createNativeRpc(driver,{onRecord:event=>writeFileSync(join(root,'native-actions.jsonl'),JSON.stringify({at:Date.now(),mainPid,event})+'\n',{flag:'a'})})
   driver.stderr!.on('data',data=>writeFileSync(join(root,'native-driver-errors.log'),data,{flag:'a'}))
   const ready=await nativeRpc.ready;expect(ready.identity.pid).toBe(mainPid);mainIdentity=ready.identity
-  const paths=await app.evaluate(({app})=>({executable:app.getPath('exe'),userData:app.getPath('userData'),sessionData:app.getPath('sessionData')}))
+  const paths=await app.evaluate(({app,screen})=>({executable:app.getPath('exe'),userData:app.getPath('userData'),sessionData:app.getPath('sessionData'),electron:process.versions.electron,displays:screen.getAllDisplays().map(d=>({id:d.id,scaleFactor:d.scaleFactor,workArea:d.workArea}))}))
   expect(paths.sessionData).toBe(join(profile,'lifecycle/runtime'))
   save('initial-identities',{at:Date.now(),launcher:appProcess.pid,mainIdentity,family:await rpc({action:'family'}),windows:await nativeState(),paths})
   expect(await app.evaluate(({app})=>(app as any).__workdayD08Test.background)).toBe(false)
@@ -109,7 +112,13 @@ test('D15 native mini: exclusive activation, pin, real mouse drag, restored posi
   await small.getByRole('button',{name:'置顶',exact:true}).click();expect(await app.evaluate(({app})=>((app as any).__workdayD08Test.windows.getMini()).isAlwaysOnTop())).toBe(true)
   const initial=(await nativeState()).find(w=>w.url==='mini')!;await rpc({action:'drag',hwnd:initial.hwnd.replace('0x','')})
   await expect.poll(async()=>((await nativeState()).find(w=>w.url==='mini')!.bounds.x)).not.toBe(initial.bounds.x)
-  const moved=(await nativeState()).find(w=>w.url==='mini')!.bounds;await small.getByRole('button',{name:'隐藏迷你窗',exact:true}).click();await exclusive(null)
+  const moved=(await nativeState()).find(w=>w.url==='mini')!.bounds
+  // Record the independent return/draft requirement before any Shell provider
+  // lookup, retaining the physical tray assertions below as separate evidence.
+  await small.screenshot({path:join(root,'mini-dragged.png')});await small.getByRole('button',{name:'打开主窗口',exact:true}).click();await exclusive('main')
+  await expect(page.getByLabel('上班时间',{exact:true})).toHaveValue('08:');expect(readFileSync(join(profile,'lifecycle/settings.json'),'utf8')).toBe(before)
+  save('mini-independent',{initial,moved,pin:true,returnedToMain:true,draftPreserved:true,configurationUnchanged:true})
+  small=await showMini();await small.getByRole('button',{name:'隐藏迷你窗',exact:true}).click();await exclusive(null)
   await trayMenu('显示迷你窗');await exclusive('mini');expect((await nativeState()).find(w=>w.url==='mini')!.bounds).toEqual(moved)
   await small.screenshot({path:join(root,'mini.png')});await small.getByRole('button',{name:'打开主窗口',exact:true}).click();await exclusive('main');await expect(page.getByLabel('上班时间',{exact:true})).toHaveValue('08:');expect(readFileSync(join(profile,'lifecycle/settings.json'),'utf8')).toBe(before)
   save('mini-drag',{initial,moved,restored:await nativeState()})
@@ -175,33 +184,111 @@ test('D15 native 100 switches: real exclusive windows, focus, listeners, subscri
     const began=performance.now();result(await small.evaluate(()=>window.workdayV2.window.perform({action:'showMain'})));await exclusive('main');expect(performance.now()-began).toBeLessThanOrEqual(1000);expect((await nativeState()).find(w=>w.url==='main')!.focused).toBe(true)
     expect((await rpc({action:'foreground'})).pid).toBe(mainPid)
     await expect(page.getByLabel('上班时间',{exact:true})).toHaveValue('08:')
-    const state=await app.evaluate(({app,BrowserWindow})=>({ids:BrowserWindow.getAllWindows().map(w=>w.id),listeners:BrowserWindow.getAllWindows().map(w=>w.eventNames().reduce((n,k)=>n+w.listenerCount(k),0)),subscribers:(app as any).__workdayD08Test.snapshotSubscribers(),metrics:app.getAppMetrics()}));expect(state.ids).toEqual(initial.ids);expect(state.listeners).toEqual(initial.listeners);expect(state.subscribers).toBeLessThanOrEqual(1);if(i%25===24)points.push({cycle:i+1,...state})
+    const state=await app.evaluate(({app,BrowserWindow})=>({ids:BrowserWindow.getAllWindows().map(w=>w.id),listeners:BrowserWindow.getAllWindows().map(w=>w.eventNames().reduce((n,k)=>n+w.listenerCount(k),0)),subscribers:(app as any).__workdayD08Test.snapshotSubscribers(),metrics:app.getAppMetrics()}));expect(state.ids).toEqual(initial.ids);expect(state.listeners).toEqual(initial.listeners);expect(state.subscribers).toBeLessThanOrEqual(1);if(i%25===24){points.push({cycle:i+1,...state});save('switch-checkpoints',{initial,points})}
   }
   expect(readFileSync(join(profile,'lifecycle/settings.json'),'utf8')).toBe(before);save('100-switches',{initial,points,foreground:await rpc({action:'foreground'})})
   await showMini();await app.evaluate(({app})=>(app as any).__workdayD08Test.windows.getMini().destroy());await rpc({action:'tray',right:false});await exclusive('main');await expect(page.getByLabel('上班时间',{exact:true})).toHaveValue('08:')
 })
 
 test('D15 native resources: visible main, visible mini and real tray-only, 30+120 seconds each',async()=>{
-  test.setTimeout(600000);const summaries=[];await showMini();await showMain()
+  await measureNativeResources(['main','mini','tray'])
+})
+
+test('D15 native resources main: visible main only, 30+120 seconds',async()=>{
+  await measureNativeResources(['main'],true)
+})
+
+async function measureNativeResources(modes:ReadonlyArray<'main'|'mini'|'tray'>,directMain=false){
+  // Ten hidden samples took 12.67s on this machine. Leave a bounded margin for
+  // actual CIM collection intervals, without changing 30+120 or any G05 budget.
+  test.setTimeout(directMain?270000:780000);const summaries=[]
+  if(directMain){
+    // Instantiate the second Renderer while its native window stays hidden.
+    // Main-only sampling never shows Mini or closes/hides/restores Main.
+    result(await app.evaluate(({app})=>(app as any).__workdayD08Test.mini.prepare()))
+    await exclusive('main')
+  }else{await showMini();await showMain()}
   // Resource isolation does not depend on locating the Shell icon. This is
   // the real window service and real native tray, NOT a tray click verdict.
-  await app.evaluate(({app})=>(app as any).__workdayD08Test.windows.getMain().close());await dialog('知道了，隐藏到托盘');await exclusive(null);result(await app.evaluate(({app})=>(app as any).__workdayD08Test.windows.showMain()));await exclusive('main')
-  for(const mode of ['main','mini','tray'] as const){
+  await app.evaluate(({app,BrowserWindow})=>{
+    const trace=(app as any).__d15Trace
+    for(const w of BrowserWindow.getAllWindows())for(const event of ['close','show','hide','minimize','restore'])w.on(event as any,()=>trace.push({event,at:Date.now(),id:w.id,visible:w.isVisible(),minimized:w.isMinimized()}))
+    const api=(app as any).__workdayD08Test
+    for(const [port,methods]of [[api.windows,['showMain','hideMain','showMini','hideMini']],[api.tray,['close']]] as const)for(const operation of methods){
+      const original=port[operation]
+      port[operation]=function(this:unknown,...args:unknown[]){
+        trace.push({event:'service-call',operation,at:Date.now()})
+        const value:any=Reflect.apply(original,this,args)
+        const returned=(result:any)=>trace.push({event:'service-return',operation,at:Date.now(),ok:result?.ok})
+        if(value?.then)void value.then(returned,()=>trace.push({event:'service-reject',operation,at:Date.now()}));else returned(value)
+        return value
+      }
+    }
+  })
+  if(!directMain)await prepareResourceMain({
+    closeMain:()=>app.evaluate(({app})=>(app as any).__workdayD08Test.tray.close()),
+    confirmHide:()=>dialog('知道了，隐藏到托盘'),assertTrayOnly:()=>exclusive(null),
+    showMain:()=>app.evaluate(({app})=>(app as any).__workdayD08Test.windows.showMain()),assertMain:()=>exclusive('main'),
+    record:(event,data)=>phase('resource-'+event,data)
+  })
+  const inputHwnd=directMain?(await nativeState()).find(w=>w.url==='main')!.hwnd.replace('0x',''):undefined
+  const initialInput=directMain?await rpc({action:'input',hwnd:inputHwnd}):null
+  if(directMain){
+    const prepared=await app.evaluate(({app})=>{const api=(app as any).__workdayD08Test;return {at:Date.now(),state:api.windows.state(),trayAvailable:api.tray.available(),metrics:app.getAppMetrics(),trace:(app as any).__d15Trace}})
+    const snapshot=result(await page.evaluate(()=>window.workdayV2.snapshot.read()))
+    expect(snapshot.state).toBe('working');expect(prepared.state).toBe('mainVisible');expect(prepared.trayAvailable).toBe(true)
+    expect(prepared.metrics.filter((m:any)=>m.type==='Tab').length).toBe(2)
+    await expect(page.locator('.fish-waves--flowing')).toHaveCount(1)
+    const timer=page.locator('[role=timer]').first(),timerBefore=await timer.innerText()
+    await expect(timer).not.toHaveText(timerBefore)
+    await page.screenshot({path:join(root,'main-prepared.png')})
+    save('main-prepared',{...prepared,windows:await nativeState(),input:initialInput,family:await rpc({action:'family'}),mainIdentity,launcherPid:appProcess.pid,snapshotState:snapshot.state,timerBefore,timerAfter:await timer.innerText()})
+  }
+  for(const mode of modes){
     if(mode==='mini'){const start=performance.now();await showMini();const ms=performance.now()-start;expect(ms).toBeLessThanOrEqual(1000);save('mini-restore',{milliseconds:ms})}
     if(mode==='tray'){await (await miniPage()).getByRole('button',{name:'隐藏迷你窗',exact:true}).click();await exclusive(null)}
     const file=join(root,mode+'-verified-resources.jsonl'),feed=join(root,mode+'-metric-hints.jsonl'),observations:any[]=[]
+    const expectedId=(await nativeState()).find(w=>w.url===mode)?.id
+    const modeFailures:Array<{at:number;issues:string[]}>=[]
+    const environmentNotes:any[]=[],environmentIssues:any[]=[]
+    phase('resource-mode-start',{mode,expectedId})
     writeFileSync(feed,'',{flag:'wx'})
-    const sampling=promisify(execFile)('powershell.exe',['-NoProfile','-NonInteractive','-WindowStyle','Hidden','-File',resolve('scripts/measure-owned-processes.ps1'),'-RootProcessId',String(appProcess.pid),'-ElectronProcessId',String(mainPid),'-OutputFile',file,'-MetricsFile',feed,'-Mode',mode,'-WarmupSeconds','30','-SampleSeconds','120'],{windowsHide:true,timeout:195000,maxBuffer:1048576})
-    let complete=false,failure:unknown;void sampling.then(()=>{complete=true},e=>{failure=e;complete=true})
-    while(!complete){const point=await app.evaluate(({app,BrowserWindow})=>({at:Date.now(),windows:BrowserWindow.getAllWindows().map(w=>({id:w.id,visible:w.isVisible(),minimized:w.isMinimized()})),subscribers:(app as any).__workdayD08Test.snapshotSubscribers(),metrics:app.getAppMetrics()}));observations.push(point);writeFileSync(feed,JSON.stringify({at:point.at,metrics:point.metrics})+'\n',{flag:'a'});await new Promise(r=>setTimeout(r,250))}
+    const sampling=promisify(execFile)('powershell.exe',['-NoProfile','-NonInteractive','-WindowStyle','Hidden','-File',resolve('scripts/measure-owned-processes.ps1'),'-RootProcessId',String(appProcess.pid),'-ElectronProcessId',String(mainPid),'-OutputFile',file,'-MetricsFile',feed,'-Mode',mode,'-WarmupSeconds','30','-SampleSeconds','120'],{windowsHide:true,timeout:240000,maxBuffer:1048576})
+    let complete=false,failure:unknown,interrupted=false,nextInputCheck=0,previousInput=initialInput,activity:ResourceInputActivity|undefined;void sampling.then(()=>{complete=true},e=>{failure=e;complete=true})
+    while(!complete){
+      const point=await app.evaluate(({app,BrowserWindow})=>({at:Date.now(),windows:BrowserWindow.getAllWindows().map(w=>({id:w.id,visible:w.isVisible(),minimized:w.isMinimized()})),subscribers:(app as any).__workdayD08Test.snapshotSubscribers(),trayAvailable:(app as any).__workdayD08Test.tray.available(),metrics:app.getAppMetrics()}))
+      observations.push(point);writeFileSync(feed,JSON.stringify({at:point.at,metrics:point.metrics})+'\n',{flag:'a'})
+      const issues=resourceModeIssues(point,mode,expectedId)
+      if(issues.length){if(!modeFailures.length)save(mode+'-first-mode-failure',{point,issues,trace:await app.evaluate(({app})=>(app as any).__d15Trace)});modeFailures.push({at:point.at,issues})}
+      if(directMain&&Date.now()>=nextInputCheck){
+        const input=await rpc({action:'input',hwnd:inputHwnd});nextInputCheck=Date.now()+1000
+        input.renderer=await page.evaluate(()=>({at:Date.now(),visibility:document.visibilityState,hidden:document.hidden,wavesFlowing:!!document.querySelector('.fish-waves--flowing'),gifPlaying:!!document.querySelector('.moyu-animated[src]')}))
+        const assessment=classifyResourceInput(input,previousInput,activity);activity=assessment.activity;previousInput=input
+        input.assessment=assessment
+        writeFileSync(join(root,'main-native-input.jsonl'),JSON.stringify(input)+'\n',{flag:'a'})
+        if(assessment.changed)environmentNotes.push({at:input.at,input,point,reason:'input changed without proven GUI interference'})
+        if(assessment.uncertainReasons.length)environmentIssues.push({at:input.at,reasons:assessment.uncertainReasons})
+        if(input.renderer.hidden||input.renderer.visibility!=='visible'||!input.renderer.wavesFlowing||!input.renderer.gifPlaying)environmentIssues.push({at:input.at,reasons:['representative Renderer visibility or animation load changed'],renderer:input.renderer})
+        if(assessment.stopReasons.length){save('main-external-interference',{initialInput,input,point,inputIssues:assessment.stopReasons});interrupted=true}
+      }
+      if(directMain&&(issues.length||interrupted)){
+        interrupted=true;phase('resource-interrupted',{mode,samplerPid:sampling.child.pid,modeIssues:issues})
+        sampling.child.kill() // Only this owned sampler; never count forced cleanup as PASS.
+        break
+      }
+      await new Promise(r=>setTimeout(r,250))
+    }
+    if(interrupted){await sampling.catch(error=>{failure=error});save('main-interrupted',{at:Date.now(),failure:String(failure),modeFailures,observations,environmentNotes,environmentIssues,trace:await app.evaluate(({app})=>(app as any).__d15Trace)});throw Error('Main resource sampling stopped on mode or explicit desktop safety failure; evidence is INCOMPLETE')}
     await sampling;if(failure)throw failure
     const raw=readFileSync(file,'utf8'),protocol=summarizeResourceLog(raw),coverage=verifyMetricCoverage(raw,observations)
     const summary={...protocol,status:protocol.status==='COMPLETE'&&coverage.status==='COMPLETE'?'COMPLETE':'INCOMPLETE',coverage}
-    save(mode+'-verified-summary',{summary,observations});summaries.push({mode,...summary})
+    const environmentQuality=directMain?{status:environmentIssues.length?'INCONCLUSIVE':'COMPLETE',notes:environmentNotes,issues:environmentIssues}:undefined
+    save(mode+'-verified-summary',{summary,observations,modeFailures,environmentQuality,trace:await app.evaluate(({app})=>(app as any).__d15Trace)});summaries.push({mode,...summary,environmentQuality})
+    expect(modeFailures,'mode must remain correct throughout warmup and sampling').toEqual([])
     expect(coverage.status,JSON.stringify(coverage.missing)).toBe('COMPLETE')
-    const expectedId=(await nativeState()).find(w=>w.url===mode)?.id
-    for(const point of observations){expect(point.windows.filter((w:any)=>w.visible&&!w.minimized).map((w:any)=>w.id)).toEqual(mode==='tray'?[]:[expectedId]);expect(point.subscribers).toBeLessThanOrEqual(1)}
+    for(const point of observations){expect(point.trayAvailable).toBe(true);expect(point.windows.filter((w:any)=>w.visible&&!w.minimized).map((w:any)=>w.id)).toEqual(mode==='tray'?[]:[expectedId]);expect(point.subscribers).toBeLessThanOrEqual(1)}
     expect(summary.status,JSON.stringify(summary.issues)).toBe('COMPLETE');await exclusive(mode==='tray'?null:mode);console.log('D15 native resource',mode,JSON.stringify({cpu:summary.meanCpuPercent,p95:summary.p95CpuPercent,pws:summary.pws}))
+    if(directMain)expect(environmentIssues,'ENVIRONMENT_INCONCLUSIVE: unresolved sustained activity or Renderer workload change').toEqual([])
   }
-  save('three-modes',summaries);for(const s of summaries){expect(s.meanCpuPercent!).toBeLessThanOrEqual(s.mode==='tray'?.5:2);expect(s.pws!.maxMiB).toBeLessThanOrEqual(s.mode==='tray'?200:250)}
-})
+  save(directMain?'main-g05-result':'three-modes',summaries);for(const s of summaries){expect(s.meanCpuPercent!).toBeLessThanOrEqual(s.mode==='tray'?.5:2);expect(s.pws!.maxMiB).toBeLessThanOrEqual(s.mode==='tray'?200:250)}
+}

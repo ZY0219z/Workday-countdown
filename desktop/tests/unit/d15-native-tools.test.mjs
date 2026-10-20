@@ -7,6 +7,14 @@ import {verifyOwnedExit} from '../helpers/d15-exit-verdict.mjs'
 const launcher={exitCode:0,signalCode:null}
 const identity={pid:12,createdFileTime:'134368542135630856',exited:false,exitCode:null}
 const main={...identity,exited:true,exitCode:0}
+
+test('resource input observer reads native last-input and foreground without any window action',{skip:process.platform!=='win32'},()=>{
+  const source=readFileSync(new URL('../helpers/d15-native-driver.ps1',import.meta.url),'utf8')
+  const body=source.match(/Add-Type -TypeDefinition @'\r?\n([\s\S]+?)\r?\n'@/)[1]
+  const script=`$ErrorActionPreference='Stop'\nAdd-Type -TypeDefinition @'\n${body}\n'@\n[D15Native]::Input()|ConvertTo-Json -Compress`
+  const value=JSON.parse(execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-WindowStyle','Hidden','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],{windowsHide:true,encoding:'utf8',timeout:15000}))
+  assert.ok(Number.isInteger(value.lastInputTick));assert.ok(Number.isFinite(value.at));assert.ok(Number.isInteger(value.foreground.pid));assert.match(value.foreground.hwnd,/^0x[\da-f]+$/)
+})
 test('normal wrapper AND retained native Main exit are required',()=>assert.equal(verifyOwnedExit(launcher,main,identity).status,'PASS'))
 for(const [name,wrapper,native,expected]of [
   ['already-crashed Main despite wrapper 0',launcher,{...main,exitCode:0xc0000005},identity],

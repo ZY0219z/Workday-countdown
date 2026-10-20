@@ -108,3 +108,34 @@ test('recorded Main FILETIME/metric boundary avoids double rounding without incr
   const result=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-WindowStyle','Hidden','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],{encoding:'utf8',windowsHide:true,timeout:15000})
   assert.equal(result.status,0,result.stderr);assert.equal(result.stdout.trim(),'PASS')
 })
+
+test('recorded GPU 29156 birth matches only its exact CIM microsecond and path, without widening identity checks',{skip:process.platform!=='win32'},()=>{
+  const source=readFileSync(new URL('../../scripts/measure-owned-processes.ps1',import.meta.url),'utf8')
+  const native=source.match(/Add-Type -TypeDefinition @'\r?\n([\s\S]+?)\r?\n'@/)[1]
+  // Fixed values, no process is launched/opened and no CIM observation is invented.
+  // The historical first rejected CIM row was NOT logged; this tests the guard,
+  // not a claim that the missing historical row had these values.
+  const script=`$ErrorActionPreference='Stop'\nAdd-Type -TypeDefinition @'\n${native}\n'@\n$counter=[Runtime.Serialization.FormatterServices]::GetUninitializedObject([OwnedCounter]);$counter.Creation=134368790324437009L;$counter.Path='C:\\fixture\\electron.exe';$cim=[DateTime]::FromFileTimeUtc(134368790324437000L);if(!$counter.Matches($cim,$counter.Path) -or !$counter.Matches($cim.ToLocalTime(),$counter.Path)){throw 'exact GPU identity rejected'};foreach($bad in @($cim.AddTicks(10),$cim.AddTicks(-10),[DateTime]::SpecifyKind($cim,[DateTimeKind]::Unspecified))){if($counter.Matches($bad,$counter.Path)){throw 'wrong birth accepted'}};if($counter.Matches($cim,$null) -or $counter.Matches($cim,'other.exe')){throw 'wrong path accepted'};if(!$counter.MatchesMetric(1792405432443.7)){throw 'recorded metric birth rejected'};[Console]::Write('PASS')`
+  const result=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-WindowStyle','Hidden','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],{encoding:'utf8',windowsHide:true,timeout:15000})
+  assert.equal(result.status,0,result.stderr);assert.equal(result.stdout.trim(),'PASS')
+})
+
+test('rejected identity diagnostics preserve native/CIM raw values, query times and exited state',{skip:process.platform!=='win32'},()=>{
+  const source=readFileSync(new URL('../../scripts/measure-owned-processes.ps1',import.meta.url),'utf8')
+  const helper=source.match(/function Identity-Diagnostic[\s\S]+?(?=function Discover-Owned)/)[0]
+  const script=`$ErrorActionPreference='Stop'\n${helper}\n$row=[pscustomobject]@{ProcessId=29156;ParentProcessId=9824;CreationDate=[DateTime]::FromFileTimeUtc(134368790324437000L);ExecutablePath=$null};$counter=[pscustomobject]@{Creation=134368790324437009L;Path='fixture.exe';Cpu=0.5625;Exited=$true;ExitCode=0};Identity-Diagnostic $row $counter 'new' 1000 1001|ConvertTo-Json -Depth 8 -Compress`
+  const result=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-WindowStyle','Hidden','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],{encoding:'utf8',windowsHide:true,timeout:15000})
+  assert.equal(result.status,0,result.stderr)
+  const packet=JSON.parse(result.stdout)
+  assert.equal(packet.pid,29156);assert.equal(packet.parentPid,9824)
+  assert.equal(packet.queryStartedAt,1000);assert.equal(packet.queryCompletedAt,1001)
+  assert.equal(packet.native.createdFileTime,'134368790324437009');assert.equal(packet.native.exited,true);assert.equal(packet.native.exitCode,0)
+  assert.equal(packet.cim.path,null);assert.equal(packet.cim.creation.fileTime,'134368790324437000');assert.equal(packet.cim.creation.kind,'Utc')
+})
+
+test('identity diagnostic metadata cannot repair a known failed sample or substitute PWS',()=>{
+  const frames=[frame(0,[p('1/a')],'baseline'),frame(1,[p('1/a',.1)],'sample',{errors:['cannot capture owned PID 29156: native/CIM identity mismatch']}),frame(2,[p('1/a',.2)])]
+  const raw=log(frames)+'\n'+JSON.stringify({kind:'identity-check',pid:29156,native:{cpuSeconds:.5625,pwsBytes:0}})+'\n'+JSON.stringify({kind:'footer',complete:true})
+  const result=summarizeResourceLog(raw)
+  assert.equal(result.status,'INCOMPLETE');assert.equal(result.validSamples,1);assert.equal(result.processIdentities,1)
+})

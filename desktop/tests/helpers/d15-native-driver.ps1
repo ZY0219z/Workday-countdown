@@ -27,6 +27,8 @@ public sealed class D15OwnerExit:IDisposable {
 }
 public static class D15Native {
  [StructLayout(LayoutKind.Sequential)]public struct Rect{public int Left,Top,Right,Bottom;}
+ [StructLayout(LayoutKind.Sequential)]struct LastInput{public uint cbSize,dwTime;}
+ [DllImport("user32.dll")]static extern bool GetLastInputInfo(ref LastInput value);
  [DllImport("user32.dll")]public static extern IntPtr GetForegroundWindow();
  [DllImport("user32.dll")]public static extern uint GetWindowThreadProcessId(IntPtr w,out uint p);
  [DllImport("user32.dll")]public static extern bool GetWindowRect(IntPtr w,out Rect r);
@@ -34,6 +36,8 @@ public static class D15Native {
  [DllImport("user32.dll")]static extern void mouse_event(uint flags,uint dx,uint dy,uint data,UIntPtr extra);
  public static int Pid(IntPtr w){uint p;GetWindowThreadProcessId(w,out p);return (int)p;}
  public static object Foreground(){var w=GetForegroundWindow();int p=Pid(w);string n=null;try{n=Process.GetProcessById(p).ProcessName;}catch{}return new{hwnd="0x"+w.ToInt64().ToString("x"),pid=p,name=n,at=DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()};}
+ public static object Input(){return Input(IntPtr.Zero,0);}
+ public static object Input(IntPtr own,int owner){var value=new LastInput();value.cbSize=(uint)Marshal.SizeOf(value);if(!GetLastInputInfo(ref value))throw new Exception("Last input unavailable");if(own!=IntPtr.Zero&&Pid(own)!=owner)throw new Exception("Owned window required for resource diagnostics");Rect frontRect=new Rect(),mainRect=new Rect();bool front=GetWindowRect(GetForegroundWindow(),out frontRect),main=own!=IntPtr.Zero&&GetWindowRect(own,out mainRect);if(!main)mainRect=new Rect();return new{lastInputTick=value.dwTime,foreground=Foreground(),foregroundRect=front?(Rect?)frontRect:null,mainRect=main?(Rect?)mainRect:null,at=DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()};}
  public static void Click(int x,int y,bool right){SetCursorPos(x,y);mouse_event(right?8u:2u,0,0,0,UIntPtr.Zero);mouse_event(right?16u:4u,0,0,0,UIntPtr.Zero);}
  public static object Drag(IntPtr w,int owner){if(Pid(w)!=owner||GetForegroundWindow()!=w)throw new Exception("Drag requires owned foreground HWND");Rect r;if(!GetWindowRect(w,out r))throw new Exception("No rectangle");int x=r.Left+25,y=r.Top+12;SetCursorPos(x,y);mouse_event(2,0,0,0,UIntPtr.Zero);try{for(int i=1;i<=8;i++){SetCursorPos(x-5*i,y+4*i);System.Threading.Thread.Sleep(20);}}finally{mouse_event(4,0,0,0,UIntPtr.Zero);}return new{x=x-40,y=y+32};}
 }
@@ -140,6 +144,7 @@ try{
     family {FamilyState;break}
     dialogSnapshot {DialogSnapshot;break}
     foreground {[D15Native]::Foreground();break}
+    input {if($request.hwnd){[D15Native]::Input([IntPtr]([Convert]::ToInt64($request.hwnd,16)),$OwnerProcessId)}else{[D15Native]::Input()};break}
     drag {[D15Native]::Drag([IntPtr]([Convert]::ToInt64($request.hwnd,16)),$OwnerProcessId);break}
     dialog {InvokeOwned $request.name ([Windows.Automation.ControlType]::Button);break}
     menu {InvokeOwned $request.name ([Windows.Automation.ControlType]::MenuItem);break}

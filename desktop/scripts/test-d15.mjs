@@ -1,5 +1,5 @@
 import {spawnSync} from 'node:child_process'
-for(const args of [['scripts/test-lifecycle.mjs','d15'],['--test','tests/unit/d15-resources.test.mjs','tests/unit/d15-gui-lease.test.mjs','tests/unit/d15-native-tools.test.mjs','tests/unit/d15-native-rpc.test.mjs']]){
+for(const args of [['scripts/test-lifecycle.mjs','d15'],['--test','tests/unit/d15-resources.test.mjs','tests/unit/d15-resource-preparation.test.mjs','tests/unit/d15-gui-lease.test.mjs','tests/unit/d15-native-tools.test.mjs','tests/unit/d15-native-rpc.test.mjs']]){
   const result=spawnSync(process.execPath,args,{stdio:'inherit',windowsHide:true})
   if(result.error)throw result.error
   if(result.status!==0){process.exitCode=result.status??1;break}

@@ -69,13 +69,25 @@ function Read-MetricHints {
     Emit @{kind='metric-observation';at=$point.at;metrics=$point.metrics}
   }
 }
+function Identity-Diagnostic($row,$counter,$phaseName,$queryStartedAt,$queryCompletedAt) {
+  # Preserve the two original identities on rejection. Do not infer a reason
+  # from a generic mismatch or relax the existing precision/path comparison.
+  $date=$row.CreationDate
+  $cimDate=if($date -is [DateTime]){@{raw=$date.ToString('o');kind=$date.Kind.ToString();utc=$date.ToUniversalTime().ToString('o');fileTime=$date.ToUniversalTime().ToFileTimeUtc().ToString()}}else{@{raw=[string]$date;kind='unknown';utc=$null;fileTime=$null}}
+  return @{kind='identity-check';at=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();phase=$phaseName;queryStartedAt=$queryStartedAt;queryCompletedAt=$queryCompletedAt;
+    pid=[int]$row.ProcessId;parentPid=[int]$row.ParentProcessId;
+    cim=@{pid=[int]$row.ProcessId;parentPid=[int]$row.ParentProcessId;path=$row.ExecutablePath;creation=$cimDate};
+    native=@{createdFileTime=$counter.Creation.ToString();path=$counter.Path;cpuSeconds=$counter.Cpu;exited=$counter.Exited;exitCode=if($counter.Exited){$counter.ExitCode}else{$null}}}
+}
 function Discover-Owned($events,$errors) {
   Read-MetricHints
   # Target known parents/identities rather than enumerating all desktop apps.
   # Hints are discovery only: CIM ancestry + native creation/path still decide ownership.
   $ids=@($RootProcessId,$ElectronProcessId)+@($records.Values|Where-Object {!$_.exited}|ForEach-Object {$_.pid})
   $filters=@($ids|Select-Object -Unique|ForEach-Object {"ProcessId=$_ OR ParentProcessId=$_"})+@($metricHints.Values|ForEach-Object {"ProcessId=$($_.pid)"})
+  $queryStartedAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   $processes=@(Get-CimInstance Win32_Process -Filter ($filters -join ' OR ') -Property ProcessId,ParentProcessId,CreationDate,Name,ExecutablePath)
+  $queryCompletedAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   $byId=@{};foreach($processRow in $processes){$byId[[int]$processRow.ProcessId]=$processRow}
   if($byId.ContainsKey($RootProcessId) -and $byId[$RootProcessId].CreationDate.ToUniversalTime() -ne $rootBirthUtc){throw 'Root PID was recycled; observation stopped.'}
   do {
@@ -83,14 +95,14 @@ function Discover-Owned($events,$errors) {
     foreach($processRow in $processes){
       $processId=[int]$processRow.ProcessId;$parentId=[int]$processRow.ParentProcessId
       $existing=@($records.Values|Where-Object {$_.pid -eq $processId -and !$_.exited})
-      if($existing.Count){if(!$existing[0].counter.Matches($processRow.CreationDate,$processRow.ExecutablePath)){$errors.Add("native/CIM identity changed $processId")};continue}
+      if($existing.Count){if(!$existing[0].counter.Matches($processRow.CreationDate,$processRow.ExecutablePath)){Emit (Identity-Diagnostic $processRow $existing[0].counter 'existing' $queryStartedAt $queryCompletedAt);$errors.Add("native/CIM identity changed $processId")};continue}
       $parents=@($records.Values|Where-Object {$_.pid -eq $parentId -and $_.createdUtc -le $processRow.CreationDate.ToUniversalTime() -and (!$_.exited -or $processRow.CreationDate.ToUniversalTime() -le $_.exitedUtc)})
       if($processId -ne $RootProcessId -and !$parents.Count){continue}
       if($processId -ne $RootProcessId -and $byId.ContainsKey($parentId) -and !@($parents|Where-Object {$_.counter.Matches($byId[$parentId].CreationDate,$byId[$parentId].ExecutablePath)}).Count){continue}
       $counter=$null
       try {
         $counter=New-Object OwnedCounter($processId);$key="$processId/$($counter.Creation)"
-        if(!$counter.Matches($processRow.CreationDate,$processRow.ExecutablePath)){throw 'native/CIM identity mismatch'}
+        if(!$counter.Matches($processRow.CreationDate,$processRow.ExecutablePath)){Emit (Identity-Diagnostic $processRow $counter 'new' $queryStartedAt $queryCompletedAt);throw 'native/CIM identity mismatch'}
         if($records.ContainsKey($key)){$counter.Dispose();continue}
         $records[$key]=@{key=$key;pid=$processId;parentPid=$parentId;name=$processRow.Name;imagePath=$counter.Path;createdFileTime=[string]$counter.Creation;createdUtc=[DateTime]::FromFileTimeUtc($counter.Creation);counter=$counter;cpuSeconds=$counter.Cpu;exited=$counter.Exited;exitedUtc=$null}
         $events.Add(@{event='enter';key=$key;pid=$processId});$added=$true
