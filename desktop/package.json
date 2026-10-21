@@ -1,7 +1,7 @@
 {
   "name": "workday-escape-poc",
   "version": "2.0.0",
-  "description": "Workday Escape V2.0 stage 1 desktop feasibility POC",
+  "description": "Workday Escape desktop countdown",
   "author": "Workday Escape",
   "private": true,
   "type": "module",

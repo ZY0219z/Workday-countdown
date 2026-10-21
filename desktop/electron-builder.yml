@@ -7,6 +7,7 @@ files:
   - out/**
   - package.json
 asar: true
+afterPack: scripts/after-pack.cjs
 electronDist: node_modules/electron/dist
 npmRebuild: false
 win:
