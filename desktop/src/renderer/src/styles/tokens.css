@@ -1,19 +1,17 @@
 /* Opt-in host: importing these files cannot restyle the existing POC. */
 .workday-ui {
   color-scheme: light;
-  --we-bg: #f1f5f3;
+  --we-bg: #f0f7fd;
   --we-surface: #ffffff;
-  --we-subtle: #edf5f3;
-  --we-text: #183f49;
-  --we-muted: #526e74;
-  --we-border: #d3e2de;
-  --we-control-border: #7f9c9e;
-  --we-accent: #147b88;
-  --we-accent-soft: #e3f2f1;
-  --we-track: #dfefed;
-  --we-button: #126e7b;
-  --we-water: #8dced6;
-  --we-water-deep: #64b6c3;
+  --we-subtle: #f4f8fc;
+  --we-text: #24374b;
+  --we-muted: #506178;
+  --we-border: #becddd;
+  --we-control-border: #6b819c;
+  --we-accent: #2563eb;
+  --we-accent-soft: #e5efff;
+  --we-track: #dbe9f9;
+  --we-button: #2563eb;
   --we-button-text: #ffffff;
   --we-positive-text: #166534;
   --we-positive-bg: #e6f6ec;
@@ -24,7 +22,7 @@
   --we-neutral-text: #475569;
   --we-neutral-bg: #eef2f7;
   --we-font: "Segoe UI", "Microsoft YaHei", sans-serif;
-  --we-font-numeric: Bahnschrift, "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei", sans-serif;
+  --we-font-numeric: "Segoe UI", Consolas, "Microsoft YaHei", sans-serif;
   --we-text-small: 12px;
   --we-text-body: 14px;
   --we-text-title: 18px;
@@ -37,7 +35,7 @@
   --we-space-6: 24px;
   --we-radius-control: 8px;
   --we-radius-card: 12px;
-  --we-shadow: 0 8px 24px rgb(30 74 77 / 8%);
+  --we-shadow: 0 6px 18px rgb(36 55 75 / 6%);
 }
 .workday-ui[data-accent="coral"] {
   --we-bg: #fff4f1; --we-subtle: #fff7f4; --we-accent: #be123c; --we-accent-soft: #fce7ed; --we-track: #f5d6dd; --we-button: #be123c;

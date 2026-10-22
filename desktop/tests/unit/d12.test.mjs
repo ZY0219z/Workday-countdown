@@ -48,7 +48,7 @@ test('real net progress, lunch freeze, overtime rollback and end remain domain r
 })
 test('null data stays static, missing-calendar progress retains estimate, simplified three cards remain',async()=>{
   const empty=await render(null);assert.ok(!empty.includes('moyu-animated'));assert.ok(!empty.includes('aria-label="有效工作进度"'));assert.ok(empty.includes('无工作进度'))
-  const html=await render(f.snapshots.estimate);assert.ok(html.includes('2027'));assert.ok(html.includes('估算'));assert.equal((html.match(/class="we-surface we-metric(?: [^"]*)?"/g)||[]).length,3);assert.ok(!html.includes('累计计划工作日'));assert.ok(!html.includes('dashboard-date'))
+  const html=await render(f.snapshots.estimate);assert.ok(html.includes('2027'));assert.ok(html.includes('估算'));assert.equal((html.match(/class="we-surface we-metric"/g)||[]).length,3);assert.ok(!html.includes('累计计划工作日'));assert.ok(!html.includes('dashboard-date'))
 })
 test('native hidden or reduced-motion gate uses static original canvas',async()=>{const html=await render(f.snapshots.working,false);assert.ok(html.includes('原始蓝色摸鱼猫抱灰鱼（静态）'));assert.ok(!html.includes('moyu-animated'))})
 test('D10 theme resolves system OR app reduction for the shared animation gate and releases media listeners',()=>{

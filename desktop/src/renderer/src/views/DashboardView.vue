@@ -28,16 +28,15 @@ const estimate=computed(()=>props.snapshot?.countdown?.quality.approximate?quali
     <div class="dashboard-metrics">
       <MetricCard title="下个休息日" description-label="休息日期" :value="snapshot?.nextRest?.days??null" unit="天" :description="snapshot?.nextRest ? (snapshot.nextRest.days===0?'今天休息 · ':'')+snapshot.nextRest.date : '未来查询范围内暂无可用结果'" :source="snapshot?.nextRest?.quality.approximate?qualityText(snapshot.nextRest.quality):''" :estimated="snapshot?.nextRest?.quality.approximate" :warning="snapshot ? affectedWarnings(snapshot,'nextRest'):''" />
       <MetricCard title="下次预计发薪" description-label="预计日期" :value="snapshot?.salary?.days??null" unit="天" :empty-label="snapshot?.salaryAmbiguity?'发薪周期存在歧义':'暂无计划日期'" :description="salaryDescription" :source="snapshot?.salary?.quality.approximate?qualityText(snapshot.salary.quality):''" :estimated="snapshot?.salary?.quality.approximate" :warning="salaryWarning" />
-      <MetricCard title="已工作" accessible-description="按自然日统计，不含今天，入职当天为 0；不代表实际出勤天数。" :value="snapshot?.employment.elapsedNaturalDays??null" unit="天" :description="snapshot?.employment.status==='notStarted'?'尚未入职':snapshot?.employment.status==='unset'?'尚未设置入职日期':''" />
+      <MetricCard title="已工作" :value="snapshot?.employment.elapsedNaturalDays??null" unit="天" :description="snapshot?.employment.status==='notStarted'?'尚未入职':snapshot?.employment.status==='unset'?'尚未设置入职日期':''" />
     </div>
   </section>
 </template>
 <style scoped>
 .dashboard { display:grid;gap:var(--we-space-3);container-type:inline-size; }
-.dashboard-primary.we-surface { min-width:0;border-color:transparent;background:linear-gradient(145deg,var(--we-surface) 35%,var(--we-subtle)); }
+.dashboard-primary { min-width:0; }
 .dashboard-progress { padding:0 var(--we-space-6) var(--we-space-3); }
 .dashboard-metrics { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:start;gap:var(--we-space-3); }
 .dashboard-warning { font-size:var(--we-text-small);color:var(--we-warning-text);overflow-wrap:anywhere; }
 @media (max-width:439px) { .dashboard-metrics { grid-template-columns:minmax(0,1fr); } }
-@media (forced-colors:active) { .dashboard-primary.we-surface { border-color:CanvasText;background:Canvas;box-shadow:none; } }
 </style>

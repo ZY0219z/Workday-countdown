@@ -10,18 +10,18 @@ function fixture() {
   const dark = media(false), motion = media(false)
   return { attributes, target, dark, motion }
 }
-for (const mode of ['light', 'dark', 'system']) for (const accent of ['ocean', 'coral']) test(`UI-07 stored ${mode}/${accent} resolves to the single sea-salt style without migration`, () => {
-  for (const dark of [false, true]) { const stored={ ...initial, mode, accent }, before=structuredClone(stored);assert.deepEqual(resolveAppearance(stored, dark, false), { theme:'light', accent:'ocean', reduceMotion:false });assert.deepEqual(stored,before) }
+for (const mode of ['light', 'dark', 'system']) for (const accent of ['ocean', 'coral']) test(`appearance ${mode}/${accent}: explicit or system resolution`, () => {
+  for (const dark of [false, true]) assert.deepEqual(resolveAppearance({ ...initial, mode, accent }, dark, false), { theme: mode === 'system' ? (dark ? 'dark' : 'light') : mode, accent, reduceMotion: false })
 })
 test('reduce motion is user OR system, neither source can disable the other', () => {
   for (const user of [false, true]) for (const system of [false, true]) assert.equal(resolveAppearance({ ...initial, reduceMotion: user }, false, system).reduceMotion, user || system)
 })
-test('UI-07 legacy/system colors cannot change the fixed style; motion and scoped attributes remain reactive', () => {
+test('system theme changes react; explicit mode ignores system changes; only scoped target is altered', () => {
   const f = fixture(), result = createThemeController(f.target, f, initial); assert.equal(result.ok, true)
-  f.dark.change(true); assert.equal(f.attributes.get('data-theme'), 'light')
+  f.dark.change(true); assert.equal(f.attributes.get('data-theme'), 'dark')
   assert.equal(result.data.update({ ...initial, mode: 'light', accent: 'coral' }).ok, true)
   f.dark.change(false); f.dark.change(true); assert.equal(f.attributes.get('data-theme'), 'light')
-  assert.equal(f.attributes.get('data-accent'), 'ocean'); assert.equal(f.attributes.get('unrelated'), 'preserve')
+  assert.equal(f.attributes.get('data-accent'), 'coral'); assert.equal(f.attributes.get('unrelated'), 'preserve')
   f.motion.change(true); assert.equal(f.attributes.get('data-reduced-motion'), 'true')
   result.data.dispose(); assert.equal(f.dark.listeners.size + f.motion.listeners.size, 0)
 })

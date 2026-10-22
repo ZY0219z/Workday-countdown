@@ -1,6 +1,5 @@
 import { createApp, h, nextTick, ref, shallowRef } from 'vue'
 import Dashboard from '../../src/renderer/src/views/DashboardView.vue'
-import { resolveAppearance } from '../../src/renderer/src/ui/appearance'
 import '../../src/renderer/src/styles/tokens.css'
 import '../../src/renderer/src/styles/base.css'
 import '../../src/renderer/src/style.css'
@@ -20,8 +19,7 @@ createApp({ render: () => h('div', {
 
 window.__dashboard = async value => {
   snapshot.value = value.snapshot
-  const appearance=resolveAppearance({mode:value.theme??'light',accent:value.accent??'ocean',reduceMotion:value.reduced??true},false,false)
-  theme.value = appearance.theme; accent.value = appearance.accent
+  theme.value = value.theme ?? 'light'; accent.value = value.accent ?? 'ocean'
   reduced.value = value.reduced ?? true; motionAllowed.value = value.motionAllowed ?? false
   await nextTick()
   await new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)))
