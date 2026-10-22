@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { ValidationIssue } from '../../../shared/contracts'
-import { fieldMessage } from '../ui/settings-editor'
-defineProps<{issues:ValidationIssue[];path:string}>()
+import { fieldIssues, fieldMessage } from '../ui/settings-editor'
+const props=defineProps<{issues:ValidationIssue[];path:string;id?:string;excludePaths?:string[]}>()
+const matching=computed(()=>fieldIssues(props.issues,props.path,props.excludePaths))
 </script>
-<template><p v-for="(issue,i) in issues.filter(item=>item.field===path||item.field.startsWith(path+'.')||item.field.startsWith(path+'['))" :key="i" class="field-error" role="alert">{{ fieldMessage(issue) }}</p></template>
+<template><div v-if="matching.length" :id="id" role="alert"><p v-for="(issue,i) in matching" :key="i" class="field-error">{{ fieldMessage(issue) }}</p></div></template>
 <style scoped>.field-error { color:var(--we-danger-text);font-size:var(--we-text-small);margin-top:var(--we-space-1); }</style>

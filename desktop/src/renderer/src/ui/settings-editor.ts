@@ -32,6 +32,10 @@ export function editorFrom(session: SettingsDraftSession): EditorSettings {
   }
   return merge(asDraft(base), parsed.data) as unknown as EditorSettings
 }
+export function fieldIssues(issues: readonly ValidationIssue[], path: string, excludePaths: readonly string[] = []): ValidationIssue[] {
+  const matches = (field: string, parent: string) => field === parent || field.startsWith(parent + '.') || field.startsWith(parent + '[')
+  return issues.filter(issue => matches(issue.field, path) && !excludePaths.some(excluded => matches(issue.field, excluded)))
+}
 export function fieldMessage(issue: ValidationIssue): string {
   if(issue.field==='$.expectedEndTime')return issue.message
   if(issue.field==='$.salary.day')return '请填写每月发薪日，使用 1–31 的整数。'

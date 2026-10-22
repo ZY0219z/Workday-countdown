@@ -5,6 +5,8 @@
 .workday-ui .we-muted { color: var(--we-muted); font-size: var(--we-text-small); }
 .workday-ui .we-button, .workday-ui .we-control { font: inherit; min-height: 32px; border: 1px solid var(--we-control-border); border-radius: var(--we-radius-control); padding: var(--we-space-1) var(--we-space-2); color: var(--we-text); background: var(--we-surface); }
 .workday-ui .we-button { cursor: pointer; }
+.workday-ui .settings .we-button:where(:not(.we-button--primary):not([aria-pressed="true"]):not([aria-selected="true"]):not(:disabled)):hover { background: var(--we-accent-soft); border-color: var(--we-accent); }
+.workday-ui .settings .we-button:where(:not(.we-button--primary):not([aria-pressed="true"]):not([aria-selected="true"]):not(:disabled)):active { background: var(--we-track); border-color: var(--we-accent); }
 .workday-ui .we-check { display: inline-flex; align-items: center; gap: var(--we-space-2); min-height: 32px; cursor: pointer; }
 .workday-ui .we-button--primary { background: var(--we-button); color: var(--we-button-text); border-color: var(--we-button); }
 .workday-ui :where(button, select, input, a):focus-visible { outline: 3px solid var(--we-accent); outline-offset: 3px; }

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
 import type { CalendarDatasetMetadata, ValidationIssue, ExpectedEndContext } from '../../../shared/contracts'
 import type { EditorSettings } from '../ui/settings-editor'
+import { fieldIssues } from '../ui/settings-editor'
 import FieldErrors from '../components/FieldErrors.vue'
 import TimeInput from '../components/TimeInput.vue'
 import DataSettings from '../settings/DataSettings.vue'
@@ -14,6 +15,10 @@ const form=ref<EditorSettings>(JSON.parse(JSON.stringify(props.model)))
 watch(()=>props.model,value=>{if(JSON.stringify(value)!==JSON.stringify(form.value))form.value=JSON.parse(JSON.stringify(value))})
 const moreOpen=ref(false),active=ref('calendar'), date=ref(''),kind=ref<'work'|'rest'>('rest'),dateError=ref('')
 const groups=[['calendar','工作日历'],['appearance','外观主题'],['desktop','窗口与托盘'],['data','数据与恢复']]
+const errorPrefix=useId()
+const errorId=(path:string)=>`${errorPrefix}-${path.replace(/[^a-zA-Z0-9-]/g,'-')}-errors`
+const hasErrors=(path:string)=>fieldIssues(props.issues,path).length>0
+const errorDescription=(path:string)=>hasErrors(path)?errorId(path):undefined
 // Jump only on explicit failed Save, never during typing/group navigation.
 watch(()=>props.validationAttempt,()=>{const field=props.issues[0]?.field.split('.')[1];if(groups.some(group=>group[0]===field)){active.value=field;moreOpen.value=true}})
 const days=['周一','周二','周三','周四','周五','周六','周日']
@@ -33,51 +38,64 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
         <div class="settings-common">
         <section class="settings-panel settings-schedule" aria-label="时间与日程">
           <h3>时间与日程</h3>
-          <div class="settings-time-pair"><div><TimeInput v-model="form.schedule.startTime" label="上班时间" @update:model-value="update" />
-          <FieldErrors :issues="issues" path="$.schedule.startTime" /></div><div>
-          <TimeInput v-model="form.schedule.endTime" label="下班时间" @update:model-value="update" />
-          <FieldErrors :issues="issues" path="$.schedule.endTime" /></div></div>
+          <div class="settings-time-pair"><div><TimeInput v-model="form.schedule.startTime" label="上班时间" :invalid="hasErrors('$.schedule.startTime')" :described-by="errorDescription('$.schedule.startTime')" @update:model-value="update" />
+          <FieldErrors :id="errorId('$.schedule.startTime')" :issues="issues" path="$.schedule.startTime" /></div><div>
+          <TimeInput v-model="form.schedule.endTime" label="下班时间" :invalid="hasErrors('$.schedule.endTime')" :described-by="errorDescription('$.schedule.endTime')" @update:model-value="update" />
+          <FieldErrors :id="errorId('$.schedule.endTime')" :issues="issues" path="$.schedule.endTime" /></div></div>
           <div class="settings-expected"><fieldset :disabled="!expectedEnd?.available" class="settings-expected-fields">
-            <TimeInput :model-value="expectedEndInput||''" label="今天预计下班时间" @update:model-value="value=>emit('expectedEnd',value)" />
+            <TimeInput :model-value="expectedEndInput||''" label="今天预计下班时间" :invalid="hasErrors('$.expectedEndTime')" :described-by="errorDescription('$.expectedEndTime')" @update:model-value="value=>emit('expectedEnd',value)" />
             <button type="button" class="we-button" @click="emit('expectedEnd',null)">取消今天加班</button>
           </fieldset>
           <p class="we-muted">仅本班次有效，下一个工作日恢复正常下班时间。较早时刻按正常下班的次日解释。</p>
           <p v-if="expectedEnd?.available" class="we-muted">本班次 {{ expectedEnd.shiftDate }} · 正常结束 {{ expectedEnd.normalEnd.date }} {{ expectedEnd.normalEnd.time }}<template v-if="expectedEnd.minutes>0"> · 现有预计结束 {{ expectedEnd.finalEnd.date }} {{ expectedEnd.finalEnd.time }}</template></p>
           <p v-else class="we-muted">{{ expectedEnd&&!expectedEnd.available?expectedEnd.message:'正在确认当前班次…' }}</p>
           <p v-if="expectedEnd?.available&&expectedEnd.previewEnd" class="we-muted">本次预计结束：{{ expectedEnd.previewEnd.date }} {{ expectedEnd.previewEnd.time }}（保存后生效）</p>
-          <FieldErrors :issues="issues" path="$.expectedEndTime" /></div>
+          <FieldErrors :id="errorId('$.expectedEndTime')" :issues="issues" path="$.expectedEndTime" /></div>
           <p v-if="form.schedule.crossMidnight" class="we-muted">保留历史跨夜班次，下班在次日。</p>
           <p v-if="customWorkWeek" class="we-muted">保留历史工作周：{{ workWeekLabel }}；仍按原规则计算。</p>
           <p v-if="form.schedule.breaks.length" class="we-muted">保留了历史午休配置，仍按原规则计算；修改其他设置不会清除它。</p>
-          <FieldErrors :issues="issues" path="$.schedule" />
+          <FieldErrors :issues="issues" path="$.schedule" :exclude-paths="['$.schedule.startTime','$.schedule.endTime']" />
         </section>
         <section class="settings-panel">
-          <h3>入职日期</h3><label>入职日期<input :value="form.employee.startDate||''" type="date" class="we-control" @input="form.employee.startDate=($event.target as HTMLInputElement).value||null;update()" /></label>
-          <p class="we-muted">可留空。不含今天，入职当天为 0；计划工作日并非实际出勤。</p><FieldErrors :issues="issues" path="$.employee" />
+          <h3>入职日期</h3><label>入职日期<input :value="form.employee.startDate||''" type="date" class="we-control" :aria-invalid="hasErrors('$.employee.startDate')||undefined" :aria-describedby="errorDescription('$.employee.startDate')" @input="form.employee.startDate=($event.target as HTMLInputElement).value||null;update()" /></label>
+          <FieldErrors :id="errorId('$.employee.startDate')" :issues="issues" path="$.employee.startDate" />
+          <p class="we-muted">可留空。不含今天，入职当天为 0；计划工作日并非实际出勤。</p><FieldErrors :issues="issues" path="$.employee" :exclude-paths="['$.employee.startDate']" />
         </section>
         <section class="settings-panel">
-          <h3>计划发薪</h3><label>每月发薪日<input :value="form.salary.day??''" type="number" min="1" max="31" step="1" class="we-control" @input="form.salary.day=numeric($event);update()" /></label>
+          <h3>计划发薪</h3><label>每月发薪日<input :value="form.salary.day??''" type="number" min="1" max="31" step="1" class="we-control" :aria-invalid="hasErrors('$.salary.day')||undefined" :aria-describedby="errorDescription('$.salary.day')" @input="form.salary.day=numeric($event);update()" /></label>
+          <FieldErrors :id="errorId('$.salary.day')" :issues="issues" path="$.salary.day" />
           <p v-if="form.salary.nonWorkingPolicy!=='delay'" class="we-muted">保留历史发薪策略：{{ form.salary.nonWorkingPolicy==='advance'?'提前至上一个工作日':'休息日不调整' }}。</p>
-          <p v-else class="we-muted">每月发上月工资，遇休息日按工作日历顺延。</p><FieldErrors :issues="issues" path="$.salary" />
+          <p v-else class="we-muted">每月发上月工资，遇休息日按工作日历顺延。</p><FieldErrors :issues="issues" path="$.salary" :exclude-paths="['$.salary.day']" />
         </section>
         </div>
         <details class="settings-more" :open="moreOpen" @toggle="moreOpen=($event.target as HTMLDetailsElement).open"><summary>更多设置</summary>
     <label class="settings-group-label">设置分组 <select v-model="active" :disabled="busy||!sessionReady" class="we-control"><option v-for="group in groups" :key="group[0]" :value="group[0]">{{ group[1] }}</option></select></label>
         <section v-if="active==='calendar'" class="settings-panel">
           <h3>离线工作日历</h3><p class="we-muted">优先级：自定义日期 > 已核验年度安排 > 每周规则。缺少年份按周规则估算，不冒充官方数据。</p>
-          <label v-for="item in metadata" :key="item.year" class="we-check calendar-year"><input v-model="form.calendar.enabledYears" type="checkbox" :value="item.year" @change="update" /><span>{{ item.year }} · {{ item.version }} · {{ item.verification==='verified'?'已核验':'未核验' }}<small>{{ item.source }} · 发布 {{ item.publishedOn }}</small></span></label>
-          <div class="settings-record"><label>覆盖日期<input v-model="date" type="date" class="we-control" /></label><label>此日安排<select v-model="kind" class="we-control"><option value="work">工作</option><option value="rest">休息</option></select></label><button type="button" class="we-button" @click="addOverride">{{ form.calendar.overrides[date]?'更新此日覆盖':'添加日期覆盖' }}</button><p v-if="dateError" role="alert">{{ dateError }}</p></div>
+          <label v-for="item in metadata" :key="item.year" class="we-check calendar-year"><input v-model="form.calendar.enabledYears" type="checkbox" :value="item.year" :aria-invalid="hasErrors('$.calendar.enabledYears')||undefined" :aria-describedby="errorDescription('$.calendar.enabledYears')" @change="update" /><span>{{ item.year }} · {{ item.version }} · {{ item.verification==='verified'?'已核验':'未核验' }}<small>{{ item.source }} · 发布 {{ item.publishedOn }}</small></span></label>
+          <FieldErrors :id="errorId('$.calendar.enabledYears')" :issues="issues" path="$.calendar.enabledYears" />
+          <div class="settings-record"><label>覆盖日期<input v-model="date" type="date" class="we-control" :aria-invalid="!!dateError||undefined" :aria-describedby="dateError?errorId('override-date'):undefined" /></label><label>此日安排<select v-model="kind" class="we-control"><option value="work">工作</option><option value="rest">休息</option></select></label><button type="button" class="we-button" @click="addOverride">{{ form.calendar.overrides[date]?'更新此日覆盖':'添加日期覆盖' }}</button><p v-if="dateError" :id="errorId('override-date')" role="alert">{{ dateError }}</p></div>
           <div v-for="(value,key) in form.calendar.overrides" :key="key" class="settings-override"><span>{{ key }} · 自定义{{ value==='work'?'工作':'休息' }}</span><button type="button" class="we-button" @click="delete form.calendar.overrides[key];update()">删除 {{ key }} 覆盖</button></div>
-          <p class="we-muted">删除覆盖后恢复年度安排 / 每周规则。</p><FieldErrors :issues="issues" path="$.calendar" />
-          <p class="settings-deferred">外部年度包导入暂未开放，待后续单独授权；内置日历和手动覆盖可正常使用。</p>
+          <p class="we-muted">删除覆盖后恢复年度安排 / 每周规则。</p><FieldErrors :issues="issues" path="$.calendar" :exclude-paths="['$.calendar.enabledYears']" />
+          <p class="settings-deferred">外部年度日历包手动导入暂未开放；内置日历和手动日期覆盖可正常使用。</p>
         </section>
         <section v-if="active==='appearance'" class="settings-panel">
-          <h3>外观主题</h3><label>显示模式<select v-model="form.appearance.mode" aria-label="显示模式" class="we-control" @change="update"><option value="system">跟随系统</option><option value="light">亮色</option><option value="dark">深色</option></select></label><label>配色<select v-model="form.appearance.accent" aria-label="配色" class="we-control" @change="update"><option value="ocean">海蓝</option><option value="coral">珊瑚</option></select></label><label class="we-check"><input v-model="form.appearance.reduceMotion" type="checkbox" @change="update" />减少动画</label>
-          <p class="we-muted">即时预览；取消或放弃恢复已保存主题。系统或应用任一减少动画设置生效，暂停动画并保留静态形象。</p><FieldErrors :issues="issues" path="$.appearance" />
+          <h3>外观主题</h3><label>显示模式<select v-model="form.appearance.mode" aria-label="显示模式" class="we-control" :aria-invalid="hasErrors('$.appearance.mode')||undefined" :aria-describedby="errorDescription('$.appearance.mode')" @change="update"><option value="system">跟随系统</option><option value="light">亮色</option><option value="dark">深色</option></select></label>
+          <FieldErrors :id="errorId('$.appearance.mode')" :issues="issues" path="$.appearance.mode" />
+          <label>配色<select v-model="form.appearance.accent" aria-label="配色" class="we-control" :aria-invalid="hasErrors('$.appearance.accent')||undefined" :aria-describedby="errorDescription('$.appearance.accent')" @change="update"><option value="ocean">海蓝</option><option value="coral">珊瑚</option></select></label>
+          <FieldErrors :id="errorId('$.appearance.accent')" :issues="issues" path="$.appearance.accent" />
+          <label class="we-check"><input v-model="form.appearance.reduceMotion" type="checkbox" :aria-invalid="hasErrors('$.appearance.reduceMotion')||undefined" :aria-describedby="errorDescription('$.appearance.reduceMotion')" @change="update" />减少动画</label>
+          <FieldErrors :id="errorId('$.appearance.reduceMotion')" :issues="issues" path="$.appearance.reduceMotion" />
+          <p class="we-muted">即时预览；取消或放弃恢复已保存主题。系统或应用任一减少动画设置生效，暂停动画并保留静态形象。</p><FieldErrors :issues="issues" path="$.appearance" :exclude-paths="['$.appearance.mode','$.appearance.accent','$.appearance.reduceMotion']" />
         </section>
         <section v-if="active==='desktop'" class="settings-panel">
-          <h3>窗口与托盘偏好</h3><label>关闭主窗口<select v-model="form.desktop.closeAction" class="we-control" @change="update"><option value="hideToTray">隐藏到托盘</option><option value="quit">退出程序</option></select></label><label class="we-check"><input v-model="form.desktop.miniEnabled" type="checkbox" @change="update" />启用迷你窗</label><label class="we-check"><input v-model="form.desktop.alwaysOnTop" type="checkbox" @change="update" />迷你窗置顶偏好</label>
-          <p class="settings-deferred">关闭行为按已保存设置执行；隐藏到托盘保留输入，托盘“退出程序”仍保护未保存设置。最小化保留任务栏。托盘不可用时不会隐藏。迷你窗启用并保存后，可从主窗口或托盘主动进入；每次启动仍打开主窗口。拖动位置随下次保存设置记住；置顶按钮本次操作不自动写入偏好。</p><FieldErrors :issues="issues" path="$.desktop" />
+          <h3>窗口与托盘偏好</h3><label>关闭主窗口<select v-model="form.desktop.closeAction" class="we-control" :aria-invalid="hasErrors('$.desktop.closeAction')||undefined" :aria-describedby="errorDescription('$.desktop.closeAction')" @change="update"><option value="hideToTray">隐藏到托盘</option><option value="quit">退出程序</option></select></label>
+          <FieldErrors :id="errorId('$.desktop.closeAction')" :issues="issues" path="$.desktop.closeAction" />
+          <label class="we-check"><input v-model="form.desktop.miniEnabled" type="checkbox" :aria-invalid="hasErrors('$.desktop.miniEnabled')||undefined" :aria-describedby="errorDescription('$.desktop.miniEnabled')" @change="update" />启用迷你窗</label>
+          <FieldErrors :id="errorId('$.desktop.miniEnabled')" :issues="issues" path="$.desktop.miniEnabled" />
+          <label class="we-check"><input v-model="form.desktop.alwaysOnTop" type="checkbox" :aria-invalid="hasErrors('$.desktop.alwaysOnTop')||undefined" :aria-describedby="errorDescription('$.desktop.alwaysOnTop')" @change="update" />迷你窗置顶偏好</label>
+          <FieldErrors :id="errorId('$.desktop.alwaysOnTop')" :issues="issues" path="$.desktop.alwaysOnTop" />
+          <p class="settings-deferred">关闭行为按已保存设置执行；隐藏到托盘保留输入，托盘“退出程序”仍保护未保存设置。最小化保留任务栏。托盘不可用时不会隐藏。迷你窗启用并保存后，可从主窗口或托盘主动进入；每次启动仍打开主窗口。拖动位置随下次保存设置记住；置顶按钮本次操作不自动写入偏好。</p><FieldErrors :issues="issues" path="$.desktop" :exclude-paths="['$.desktop.closeAction','$.desktop.miniEnabled','$.desktop.alwaysOnTop']" />
         </section>
         <section v-if="active==='data'" class="settings-panel"><DataSettings :api="api" :blocked="dirty||busy" @applied="emit('imported')" @busy="value=>emit('dataBusy',value)" /></section>
         </details>

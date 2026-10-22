@@ -48,6 +48,8 @@ html,body,#app { margin:0;width:100%;height:100%;min-width:0; }
 .mini-shell button:hover:not(:disabled) { background:var(--we-accent-soft);border-color:var(--we-accent);color:var(--we-accent); }
 .mini-shell button:active:not(:disabled) { background:var(--we-track); }
 .mini-shell button[aria-pressed="true"] { color:var(--we-button-text);background:var(--we-button);border-color:var(--we-button); }
+.mini-shell button[aria-pressed="true"]:hover:not(:disabled) { color:var(--we-button-text);background:var(--we-button);border-color:var(--we-button);box-shadow:inset 0 0 0 1px var(--we-button-text); }
+.mini-shell button[aria-pressed="true"]:active:not(:disabled) { box-shadow:inset 0 0 0 2px var(--we-button-text); }
 .mini-shell button:focus-visible { outline:2px solid var(--we-accent);outline-offset:1px; }
 .mini-countdown { display:flex;align-items:baseline;justify-content:space-between;gap:6px; }
 .mini-label { font-size:10px;flex:none;color:var(--we-muted); }

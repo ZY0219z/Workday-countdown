@@ -45,7 +45,7 @@ onBeforeUnmount(()=>{if(preview.value)void props.api.data.cancelImport({previewT
     <label>导入来源<select v-model="kind" class="we-control" :disabled="busy||!!preview"><option value="python-v1">Python V1</option><option value="electron-poc">Electron POC</option><option value="v2">正式 V2 配置</option></select></label>
     <div class="data-actions"><button type="button" class="we-button" :disabled="busy||blocked" @click="open(false)">选择配置并预览</button><button type="button" class="we-button" :disabled="busy||blocked" @click="open(true)">预览最近有效备份</button><button type="button" class="we-button" :disabled="busy||blocked" @click="exportSaved">导出已保存配置</button></div>
     <section v-if="preview" class="data-preview" aria-label="导入预览">
-      <h4>请选择要应用的字段</h4><p class="we-muted">应用前将校验并备份，未选字段保留现有值。窗口行为偏好不会提前开启尚未开发的托盘或迷你窗。</p>
+      <h4>请选择要应用的字段</h4><p class="we-muted">应用前将校验并备份，未选字段保留现有值。迷你窗需启用后主动进入，每次启动仍打开主窗口。</p>
       <div v-for="choice in preview.choices" :key="choice.field" class="data-choice">
         <label class="we-check"><input v-model="selected" type="checkbox" :value="choice.field" :disabled="busy||choice.issues.length>0" />{{ labels[choice.field] }}</label>
         <p>当前：{{ valueText(choice.field,choice.current) }}</p><p>导入：{{ valueText(choice.field,choice.incoming) }}</p>

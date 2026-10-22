@@ -1,7 +1,42 @@
 import {test} from 'node:test'
 import assert from 'node:assert/strict'
-import {fixtures,renderDashboard,renderSettings,createSettingsController,initialEditor,editorFrom,createSettingsDraft,durationText,wallLabel,qualityText,createV2Bridge,validateContractRequest,fieldMessage,createDefaultAppConfig,salaryMonthLabel} from '../../test-results/d11-ssr/components.mjs'
+import {fixtures,renderDashboard,renderSettings,createSettingsController,initialEditor,editorFrom,createSettingsDraft,durationText,wallLabel,qualityText,createV2Bridge,validateContractRequest,fieldIssues,fieldMessage,createDefaultAppConfig,salaryMonthLabel} from '../../test-results/d11-ssr/components.mjs'
 const f=fixtures(),ok=data=>({ok:true,data}),fail=code=>({ok:false,error:{code,message:'fixture failure',...(code==='REVISION_CONFLICT'?{expectedRevision:1,actualRevision:2}:{})}})
+test('UI-02 excludes only field-owned errors and preserves group, legacy and indexed errors',()=>{
+  const fields=['$.schedule','$.schedule.startTime','$.schedule.startTimeExtra','$.schedule.breaks[0].endTime','$.salary.day']
+  const issues=fields.map(field=>Object.freeze({field,reason:'FORMAT',message:'invalid fixture'}))
+  assert.deepEqual(fieldIssues(issues,'$.schedule',['$.schedule.startTime']).map(issue=>issue.field),[fields[0],fields[2],fields[3]])
+  assert.deepEqual(fieldIssues(issues,'$.schedule.breaks').map(issue=>issue.field),[fields[3]])
+  assert.deepEqual(issues.map(issue=>issue.field),fields)
+})
+test('UI-02 renders field errors once while retaining genuine schedule and calendar errors',async()=>{
+  const issues=[['$.schedule.startTime','FORMAT'],['$.schedule.endTime','FORMAT'],['$.expectedEndTime','RANGE'],['$.employee.startDate','FORMAT'],['$.salary.day','RANGE'],['$.schedule','RANGE'],['$.schedule.breaks[0].endTime','DUPLICATE'],['$.calendar.enabledYears[0]','ENUM'],['$.calendar.overrides.2026-10-22','ENUM']].map(([field,reason])=>({field,reason,message:'本班次预计结束时间无效。'}))
+  const html=await renderSettings(initialEditor(),f.metadata,{issues})
+  assert.equal((html.match(/class="field-error"/g)||[]).length,issues.length)
+  assert.equal((html.match(/请输入 24 小时制 HH:MM（00:00–23:59），例如 08:30。/g)||[]).length,2)
+  assert.ok(html.includes('数值或时间区间超出允许范围。'))
+  assert.ok(html.includes('存在重复或冲突记录。'))
+  assert.ok(html.includes('本班次预计结束时间无效。'))
+  const controls=[...html.matchAll(/<(?:input|select)\b[^>]*aria-invalid="true"[^>]*>/g)].map(match=>match[0])
+  assert.ok(controls.length>=5)
+  for(const control of controls){
+    const describedBy=control.match(/aria-describedby="([^"]+)"/)?.[1]
+    assert.ok(describedBy,control)
+    for(const id of describedBy.split(' '))assert.equal(html.split(`id="${id}"`).length-1,1,id)
+  }
+})
+test('UI-02 keeps stable error IDs and drops invalid state and stale references after correction',async()=>{
+  const model=initialEditor(),issues=[{field:'$.schedule.startTime',reason:'FORMAT',message:'invalid fixture'}]
+  const first=await renderSettings(model,f.metadata,{issues}),again=await renderSettings(model,f.metadata,{issues}),valid=await renderSettings(model,f.metadata)
+  const input=html=>html.match(/<input\b[^>]*aria-label="上班时间"[^>]*>/)?.[0]
+  const errorId=input(first).match(/aria-describedby="[^"]* ([^"]+)"/)?.[1]
+  assert.ok(errorId)
+  assert.ok(input(again).includes(errorId))
+  assert.ok(!input(valid).includes(errorId))
+  assert.ok(!valid.includes('aria-invalid="true"'))
+  assert.ok(!valid.includes('class="field-error"'))
+  for(const match of valid.matchAll(/aria-describedby="([^"]+)"/g))for(const id of match[1].split(' '))assert.equal(valid.split(`id="${id}"`).length-1,1,id)
+})
 function harness({missing=false,saveFail=null,timers}={}){
   let session=missing?{saved:null,draft:{},dirty:false,issues:[],expectedRevision:0,save:{status:'idle'},configurationStatus:'missing'}:{...createSettingsDraft(f.config).data,configurationStatus:'ready'}
   const calls=[],api={settingsDraft:{read:async()=>ok(structuredClone(session)),update:async request=>{calls.push(['update',structuredClone(request)]);session={...session,draft:request.draft,dirty:true};return ok(structuredClone(session))},discard:async()=>{calls.push(['discard']);session=missing?{saved:null,draft:{},dirty:false,issues:[],expectedRevision:0,save:{status:'idle'},configurationStatus:'missing'}:{...createSettingsDraft(f.config).data,configurationStatus:'ready'};return ok(session)}},config:{save:async request=>{calls.push(['save',structuredClone(request)]);if(saveFail)return fail(saveFail);const config={...structuredClone(f.config),...structuredClone(request.settings),calendar:{...structuredClone(f.config.calendar),...structuredClone(request.settings.calendar)},revision:request.expectedRevision+1};session={...createSettingsDraft(config).data,configurationStatus:'ready'};return ok({config,warnings:[]})}}}
