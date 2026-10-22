@@ -12,18 +12,19 @@ const props = defineProps<{
   estimate?: string
   warning?: string
   compact?: boolean
+  hero?: boolean
 }>()
 const headingId = useId()
 const display = computed(() => countdownPresentation(props.state, props.text, props.target?.kind))
 </script>
 
 <template>
-  <section class="we-surface we-countdown" :class="{ 'we-countdown--compact': compact }" :aria-labelledby="headingId">
+  <section class="we-surface we-countdown" :class="{ 'we-countdown--compact': compact, 'we-countdown--hero': hero }" :aria-labelledby="headingId">
     <div class="we-countdown-header"><StatusBadge :state="state" /><slot name="actions"></slot></div>
     <div class="we-countdown-body">
       <div class="we-countdown-copy">
         <h2 :id="headingId">{{ display.heading }}</h2>
-        <output v-if="display.text !== null" class="we-countdown-value" role="timer" aria-live="off" :aria-label="display.heading">{{ display.text }}</output>
+        <output v-if="display.text !== null" class="we-countdown-value" role="timer" aria-live="off" :aria-label="hero ? display.heading+' '+display.text : display.heading"><template v-if="hero"><template v-for="(part,index) in display.text.split(':')" :key="index"><span class="we-time-part">{{ part }}</span><span v-if="index<2" class="we-time-separator" aria-hidden="true">:</span></template></template><template v-else>{{ display.text }}</template></output>
         <p v-else class="we-countdown-empty">{{ display.emptyLabel }}</p>
         <p v-if="target && display.text !== null" class="we-muted we-countdown-target">{{ target.kind === 'workStart' ? '上班' : '下班时间' }}：{{ [target.date, target.time].filter(Boolean).join(' ') }}</p>
       </div>
@@ -57,6 +58,15 @@ h2 { font-size: var(--we-text-title); font-weight: 600; }
 .we-countdown--compact .we-countdown-illustration { flex-basis: 36px; width: 36px; }
 .we-countdown--compact .we-countdown-empty { font-size: 14px; }
 .we-countdown--compact .we-countdown-hint { margin-top: var(--we-space-1); }
+.we-countdown--hero { padding:var(--we-space-4) var(--we-space-5);text-align:center; }
+.we-countdown--hero .we-countdown-header { justify-content:center; }
+.we-countdown--hero .we-countdown-body { margin-top:var(--we-space-2); }
+.we-countdown--hero h2 { color:var(--we-muted);font-size:var(--we-text-body);font-weight:500; }
+.we-countdown--hero .we-countdown-value { display:flex;justify-content:center;align-items:baseline;margin:var(--we-space-1) 0 var(--we-space-2);font-size:clamp(40px,15cqi,80px);font-weight:700;line-height:1.08;letter-spacing:-.03em;overflow-wrap:normal; }
+.we-countdown--hero .we-time-part { flex:none; }
+.we-countdown--hero .we-time-separator { color:var(--we-muted);font-weight:400; }
+.we-countdown--hero .we-countdown-hint { margin-top:var(--we-space-3); }
+.we-countdown--hero .we-countdown-notices { display:grid;justify-items:center;gap:var(--we-space-1); }
 @container (max-width: 440px) {
   .we-countdown-illustration { flex-basis: 80px; width: 80px; }
   .we-countdown--compact .we-countdown-illustration { flex-basis: 36px; width: 36px; }

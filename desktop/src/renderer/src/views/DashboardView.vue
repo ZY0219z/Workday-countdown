@@ -9,16 +9,15 @@ import { durationText, wallLabel, qualityText, affectedWarnings } from '../ui/da
 const props=withDefaults(defineProps<{snapshot:DashboardSnapshot|null;motionAllowed?:boolean}>(),{motionAllowed:false})
 const animated=computed(()=>fishCanAnimate(props.snapshot?.state,props.snapshot?.progress?.percent,props.motionAllowed))
 const target=computed(()=>{const s=props.snapshot;if(!s?.countdown)return null;const wall=wallLabel(s.countdown.targetAt,s.timeZoneId);return wall?{kind:s.countdown.target,...wall}:null})
-const percentage=computed(()=>props.snapshot?.progress?.percent.toFixed(1).replace(/\.0$/,'')??null)
 const salaryDescription=computed(()=>{const salary=props.snapshot?.salary;if(!salary)return '';return `${salary.days===0?'今天计划发薪 · ':''}${salary.actualDate}`})
 const salaryWarning=computed(()=>{const s=props.snapshot;if(!s)return '';return [s.salaryAmbiguity?'多个名义周期重合，未选择唯一归属；请检查发薪策略与日历':'',affectedWarnings(s,'salary')].filter(Boolean).join('；')})
 const estimate=computed(()=>props.snapshot?.countdown?.quality.approximate?qualityText(props.snapshot.countdown.quality):'')
 </script>
 <template>
   <section class="dashboard" aria-label="工作日仪表盘">
-    <CountdownCard :state="snapshot?.state || 'incomplete'" :text="durationText(snapshot?.countdown?.seconds)" :target="target" :estimate="estimate" :warning="snapshot ? affectedWarnings(snapshot,'countdown') : '暂时无法计算，请查看设置。'" hint="摸鱼一小步，下班一大步" />
+    <CountdownCard hero :state="snapshot?.state || 'incomplete'" :text="durationText(snapshot?.countdown?.seconds)" :target="target" :estimate="estimate" :warning="snapshot ? affectedWarnings(snapshot,'countdown') : '暂时无法计算，请查看设置。'" hint="摸鱼一小步，下班一大步" />
     <section class="we-surface dashboard-progress" aria-label="今日工作进度">
-      <div class="dashboard-progress-heading"><h2>今日工作进度</h2><strong>{{ percentage===null?'无工作进度':percentage+'%' }}</strong></div>
+      <div class="dashboard-progress-heading"><h2>今日工作进度</h2></div>
       <FishProgress :percent="snapshot?.progress?.percent??null" :animate="animated" />
       <p v-if="!snapshot?.progress" class="we-muted">无有效班次或暂不可计算，不代表 0%</p>
       <p v-if="snapshot?.progress?.quality.approximate" class="dashboard-warning">{{ qualityText(snapshot.progress.quality) }}</p>
@@ -28,18 +27,16 @@ const estimate=computed(()=>props.snapshot?.countdown?.quality.approximate?quali
     <div class="dashboard-metrics">
       <MetricCard title="下个休息日" :value="snapshot?.nextRest?.days??null" unit="天" :description="snapshot?.nextRest ? (snapshot.nextRest.days===0?'今天休息 · ':'')+snapshot.nextRest.date : '未来查询范围内暂无可用结果'" :source="snapshot?.nextRest?.quality.approximate?qualityText(snapshot.nextRest.quality):''" :estimated="snapshot?.nextRest?.quality.approximate" :warning="snapshot ? affectedWarnings(snapshot,'nextRest'):''" />
       <MetricCard title="下次计划发薪" :value="snapshot?.salary?.days??null" unit="天" :empty-label="snapshot?.salaryAmbiguity?'发薪周期存在歧义':'暂无计划日期'" :description="salaryDescription" :source="snapshot?.salary?.quality.approximate?qualityText(snapshot.salary.quality):''" :estimated="snapshot?.salary?.quality.approximate" :warning="salaryWarning" />
-      <MetricCard title="在职自然日" :value="snapshot?.employment.elapsedNaturalDays??null" unit="天" :description="snapshot?.employment.status==='notStarted'?'尚未入职':snapshot?.employment.status==='unset'?'尚未设置入职日期':''" />
+      <MetricCard title="已工作" :value="snapshot?.employment.elapsedNaturalDays??null" unit="天" :description="snapshot?.employment.status==='notStarted'?'尚未入职':snapshot?.employment.status==='unset'?'尚未设置入职日期':''" />
     </div>
   </section>
 </template>
 <style scoped>
 .dashboard { display:grid;gap:var(--we-space-3);container-type:inline-size; }
 .dashboard-progress { padding:var(--we-space-3) var(--we-space-4); }
-.dashboard-progress-heading { display:flex;justify-content:space-between;gap:var(--we-space-3);align-items:center; }
+.dashboard-progress-heading { text-align:center; }
 h2 { font-size:var(--we-text-body); }
-strong { color:var(--we-accent);font-variant-numeric:tabular-nums; }
 .dashboard-metrics { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--we-space-3); }
 .dashboard-warning { font-size:var(--we-text-small);color:var(--we-warning-text);overflow-wrap:anywhere; }
-@media (max-width:639px) { .dashboard-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-@media (max-width:519px) { .dashboard-metrics { grid-template-columns:minmax(0,1fr); } }
+@media (max-width:439px) { .dashboard-metrics { grid-template-columns:minmax(0,1fr); } }
 </style>

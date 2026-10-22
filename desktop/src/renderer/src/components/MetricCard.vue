@@ -32,9 +32,9 @@ const display = computed(() => metricValue(props.value))
 </template>
 
 <style scoped>
-.we-metric { min-width: 0; padding: var(--we-space-4); }
+.we-metric { min-width:0;min-height:112px;padding:var(--we-space-4);display:flex;flex-direction:column;align-items:center;gap:var(--we-space-1);text-align:center; }
 h2 { font-size: var(--we-text-body); font-weight: 600; overflow-wrap: anywhere; }
-.we-metric-value { margin: var(--we-space-1) 0; font: 650 var(--we-text-metric)/1.4 var(--we-font-numeric); font-variant-numeric: tabular-nums; color: var(--we-accent); overflow-wrap: anywhere; }
+.we-metric-value { margin:0;font:650 32px/1.25 var(--we-font-numeric);font-variant-numeric:tabular-nums;color:var(--we-accent);overflow-wrap:anywhere;max-width:100%; }
 .we-metric-unit { font: 400 var(--we-text-body)/1.5 var(--we-font); color: var(--we-muted); }
 .we-metric-empty { margin: var(--we-space-2) 0; font-size: var(--we-text-body); font-weight: 600; }
 .we-metric-warning { color: var(--we-warning-text); font-size: var(--we-text-small); margin-top: var(--we-space-1); overflow-wrap: anywhere; }
