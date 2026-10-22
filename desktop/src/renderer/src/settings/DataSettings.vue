@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import type { ImportField, ImportPreview, JsonValue, MainWindowApi, MigrationSource } from '../../../shared/contracts'
-const props=defineProps<{api:MainWindowApi;blocked:boolean}>()
+const props=withDefaults(defineProps<{api:MainWindowApi;blocked:boolean;recoveryOnly?:boolean}>(),{recoveryOnly:false})
 const emit=defineEmits<{applied:[];busy:[value:boolean]}>()
-const kind=ref<MigrationSource>('python-v1'),preview=shallowRef<ImportPreview|null>(null),selected=ref<ImportField[]>([]),shiftDate=ref(''),reapply=ref(false),busy=ref(false),message=ref(''),failed=ref(false)
+const kind=ref<MigrationSource>(props.recoveryOnly?'v2':'python-v1'),preview=shallowRef<ImportPreview|null>(null),selected=ref<ImportField[]>([]),shiftDate=ref(''),reapply=ref(false),busy=ref(false),message=ref(''),failed=ref(false)
 watch(busy,value=>emit('busy',value),{flush:'sync'})
 const labels:Record<ImportField,string>={
   'employee.startDate':'入职日期','schedule.workWeek':'每周工作日','schedule.startTime':'上班时间','schedule.endTime':'下班时间','schedule.crossMidnight':'跨夜班次','schedule.breaks':'午休 / 休息区间','salary.day':'每月发薪日','salary.nonWorkingPolicy':'非工作日发薪策略','salary.missingDayPolicy':'短月处理','salary.showPaydayAsToday':'发薪当天提示','overtime.entries':'按班次日期的加班记录','calendar.region':'日历地区','calendar.enabledYears':'启用年度','calendar.overrides':'自定义日期覆盖','appearance.mode':'显示模式','appearance.accent':'主题配色','appearance.reduceMotion':'减少动画','desktop.closeAction':'关闭窗口偏好','desktop.miniEnabled':'迷你窗口偏好','desktop.alwaysOnTop':'迷你置顶偏好','desktop.displayMode':'窗口切换方式','desktop.bounds':'窗口位置','desktop.tray.firstHideNoticeAcknowledged':'首次托盘提示状态'
@@ -40,10 +40,10 @@ onBeforeUnmount(()=>{if(preview.value)void props.api.data.cancelImport({previewT
 </script>
 <template>
   <section class="data-settings" aria-label="数据导入导出与恢复">
-    <h3>数据导入、导出与恢复</h3><p class="we-muted">先只读预览，再明确选择字段确认。Python / POC来源分别选择，不自动合并、不修改源文件。首次未初始化时，完整V2可导入恢复；不完整旧配置需先完成首次设置。</p>
+    <h3>{{ recoveryOnly?'安全恢复':'数据导入、导出与恢复' }}</h3><p v-if="recoveryOnly" class="we-muted">先只读预览，再确认要恢复的字段。只有校验通过后才可应用，不强制覆盖原文件。</p><p v-else class="we-muted">先只读预览，再明确选择字段确认。Python / POC来源分别选择，不自动合并、不修改源文件。首次未初始化时，完整V2可导入恢复；不完整旧配置需先完成首次设置。</p>
     <p v-if="blocked" class="data-warning">请先保存或明确放弃当前设置草稿，再进行数据操作。</p>
-    <label>导入来源<select v-model="kind" class="we-control" :disabled="busy||!!preview"><option value="python-v1">Python V1</option><option value="electron-poc">Electron POC</option><option value="v2">正式 V2 配置</option></select></label>
-    <div class="data-actions"><button type="button" class="we-button" :disabled="busy||blocked" @click="open(false)">选择配置并预览</button><button type="button" class="we-button" :disabled="busy||blocked" @click="open(true)">预览最近有效备份</button><button type="button" class="we-button" :disabled="busy||blocked" @click="exportSaved">导出已保存配置</button></div>
+    <label v-if="!recoveryOnly">导入来源<select v-model="kind" class="we-control" :disabled="busy||!!preview"><option value="python-v1">Python V1</option><option value="electron-poc">Electron POC</option><option value="v2">正式 V2 配置</option></select></label>
+    <div class="data-actions"><button type="button" class="we-button" :disabled="busy||blocked" @click="open(false)">{{ recoveryOnly?'预览完整 V2 配置':'选择配置并预览' }}</button><button type="button" class="we-button" :disabled="busy||blocked" @click="open(true)">预览最近有效备份</button><button v-if="!recoveryOnly" type="button" class="we-button" :disabled="busy||blocked" @click="exportSaved">导出已保存配置</button></div>
     <section v-if="preview" class="data-preview" aria-label="导入预览">
       <h4>请选择要应用的字段</h4><p class="we-muted">应用前将校验并备份，未选字段保留现有值。迷你窗需启用后主动进入，每次启动仍打开主窗口。</p>
       <div v-for="choice in preview.choices" :key="choice.field" class="data-choice">

@@ -1,32 +1,24 @@
 <script setup lang="ts">
 import { computed, ref, useId, watch } from 'vue'
-import type { CalendarDatasetMetadata, ValidationIssue, ExpectedEndContext } from '../../../shared/contracts'
+import type { CalendarDatasetMetadata, ValidationIssue, ExpectedEndContext, MainWindowApi } from '../../../shared/contracts'
 import type { EditorSettings } from '../ui/settings-editor'
 import { fieldIssues } from '../ui/settings-editor'
 import FieldErrors from '../components/FieldErrors.vue'
 import TimeInput from '../components/TimeInput.vue'
 import DataSettings from '../settings/DataSettings.vue'
-import type { MainWindowApi } from '../../../shared/contracts'
-import { normalizeLocalDate } from '../../../domain/local-date'
 const props=withDefaults(defineProps<{model:EditorSettings;expectedEnd?:ExpectedEndContext|null;expectedEndInput?:string;issues:ValidationIssue[];busy:boolean;dirty:boolean;initialized:boolean;canSave:boolean;sessionReady?:boolean;quitDisabled?:boolean;defaultUnpersisted?:boolean;validationAttempt?:number;metadata:CalendarDatasetMetadata[];api:MainWindowApi}>(),{sessionReady:true,defaultUnpersisted:false,validationAttempt:0})
 const emit=defineEmits<{change:[value:EditorSettings];save:[];cancel:[];quit:[];imported:[];dataBusy:[value:boolean];expectedEnd:[value:string|null]}>()
+// Keep the complete acknowledged draft, including fields absent from this form.
 const form=ref<EditorSettings>(JSON.parse(JSON.stringify(props.model)))
-// Main acknowledgements must not replace equal local input on every keystroke.
 watch(()=>props.model,value=>{if(JSON.stringify(value)!==JSON.stringify(form.value))form.value=JSON.parse(JSON.stringify(value))})
-const moreOpen=ref(false),active=ref('calendar'), date=ref(''),kind=ref<'work'|'rest'>('rest'),dateError=ref('')
-const groups=[['calendar','工作日历'],['appearance','外观主题'],['desktop','窗口与托盘'],['data','数据与恢复']]
 const errorPrefix=useId()
 const errorId=(path:string)=>`${errorPrefix}-${path.replace(/[^a-zA-Z0-9-]/g,'-')}-errors`
 const hasErrors=(path:string)=>fieldIssues(props.issues,path).length>0
 const errorDescription=(path:string)=>hasErrors(path)?errorId(path):undefined
-// Jump only on explicit failed Save, never during typing/group navigation.
-watch(()=>props.validationAttempt,()=>{const field=props.issues[0]?.field.split('.')[1];if(groups.some(group=>group[0]===field)){active.value=field;moreOpen.value=true}})
 const days=['周一','周二','周三','周四','周五','周六','周日']
-// Hidden legacy fields remain in the full draft; these labels never normalize it.
 const customWorkWeek=computed(()=>form.value.schedule.workWeek.length!==5||([1,2,3,4,5] as const).some(day=>!form.value.schedule.workWeek.includes(day)))
 const workWeekLabel=computed(()=>form.value.schedule.workWeek.map(day=>days[day-1]).join('、')||'无固定工作日')
 function update(){emit('change',JSON.parse(JSON.stringify(form.value)))}
-function addOverride(){const valid=normalizeLocalDate(date.value);if(!valid.ok){dateError.value='请选择真实有效的日期。';return}form.value.calendar.overrides[valid.data]=kind.value;dateError.value='';update()}
 function numeric(event:Event):number|null{const value=(event.target as HTMLInputElement).value;return value===''?null:Number(value)}
 </script>
 <template>
@@ -34,92 +26,72 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
     <h2>{{ !sessionReady?'设置暂不可用':canSave?'设置中心':'配置恢复' }}</h2>
     <p v-if="!sessionReady" role="alert">尚未读取 Main 草稿，请先重新连接配置；当前不能编辑或保存。</p>
     <form @submit.prevent="emit('save')">
-      <fieldset :disabled="busy||!sessionReady" class="settings-fields">
-        <div class="settings-common">
-        <section class="settings-panel settings-schedule" aria-label="时间与日程">
+      <fieldset :disabled="busy||!sessionReady||!canSave" class="settings-fields">
+        <section class="settings-panel" aria-label="时间与日程">
           <h3>时间与日程</h3>
-          <div class="settings-time-pair"><div><TimeInput v-model="form.schedule.startTime" label="上班时间" :invalid="hasErrors('$.schedule.startTime')" :described-by="errorDescription('$.schedule.startTime')" @update:model-value="update" />
-          <FieldErrors :id="errorId('$.schedule.startTime')" :issues="issues" path="$.schedule.startTime" /></div><div>
-          <TimeInput v-model="form.schedule.endTime" label="下班时间" :invalid="hasErrors('$.schedule.endTime')" :described-by="errorDescription('$.schedule.endTime')" @update:model-value="update" />
-          <FieldErrors :id="errorId('$.schedule.endTime')" :issues="issues" path="$.schedule.endTime" /></div></div>
-          <div class="settings-expected"><fieldset :disabled="!expectedEnd?.available" class="settings-expected-fields">
-            <TimeInput :model-value="expectedEndInput||''" label="今天预计下班时间" :invalid="hasErrors('$.expectedEndTime')" :described-by="errorDescription('$.expectedEndTime')" @update:model-value="value=>emit('expectedEnd',value)" />
-            <button type="button" class="we-button" @click="emit('expectedEnd',null)">取消今天加班</button>
-          </fieldset>
-          <p class="we-muted">仅本班次有效，下一个工作日恢复正常下班时间。较早时刻按正常下班的次日解释。</p>
-          <p v-if="expectedEnd?.available" class="we-muted">本班次 {{ expectedEnd.shiftDate }} · 正常结束 {{ expectedEnd.normalEnd.date }} {{ expectedEnd.normalEnd.time }}<template v-if="expectedEnd.minutes>0"> · 现有预计结束 {{ expectedEnd.finalEnd.date }} {{ expectedEnd.finalEnd.time }}</template></p>
-          <p v-else class="we-muted">{{ expectedEnd&&!expectedEnd.available?expectedEnd.message:'正在确认当前班次…' }}</p>
-          <p v-if="expectedEnd?.available&&expectedEnd.previewEnd" class="we-muted">本次预计结束：{{ expectedEnd.previewEnd.date }} {{ expectedEnd.previewEnd.time }}（保存后生效）</p>
-          <FieldErrors :id="errorId('$.expectedEndTime')" :issues="issues" path="$.expectedEndTime" /></div>
+          <div class="settings-pair">
+            <div><TimeInput v-model="form.schedule.startTime" label="上班时间" :invalid="hasErrors('$.schedule.startTime')" :described-by="errorDescription('$.schedule.startTime')" @update:model-value="update" /><FieldErrors :id="errorId('$.schedule.startTime')" :issues="issues" path="$.schedule.startTime" /></div>
+            <div><TimeInput v-model="form.schedule.endTime" label="下班时间" :invalid="hasErrors('$.schedule.endTime')" :described-by="errorDescription('$.schedule.endTime')" @update:model-value="update" /><FieldErrors :id="errorId('$.schedule.endTime')" :issues="issues" path="$.schedule.endTime" /></div>
+          </div>
+          <div class="settings-expected">
+            <fieldset :disabled="!expectedEnd?.available" class="settings-expected-fields">
+              <TimeInput :model-value="expectedEndInput||''" label="今天预计下班时间" :invalid="hasErrors('$.expectedEndTime')" :described-by="errorDescription('$.expectedEndTime')" @update:model-value="value=>emit('expectedEnd',value)" />
+              <button type="button" class="we-button" @click="emit('expectedEnd',null)">取消今天加班</button>
+            </fieldset>
+            <p class="we-muted">仅本班次有效，下一个工作日恢复正常下班时间。较早时刻按正常下班的次日解释。</p>
+            <p v-if="expectedEnd?.available" class="we-muted">本班次 {{ expectedEnd.shiftDate }} · 正常结束 {{ expectedEnd.normalEnd.date }} {{ expectedEnd.normalEnd.time }}<template v-if="expectedEnd.minutes>0"> · 现有预计结束 {{ expectedEnd.finalEnd.date }} {{ expectedEnd.finalEnd.time }}</template></p>
+            <p v-else class="we-muted">{{ expectedEnd&&!expectedEnd.available?expectedEnd.message:'正在确认当前班次…' }}</p>
+            <p v-if="expectedEnd?.available&&expectedEnd.previewEnd" class="we-muted">本次预计结束：{{ expectedEnd.previewEnd.date }} {{ expectedEnd.previewEnd.time }}（保存后生效）</p>
+            <FieldErrors :id="errorId('$.expectedEndTime')" :issues="issues" path="$.expectedEndTime" />
+          </div>
           <p v-if="form.schedule.crossMidnight" class="we-muted">保留历史跨夜班次，下班在次日。</p>
           <p v-if="customWorkWeek" class="we-muted">保留历史工作周：{{ workWeekLabel }}；仍按原规则计算。</p>
           <p v-if="form.schedule.breaks.length" class="we-muted">保留了历史午休配置，仍按原规则计算；修改其他设置不会清除它。</p>
           <FieldErrors :issues="issues" path="$.schedule" :exclude-paths="['$.schedule.startTime','$.schedule.endTime']" />
         </section>
-        <section class="settings-panel">
-          <h3>入职日期</h3><label>入职日期<input :value="form.employee.startDate||''" type="date" class="we-control" :aria-invalid="hasErrors('$.employee.startDate')||undefined" :aria-describedby="errorDescription('$.employee.startDate')" @input="form.employee.startDate=($event.target as HTMLInputElement).value||null;update()" /></label>
-          <FieldErrors :id="errorId('$.employee.startDate')" :issues="issues" path="$.employee.startDate" />
-          <p class="we-muted">可留空。不含今天，入职当天为 0；计划工作日并非实际出勤。</p><FieldErrors :issues="issues" path="$.employee" :exclude-paths="['$.employee.startDate']" />
-        </section>
-        <section class="settings-panel">
-          <h3>计划发薪</h3><label>每月发薪日<input :value="form.salary.day??''" type="number" min="1" max="31" step="1" class="we-control" :aria-invalid="hasErrors('$.salary.day')||undefined" :aria-describedby="errorDescription('$.salary.day')" @input="form.salary.day=numeric($event);update()" /></label>
-          <FieldErrors :id="errorId('$.salary.day')" :issues="issues" path="$.salary.day" />
-          <p v-if="form.salary.nonWorkingPolicy!=='delay'" class="we-muted">保留历史发薪策略：{{ form.salary.nonWorkingPolicy==='advance'?'提前至上一个工作日':'休息日不调整' }}。</p>
-          <p v-else class="we-muted">每月发上月工资，遇休息日按工作日历顺延。</p><FieldErrors :issues="issues" path="$.salary" :exclude-paths="['$.salary.day']" />
-        </section>
+        <div class="settings-pair settings-personal">
+          <section class="settings-panel"><label>入职日期<input :value="form.employee.startDate||''" type="date" class="we-control" :aria-invalid="hasErrors('$.employee.startDate')||undefined" :aria-describedby="errorDescription('$.employee.startDate')" @input="form.employee.startDate=($event.target as HTMLInputElement).value||null;update()" /></label>
+            <FieldErrors :id="errorId('$.employee.startDate')" :issues="issues" path="$.employee.startDate" /><p class="we-muted">可留空。按自然日计算，不含今天；入职当天为 0。</p><FieldErrors :issues="issues" path="$.employee" :exclude-paths="['$.employee.startDate']" />
+          </section>
+          <section class="settings-panel"><label>每月发薪日<input :value="form.salary.day??''" type="number" min="1" max="31" step="1" class="we-control" :aria-invalid="hasErrors('$.salary.day')||undefined" :aria-describedby="errorDescription('$.salary.day')" @input="form.salary.day=numeric($event);update()" /></label>
+            <FieldErrors :id="errorId('$.salary.day')" :issues="issues" path="$.salary.day" />
+            <p v-if="form.salary.nonWorkingPolicy!=='delay'" class="we-muted">保留历史发薪策略：{{ form.salary.nonWorkingPolicy==='advance'?'提前至上一个工作日':'休息日不调整' }}。</p><p v-else class="we-muted">每月发上月工资，遇休息日按工作日历顺延。</p><FieldErrors :issues="issues" path="$.salary" :exclude-paths="['$.salary.day']" />
+          </section>
         </div>
-        <details class="settings-more" :open="moreOpen" @toggle="moreOpen=($event.target as HTMLDetailsElement).open"><summary>更多设置</summary>
-    <label class="settings-group-label">设置分组 <select v-model="active" :disabled="busy||!sessionReady" class="we-control"><option v-for="group in groups" :key="group[0]" :value="group[0]">{{ group[1] }}</option></select></label>
-        <section v-if="active==='calendar'" class="settings-panel">
-          <h3>离线工作日历</h3><p class="we-muted">优先级：自定义日期 > 已核验年度安排 > 每周规则。缺少年份按周规则估算，不冒充官方数据。</p>
-          <label v-for="item in metadata" :key="item.year" class="we-check calendar-year"><input v-model="form.calendar.enabledYears" type="checkbox" :value="item.year" :aria-invalid="hasErrors('$.calendar.enabledYears')||undefined" :aria-describedby="errorDescription('$.calendar.enabledYears')" @change="update" /><span>{{ item.year }} · {{ item.version }} · {{ item.verification==='verified'?'已核验':'未核验' }}<small>{{ item.source }} · 发布 {{ item.publishedOn }}</small></span></label>
-          <FieldErrors :id="errorId('$.calendar.enabledYears')" :issues="issues" path="$.calendar.enabledYears" />
-          <div class="settings-record"><label>覆盖日期<input v-model="date" type="date" class="we-control" :aria-invalid="!!dateError||undefined" :aria-describedby="dateError?errorId('override-date'):undefined" /></label><label>此日安排<select v-model="kind" class="we-control"><option value="work">工作</option><option value="rest">休息</option></select></label><button type="button" class="we-button" @click="addOverride">{{ form.calendar.overrides[date]?'更新此日覆盖':'添加日期覆盖' }}</button><p v-if="dateError" :id="errorId('override-date')" role="alert">{{ dateError }}</p></div>
-          <div v-for="(value,key) in form.calendar.overrides" :key="key" class="settings-override"><span>{{ key }} · 自定义{{ value==='work'?'工作':'休息' }}</span><button type="button" class="we-button" @click="delete form.calendar.overrides[key];update()">删除 {{ key }} 覆盖</button></div>
-          <p class="we-muted">删除覆盖后恢复年度安排 / 每周规则。</p><FieldErrors :issues="issues" path="$.calendar" :exclude-paths="['$.calendar.enabledYears']" />
-          <p class="settings-deferred">外部年度日历包手动导入暂未开放；内置日历和手动日期覆盖可正常使用。</p>
-        </section>
-        <section v-if="active==='appearance'" class="settings-panel">
-          <h3>外观主题</h3><label>显示模式<select v-model="form.appearance.mode" aria-label="显示模式" class="we-control" :aria-invalid="hasErrors('$.appearance.mode')||undefined" :aria-describedby="errorDescription('$.appearance.mode')" @change="update"><option value="system">跟随系统</option><option value="light">亮色</option><option value="dark">深色</option></select></label>
-          <FieldErrors :id="errorId('$.appearance.mode')" :issues="issues" path="$.appearance.mode" />
-          <label>配色<select v-model="form.appearance.accent" aria-label="配色" class="we-control" :aria-invalid="hasErrors('$.appearance.accent')||undefined" :aria-describedby="errorDescription('$.appearance.accent')" @change="update"><option value="ocean">海蓝</option><option value="coral">珊瑚</option></select></label>
-          <FieldErrors :id="errorId('$.appearance.accent')" :issues="issues" path="$.appearance.accent" />
-          <label class="we-check"><input v-model="form.appearance.reduceMotion" type="checkbox" :aria-invalid="hasErrors('$.appearance.reduceMotion')||undefined" :aria-describedby="errorDescription('$.appearance.reduceMotion')" @change="update" />减少动画</label>
-          <FieldErrors :id="errorId('$.appearance.reduceMotion')" :issues="issues" path="$.appearance.reduceMotion" />
-          <p class="we-muted">即时预览；取消或放弃恢复已保存主题。系统或应用任一减少动画设置生效，暂停动画并保留静态形象。</p><FieldErrors :issues="issues" path="$.appearance" :exclude-paths="['$.appearance.mode','$.appearance.accent','$.appearance.reduceMotion']" />
-        </section>
-        <section v-if="active==='desktop'" class="settings-panel">
-          <h3>窗口与托盘偏好</h3><label>关闭主窗口<select v-model="form.desktop.closeAction" class="we-control" :aria-invalid="hasErrors('$.desktop.closeAction')||undefined" :aria-describedby="errorDescription('$.desktop.closeAction')" @change="update"><option value="hideToTray">隐藏到托盘</option><option value="quit">退出程序</option></select></label>
-          <FieldErrors :id="errorId('$.desktop.closeAction')" :issues="issues" path="$.desktop.closeAction" />
-          <label class="we-check"><input v-model="form.desktop.miniEnabled" type="checkbox" :aria-invalid="hasErrors('$.desktop.miniEnabled')||undefined" :aria-describedby="errorDescription('$.desktop.miniEnabled')" @change="update" />启用迷你窗</label>
+        <section class="settings-panel settings-mini">
+          <label class="settings-mini-label"><span><strong>启用迷你模式</strong><small :id="errorPrefix+'-mini-hint'">保存后，点击主窗口右上角“迷你模式”进入。</small></span><input v-model="form.desktop.miniEnabled" type="checkbox" role="switch" aria-label="启用迷你模式" class="settings-switch" :aria-invalid="hasErrors('$.desktop.miniEnabled')||undefined" :aria-describedby="[errorPrefix+'-mini-hint',errorDescription('$.desktop.miniEnabled')].filter(Boolean).join(' ')" @change="update" /></label>
           <FieldErrors :id="errorId('$.desktop.miniEnabled')" :issues="issues" path="$.desktop.miniEnabled" />
-          <label class="we-check"><input v-model="form.desktop.alwaysOnTop" type="checkbox" :aria-invalid="hasErrors('$.desktop.alwaysOnTop')||undefined" :aria-describedby="errorDescription('$.desktop.alwaysOnTop')" @change="update" />迷你窗置顶偏好</label>
-          <FieldErrors :id="errorId('$.desktop.alwaysOnTop')" :issues="issues" path="$.desktop.alwaysOnTop" />
-          <p class="settings-deferred">关闭行为按已保存设置执行；隐藏到托盘保留输入，托盘“退出程序”仍保护未保存设置。最小化保留任务栏。托盘不可用时不会隐藏。迷你窗启用并保存后，可从主窗口或托盘主动进入；每次启动仍打开主窗口。拖动位置随下次保存设置记住；置顶按钮本次操作不自动写入偏好。</p><FieldErrors :issues="issues" path="$.desktop" :exclude-paths="['$.desktop.closeAction','$.desktop.miniEnabled','$.desktop.alwaysOnTop']" />
         </section>
-        <section v-if="active==='data'" class="settings-panel"><DataSettings :api="api" :blocked="dirty||busy" @applied="emit('imported')" @busy="value=>emit('dataBusy',value)" /></section>
-        </details>
       </fieldset>
-      <div class="settings-actions"><button type="submit" class="we-button we-button--primary" :disabled="busy||!canSave">{{ busy?'正在保存…':'保存设置' }}</button><button type="button" class="we-button" :disabled="busy||!sessionReady" @click="emit('cancel')">取消 / 返回仪表盘</button><button type="button" class="we-button" :disabled="busy||quitDisabled" @click="emit('quit')">退出程序</button><span class="we-muted">{{ !sessionReady?'草稿状态未知，尚未读取':dirty?'有未保存修改':defaultUnpersisted?'默认设置尚未保存':'没有未保存修改' }}</span></div>
-      <p v-if="sessionReady&&!canSave" class="settings-deferred">当前正式配置不可写，请到“数据与恢复”预览完整V2配置或有效备份；不会覆盖损坏或较新版本。</p>
+      <FieldErrors :issues="issues" path="$.calendar" /><FieldErrors :issues="issues" path="$.appearance" /><FieldErrors :issues="issues" path="$.desktop" :exclude-paths="['$.desktop.miniEnabled']" />
+      <div class="settings-actions"><button type="submit" class="we-button we-button--primary" :disabled="busy||!canSave||!sessionReady">{{ busy?'正在保存…':'保存设置' }}</button><button type="button" class="we-button" :disabled="busy||!sessionReady" @click="emit('cancel')">取消 / 返回仪表盘</button><button type="button" class="we-button" :disabled="busy||quitDisabled" @click="emit('quit')">退出程序</button><span class="we-muted">{{ !sessionReady?'草稿状态未知，尚未读取':dirty?'有未保存修改':defaultUnpersisted?'默认设置尚未保存':'没有未保存修改' }}</span></div>
     </form>
+    <section v-if="sessionReady&&!canSave" class="settings-recovery" aria-label="配置安全恢复">
+      <p class="settings-deferred">当前配置只读，不能直接保存覆盖。可先预览有效备份或完整 V2 配置，再按校验结果确认恢复；损坏或较新版本源文件仍受保护。</p>
+      <DataSettings recovery-only :api="api" :blocked="dirty||busy" @applied="emit('imported')" @busy="value=>emit('dataBusy',value)" />
+    </section>
   </section>
 </template>
 <style scoped>
-.settings { display:grid;gap:var(--we-space-4); }
-h2 { font-size:22px; } h3 { font-size:var(--we-text-title); }
-.settings-group-label { display:flex;align-items:center;gap:var(--we-space-2);flex-wrap:wrap; }
-.settings-fields { border:0;padding:0;margin:0;min-width:0;display:grid;gap:var(--we-space-4); }
-.settings-common { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--we-space-4);align-items:start; }.settings-schedule { grid-column:1 / -1; }.settings-time-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--we-space-2);}.settings-more{border-top:1px solid var(--we-border);padding-top:var(--we-space-3)}summary{cursor:pointer;min-height:36px;line-height:36px;font-weight:600}.settings-more[open]{display:grid;gap:var(--we-space-3)}
-.settings-expected-fields { border:0;padding:0;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--we-space-2);align-items:end; }.settings-expected-fields > .we-button { align-self:center; }.settings-expected .we-muted{margin-top:var(--we-space-1)}
-.settings-panel { display:grid;gap:var(--we-space-3); }
-.settings-panel > label:not(.we-check), .settings-record > label { display:grid;gap:var(--we-space-1); }
-.settings-panel .we-control { max-width:100%;width:100%; }
-fieldset { border:1px solid var(--we-border);border-radius:var(--we-radius-control);min-width:0; }
-.settings-record { border:1px solid var(--we-border);border-radius:var(--we-radius-control);padding:var(--we-space-3);display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--we-space-2); }
-.settings-actions { display:flex;gap:var(--we-space-2);flex-wrap:wrap;align-items:center;margin-top:var(--we-space-5);padding-top:var(--we-space-3);border-top:1px solid var(--we-border); }
-.settings-deferred { color:var(--we-warning-text);font-size:var(--we-text-small); }
-.settings-override { display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--we-space-2); }
-.calendar-year { align-items:flex-start; }.calendar-year small { display:block;font-size:var(--we-text-small);color:var(--we-muted);overflow-wrap:anywhere; }
-@media(max-width:520px){.settings-record,.settings-common,.settings-time-pair,.settings-expected-fields{grid-template-columns:minmax(0,1fr)}}
+.settings { display:grid;gap:var(--we-space-5); }
+h2 { font-size:22px;letter-spacing:-.02em; } h3 { font-size:15px; }
+.settings-fields { border:0;padding:0;margin:0;min-width:0;display:grid;gap:var(--we-space-5); }
+.settings-pair { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--we-space-4);align-items:start; }
+.settings-panel { display:grid;gap:var(--we-space-2);min-width:0; }
+.settings-panel > label:not(.settings-mini-label) { display:grid;gap:var(--we-space-1);font-weight:600; }
+.settings-panel .we-control { width:100%;max-width:100%;font-weight:400; }
+.settings-expected { padding:var(--we-space-3);border-radius:var(--we-radius-card);background:var(--we-subtle);display:grid;gap:var(--we-space-1); }
+.settings-expected-fields { border:0;padding:0;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--we-space-2);align-items:end; }
+.settings-expected-fields > button { align-self:center; }
+.settings-mini { padding:var(--we-space-4) 0;border-top:1px solid var(--we-border);border-bottom:1px solid var(--we-border); }
+.settings-mini-label { display:flex;align-items:center;justify-content:space-between;gap:var(--we-space-4);cursor:pointer; }
+.settings-mini-label small { display:block;color:var(--we-muted);font-size:var(--we-text-small);margin-top:4px; }
+.settings-switch { appearance:none;flex:none;width:42px;height:24px;margin:0;border:1px solid var(--we-control-border);border-radius:20px;background:var(--we-track);position:relative;cursor:pointer; }
+.settings-switch::before { content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:var(--we-surface);box-shadow:0 1px 3px rgb(0 0 0 / 16%); }
+.settings-switch:checked { background:var(--we-button);border-color:var(--we-button); }.settings-switch:checked::before { transform:translateX(18px); }
+.settings-actions { display:flex;gap:var(--we-space-2);flex-wrap:wrap;align-items:center;margin-top:var(--we-space-4); }
+.settings-actions .we-button--primary:disabled { background:var(--we-subtle);color:var(--we-muted);border-color:var(--we-border); }
+.settings-deferred { color:var(--we-warning-text);font-size:var(--we-text-small); }.settings-recovery { display:grid;gap:var(--we-space-3);border-top:1px solid var(--we-border);padding-top:var(--we-space-4); }
+@media(max-width:520px){.settings-pair,.settings-expected-fields{grid-template-columns:minmax(0,1fr)}}
+@media(forced-colors:active){.settings-switch:checked{background:Highlight}.settings-switch::before{background:CanvasText}.settings-switch:checked::before{background:HighlightText}}
 </style>

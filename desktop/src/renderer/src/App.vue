@@ -26,7 +26,7 @@ const errorText=computed(()=>{if(error.value)return error.value;const value=stat
   if(value.code==='IO_DENIED')return '无法保存，目录不可写或文件被占用。旧配置和输入保留；请检查权限、关闭占用程序后重试。'
   if(value.code==='IO_BUSY')return '操作仍在处理中或文件被占用，请稍后重试；保存不会被强行中断。'
   if(value.code==='VALIDATION')return '设置未保存，请检查下方标注的日期、时间区间和数值。'
-  return value.code==='REVISION_CONFLICT'?'配置修订冲突（期望 '+value.expectedRevision+'，当前 '+value.actualRevision+'）。输入已保留，未覆盖；请比较来源后重新预览导入，或放弃并重开程序读取磁盘版本。':value.message
+  return value.code==='REVISION_CONFLICT'?'配置修订冲突（期望 '+value.expectedRevision+'，当前 '+value.actualRevision+'）。输入已保留，未覆盖；请先记录需要保留的输入，再放弃本次修改并重开程序读取磁盘版本。':value.message
 })
 async function load(){const result=await controller.load();if(!result.ok){error.value='IPC 初始化失败，尚未读取 Main 草稿：'+result.error.message;return false}error.value='';const calendars=await api.calendar.readMetadata();if(calendars.ok)metadata.value=calendars.data;return true}
 async function refreshSnapshot(){const result=await api.snapshot.read();snapshot.value=result.ok?result.data:null}
@@ -57,7 +57,7 @@ function trap(event:KeyboardEvent){if(event.key==='Escape'){event.preventDefault
 async function miniMode(){
   error.value=''
   if(composing.value||confirmLeave.value){error.value='请先完成输入或当前确认，再切换迷你模式。';return}
-  if(!state.value.session?.saved?.desktop.miniEnabled){error.value='请在更多设置 → 窗口与托盘启用迷你窗并保存。';return}
+  if(!state.value.session?.saved?.desktop.miniEnabled){error.value='请打开设置，开启“启用迷你模式”并保存。';return}
   const synced=await controller.flush();await nextTick()
   if(!synced.ok||pending.value){error.value='设置尚未同步，输入保留；请完成同步后再切换。';return}
   const result=await api.window.perform({action:'showMini'});if(!result.ok)error.value='迷你模式未打开，主窗口与设置保留；请完成同步后重试。'
@@ -92,7 +92,7 @@ onBeforeUnmount(()=>{stopTraySettings?.();controller.dispose();void api.snapshot
       <main v-if="!loading">
         <section v-if="settingsOpen" id="settings-panel" class="we-surface app-settings">
           <SettingsView :expected-end="state.expectedEnd" :expected-end-input="state.expectedEndInput" :quit-disabled="syncing||quitting||defaultPending" :model="state.editor" :issues="state.issues" :busy="state.busy||dataBusy||defaultPending" :dirty="state.dirty||state.pending>0" :initialized="!!state.session?.saved" :default-unpersisted="!!state.session?.defaultPersistence" :session-ready="!!state.session" :validation-attempt="validationAttempt" :can-save="canSave" :metadata="metadata" :api="api" @expected-end="value=>{error='';controller.editExpectedEnd(value)}" @change="edit" @save="saved" @cancel="leave" @quit="quit" @imported="imported" @data-busy="value=>dataBusy=value" />
-          <p v-if="state.session?.configurationStatus==='recoverable'" class="app-error">当前只读使用有效备份，请到数据页预览并确认恢复；损坏源文件已保留。</p>
+          <p v-if="state.session?.configurationStatus==='recoverable'" class="app-error">当前只读使用有效备份，可在上方“安全恢复”中预览并确认恢复；损坏源文件已保留。</p>
         </section>
         <DashboardView v-else :snapshot="snapshot" :motion-allowed="windowVisible&&!reduceMotion" />
       </main>

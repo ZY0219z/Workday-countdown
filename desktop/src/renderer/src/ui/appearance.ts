@@ -14,9 +14,9 @@ export interface ThemeTarget {
   setAttribute(name: string, value: string): void
   removeAttribute(name: string): void
 }
-export function resolveAppearance(input: Appearance, systemDark: boolean, systemReducedMotion: boolean): ResolvedAppearance {
-  return { theme: input.mode === 'system' ? (systemDark ? 'dark' : 'light') : input.mode,
-    accent: input.accent, reduceMotion: input.reduceMotion || systemReducedMotion }
+export function resolveAppearance(input: Appearance, _systemDark: boolean, systemReducedMotion: boolean): ResolvedAppearance {
+  // UI-07: one visual style for Main and Mini. Stored legacy choices remain intact.
+  return { theme: 'light', accent: 'ocean', reduceMotion: input.reduceMotion || systemReducedMotion }
 }
 const attributes = ['data-theme', 'data-accent', 'data-reduced-motion'] as const
 

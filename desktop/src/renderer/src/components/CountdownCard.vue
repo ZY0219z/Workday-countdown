@@ -62,10 +62,14 @@ h2 { font-size: var(--we-text-title); font-weight: 600; }
 .we-countdown--hero .we-countdown-header { position:absolute;top:var(--we-space-4);right:var(--we-space-6); }
 .we-countdown--hero .we-countdown-body { margin-top:0; }
 .we-countdown--hero h2 { color:var(--we-muted);font-size:var(--we-text-body);font-weight:500; }
-.we-countdown--hero .we-countdown-value { display:flex;justify-content:center;align-items:baseline;gap:6px;margin:var(--we-space-2) 0;font-size:min(96px,calc(150cqi / var(--we-time-length)));font-weight:400;line-height:1.12;letter-spacing:-.035em;overflow-wrap:normal; }
+.we-countdown--hero .we-countdown-value { display:flex;justify-content:center;align-items:baseline;gap:10px;margin:var(--we-space-3) 0;font-size:min(96px,calc(150cqi / var(--we-time-length)));font-weight:500;line-height:1.12;letter-spacing:-.025em;overflow-wrap:normal; }
 .we-countdown--hero .we-time-part { flex:none; }
-.we-countdown--hero .we-time-separator { color:var(--we-muted);font-size:.75em;font-weight:300; }
+.we-countdown--hero .we-time-part:last-child { font-size:.72em;font-weight:400;color:var(--we-muted); }
+.we-countdown--hero .we-time-separator { display:flex;flex:none;flex-direction:column;align-self:center;gap:12px;width:8px;font-size:0; }
+.we-countdown--hero .we-time-separator::before,.we-countdown--hero .we-time-separator::after { content:'';width:5px;height:5px;border-radius:50%;background:var(--we-accent);opacity:.55; }
+.we-countdown--hero .we-countdown-target { color:var(--we-muted); }
 .we-countdown--hero .we-countdown-hint { margin-top:var(--we-space-2); }
+.we-countdown--hero .we-countdown-hint::before { content:'';display:inline-block;width:16px;height:1px;background:var(--we-accent);vertical-align:middle;margin-right:8px; }
 .we-countdown--hero .we-countdown-notices { display:grid;justify-items:center;gap:var(--we-space-1); }
 @container (max-width: 440px) {
   .we-countdown--hero .we-countdown-value { gap:4px;font-size:min(72px,calc(150cqi / var(--we-time-length))); }
