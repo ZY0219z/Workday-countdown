@@ -8,7 +8,7 @@ import { chromium, expect } from '@playwright/test'
 import { fixtures } from '../../test-results/d11-ssr/components.mjs'
 
 test('selected B Hero/pond and C summaries preserve four themes, states and animation gates in isolated Headless', async () => {
-  const directory = resolve('test-results/v21-ui-rollback/dashboard'), bundle = resolve(directory, 'bundle')
+  const directory = resolve('test-results/v21-ui08-ui09/dashboard'), bundle = resolve(directory, 'bundle')
   await mkdir(directory, { recursive: true })
   await build({ configFile: false, plugins: [vue()], logLevel: 'warn', define: { 'process.env.NODE_ENV': '"production"' }, build: {
     outDir: bundle, emptyOutDir: false,
@@ -65,6 +65,40 @@ test('selected B Hero/pond and C summaries preserve four themes, states and anim
       assert.ok(geometry.height <= 580, JSON.stringify(geometry))
       checks.push(`${accent}/${theme}: B light-weight Hero/pond, C left-top titles, accessible progress without visible heading, default fit`)
     }
+    for (const width of [680, 720, 480]) {
+      await page.setViewportSize({ width, height: 580 })
+      const snapshot = structuredClone(f.snapshots.working); snapshot.employment.elapsedNaturalDays = 462
+      await set({ snapshot }); await fits()
+      const card = page.locator('.we-metric').last()
+      await expect(card.locator('.we-metric-details')).toHaveCount(0)
+      await expect(card).toHaveText(/^\s*已工作\s*462\s*天\s*$/)
+      const geometry = await card.evaluate(card => {
+        const value = card.querySelector('.we-metric-value'), unit = value.querySelector('span'), range = document.createRange()
+        range.selectNodeContents(value.firstChild)
+        const number = range.getBoundingClientRect(), suffix = unit.getBoundingClientRect()
+        return { layout: getComputedStyle(value).display, alignment: getComputedStyle(value).alignItems,
+          numberBottom: number.bottom, unitTop: suffix.top, numberRight: number.right, unitLeft: suffix.left,
+          heights: [...card.parentElement.children].map(element => element.getBoundingClientRect().height) }
+      })
+      assert.equal(geometry.layout, 'flex'); assert.equal(geometry.alignment, 'baseline')
+      assert.ok(geometry.unitTop < geometry.numberBottom && geometry.unitLeft >= geometry.numberRight - 1)
+      if (width >= 680) assert.ok(Math.max(...geometry.heights) - Math.min(...geometry.heights) <= 2, JSON.stringify(geometry))
+      else assert.ok(geometry.heights[2] <= Math.max(...geometry.heights.slice(0, 2)), 'narrow cards may grow for real dates; the value-only card must not grow abnormally')
+      if (width === 680) {
+        await page.locator('.dashboard-metrics').screenshot({ path: resolve(directory, 'cards-462.png') })
+        for (const [selector, name] of [['.dashboard-primary', 'hero-pond'], ['.we-metric:nth-child(1)', 'card-0'], ['.we-metric:nth-child(2)', 'card-1']]) {
+          await page.locator(selector).screenshot({ path: resolve(directory, `${name}.png`) })
+        }
+      }
+      checks.push(`${width}px / 462 days: no empty column, value/unit share a baseline; card heights ${geometry.heights.join('/')}`)
+    }
+    for (const status of ['notStarted', 'unset']) {
+      const snapshot = structuredClone(f.snapshots.working)
+      snapshot.employment.status = status; snapshot.employment.elapsedNaturalDays = status === 'unset' ? null : 0
+      await set({ snapshot }); await fits()
+      await expect(page.locator('.we-metric').last()).toContainText(status === 'unset' ? '尚未设置入职日期' : '尚未入职')
+    }
+    await page.setViewportSize({ width: 720, height: 580 })
     for (const state of ['beforeWork', 'break', 'overtime', 'overnight', 'finished', 'rest', 'estimate']) {
       await set({ snapshot: f.snapshots[state] })
       await fits()

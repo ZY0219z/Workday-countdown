@@ -7,8 +7,8 @@ import vue from '@vitejs/plugin-vue'
 import { chromium, expect } from '@playwright/test'
 import { fixtures, createSettingsDraft } from '../../test-results/d11-ssr/components.mjs'
 
-test('restored More settings exposes all groups, follows themes and saves full historical preferences', async () => {
-  const directory = resolve('test-results/v21-ui-rollback/settings'), bundle = resolve(directory, 'bundle')
+test('UI-09 More contains only Mini; full drafts, themes, leave protection and read-only recovery remain', async () => {
+  const directory = resolve('test-results/v21-ui08-ui09/settings'), bundle = resolve(directory, 'bundle')
   await mkdir(directory, { recursive: true })
   await build({ configFile: false, plugins: [vue()], logLevel: 'warn', define: { 'process.env.NODE_ENV': '"production"' }, build: {
     outDir: bundle, emptyOutDir: false,
@@ -16,7 +16,7 @@ test('restored More settings exposes all groups, follows themes and saves full h
   } })
   const css = (await readdir(bundle)).find(file => file.endsWith('.css')), f = fixtures()
   const config = structuredClone(f.config)
-  config.appearance = { mode: 'dark', accent: 'coral', reduceMotion: false }
+  config.appearance = { mode: 'light', accent: 'ocean', reduceMotion: false }
   config.calendar.overrides = { '2026-10-20': 'rest', '2026-10-21': 'work' }
   config.schedule.workWeek = [1, 2, 3, 4, 5, 6]
   config.desktop.alwaysOnTop = true
@@ -34,52 +34,90 @@ test('restored More settings exposes all groups, follows themes and saves full h
     })
     await page.goto('http://settings.test/')
     await page.waitForFunction(() => typeof window.__settingsInit === 'function')
-    await page.evaluate(value => window.__settingsInit(value), { session, snapshot: f.snapshots.working, metadata: f.metadata })
-    await page.getByRole('button', { name: '设置', exact: true }).click()
-    await expect(page.getByRole('heading', { name: '设置中心', exact: true })).toBeVisible()
-    const root = page.locator('[data-workday-root]')
-    await expect(root).toHaveAttribute('data-theme', 'dark')
-    await expect(root).toHaveAttribute('data-accent', 'coral')
-    await page.locator('summary').filter({ hasText: '更多设置' }).click()
-    const group = page.getByLabel(/^设置分组/)
-    await expect(page.getByRole('heading', { name: '离线工作日历' })).toBeVisible()
-    await expect(page.getByRole('button', { name: '添加日期覆盖' })).toBeVisible()
-    await page.screenshot({ path: resolve(directory, 'settings-more-calendar.png'), fullPage: true })
-    await group.selectOption('data')
-    await expect(page.getByLabel('导入来源')).toHaveValue('python-v1')
-    for (const name of ['选择配置并预览', '预览最近有效备份', '导出已保存配置'])
-      await expect(page.getByRole('button', { name, exact: true })).toBeEnabled()
-    await group.selectOption('appearance')
-    await page.getByLabel('显示模式', { exact: true }).selectOption('light')
-    await page.getByLabel('配色', { exact: true }).selectOption('ocean')
-    await expect(root).toHaveAttribute('data-theme', 'light')
-    await expect(root).toHaveAttribute('data-accent', 'ocean')
-    await page.screenshot({ path: resolve(directory, 'settings-theme.png'), fullPage: true })
-    await page.getByLabel('显示模式', { exact: true }).selectOption('system')
-    for (const colorScheme of ['light', 'dark']) {
-      await page.emulateMedia({ colorScheme })
-      await expect(root).toHaveAttribute('data-theme', colorScheme)
+    const initialize = async (status = 'ready', appearance = config.appearance) => {
+      const value = structuredClone(session)
+      value.configurationStatus = status; value.saved.appearance = appearance; value.draft.appearance = appearance
+      await page.evaluate(value => window.__settingsInit(value), { session: value, snapshot: f.snapshots.working, metadata: f.metadata })
+      await page.getByRole('button', { name: '设置', exact: true }).click()
+      await expect(page.getByRole('heading', { name: status === 'ready' ? '设置中心' : '配置恢复', exact: true })).toBeVisible()
     }
-    await page.getByLabel('显示模式', { exact: true }).selectOption('dark')
-    await page.getByLabel('配色', { exact: true }).selectOption('coral')
-    await group.selectOption('desktop')
-    await expect(page.getByLabel(/^关闭主窗口/)).toHaveValue(config.desktop.closeAction)
-    await expect(page.getByLabel('迷你窗置顶偏好', { exact: true })).toBeChecked()
+    await initialize()
+    const root = page.locator('[data-workday-root]'), more = page.locator('.settings-more')
+    await expect(more).not.toHaveAttribute('open', '')
+    await more.locator('summary').click()
+    await expect(more.getByRole('checkbox', { name: '启用迷你窗', exact: true })).toBeVisible()
+    await expect(more.locator('input')).toHaveCount(1)
+    await expect(more.locator('select,button')).toHaveCount(0)
+    assert.doesNotMatch(await page.locator('.settings').innerText(), /设置分组|离线工作日历|外观主题|窗口与托盘|预览最近有效备份|导出已保存配置/)
+    await expect(page.getByRole('region', { name: '安全恢复', exact: true })).toHaveCount(0)
+    await more.screenshot({ path: resolve(directory, 'more-settings.png') })
     await page.getByLabel('启用迷你窗', { exact: true }).check()
     await page.getByLabel('上班时间', { exact: true }).fill('08:45')
     await page.getByLabel('下班时间', { exact: true }).fill('18:30')
     await page.getByLabel('每月发薪日', { exact: true }).fill('15')
     await page.getByRole('button', { name: '保存设置', exact: true }).click()
     await expect(page.getByRole('heading', { name: '设置中心', exact: true })).toHaveCount(0)
-    const state = await page.evaluate(() => window.__settingsState())
+    let state = await page.evaluate(() => window.__settingsState())
     assert.equal(state.saves.length, 1)
     const stored = state.saves[0].settings
     for (const key of ['calendar', 'appearance', 'overtime', 'employee']) assert.deepEqual(stored[key], session.draft[key], key)
     assert.deepEqual(stored.schedule, { ...session.draft.schedule, startTime: '08:45', endTime: '18:30' })
     assert.deepEqual(stored.salary, { ...session.draft.salary, day: 15 })
     assert.deepEqual(stored.desktop, { ...session.draft.desktop, miniEnabled: true })
-    await expect(root).toHaveAttribute('data-theme', 'dark')
-    await expect(root).toHaveAttribute('data-accent', 'coral')
+    await page.getByRole('button', { name: '设置', exact: true }).click()
+    await more.locator('summary').click()
+    await expect(page.getByLabel('启用迷你窗', { exact: true })).toBeChecked()
+    await page.getByLabel('每月发薪日', { exact: true }).fill('0')
+    await page.getByRole('button', { name: '保存设置', exact: true }).click()
+    assert.equal(await page.getByLabel('每月发薪日', { exact: true }).evaluate(input => input.validity.rangeUnderflow), true)
+    assert.equal((await page.evaluate(() => window.__settingsState())).saves.length, 1)
+    await page.getByLabel('每月发薪日', { exact: true }).fill('15')
+    await page.getByLabel('上班时间', { exact: true }).fill('bad')
+    await page.getByRole('button', { name: '保存设置', exact: true }).click()
+    await expect(page.getByLabel('上班时间', { exact: true })).toHaveAttribute('aria-invalid', 'true')
+    assert.equal((await page.evaluate(() => window.__settingsState())).saves.length, 1)
+    await page.getByLabel('上班时间', { exact: true }).fill('08:45')
+    await page.getByLabel('每月发薪日', { exact: true }).fill('16')
+    await page.getByRole('button', { name: '退出程序', exact: true }).click()
+    await expect.poll(async () => (await page.evaluate(() => window.__settingsState())).calls.quit).toBe(1)
+    await expect(page.getByRole('heading', { name: '设置中心', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: '取消 / 返回仪表盘', exact: true }).click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await page.getByRole('button', { name: '继续编辑', exact: true }).click()
+    await expect(page.getByLabel('每月发薪日', { exact: true })).toHaveValue('16')
+    await page.getByRole('button', { name: '取消 / 返回仪表盘', exact: true }).click()
+    await page.getByRole('button', { name: '放弃', exact: true }).click()
+    await expect(page.getByRole('heading', { name: '设置中心', exact: true })).toHaveCount(0)
+    state = await page.evaluate(() => window.__settingsState())
+    assert.deepEqual(state.session.draft, stored)
+    for (const appearance of [{ mode: 'dark', accent: 'coral', reduceMotion: false }, { mode: 'system', accent: 'ocean', reduceMotion: false }]) {
+      await initialize('ready', appearance)
+      await expect(root).toHaveAttribute('data-accent', appearance.accent)
+      if (appearance.mode === 'system') for (const colorScheme of ['light', 'dark']) {
+        await page.emulateMedia({ colorScheme }); await expect(root).toHaveAttribute('data-theme', colorScheme)
+      }
+      else await expect(root).toHaveAttribute('data-theme', 'dark')
+    }
+    for (const status of ['recoverable', 'invalid', 'future']) {
+      await initialize(status)
+      const recovery = page.getByRole('region', { name: '安全恢复', exact: true })
+      await expect(recovery).toBeVisible()
+      await expect(page.getByLabel('上班时间', { exact: true })).toBeDisabled()
+      await expect(page.getByRole('button', { name: '保存设置', exact: true })).toBeDisabled()
+      await expect(page.getByRole('button', { name: '导出已保存配置' })).toHaveCount(0)
+      await recovery.getByRole('button', { name: '选择配置并预览', exact: true }).click()
+      assert.deepEqual((await page.evaluate(() => window.__settingsState())).calls.imports, [{ sourceKind: 'v2' }])
+      await recovery.getByRole('button', { name: '预览最近有效备份', exact: true }).click()
+      if (status === 'future') await expect(recovery.getByRole('alert')).toContainText('较新版本配置只读')
+      else {
+        await expect(recovery.getByRole('region', { name: '导入预览' })).toBeVisible()
+        assert.equal((await page.evaluate(() => window.__settingsState())).calls.apply, 0)
+        await recovery.getByRole('button', { name: '确认备份并应用所选字段', exact: true }).click()
+        await expect(recovery.getByRole('alert')).toContainText('未覆盖只读配置')
+      }
+      assert.deepEqual((await page.evaluate(() => window.__settingsState())).session.saved, JSON.parse(JSON.stringify(session.saved)))
+      await recovery.screenshot({ path: resolve(directory, `recovery-${status}.png`) })
+    }
     assert.deepEqual(errors, [])
   } finally {
     await browser.close()

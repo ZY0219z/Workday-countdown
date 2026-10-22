@@ -17,13 +17,14 @@ const props = defineProps<{
 }>()
 const headingId = useId()
 const display = computed(() => metricValue(props.value))
+const hasDetails = computed(() => !!(props.descriptionLabel || props.description || (props.source && !props.estimated) || props.kind === 'salary'))
 </script>
 
 <template>
-  <section class="we-surface we-metric" :class="{ 'we-metric--long': display !== null && display.length > 3 }" :aria-labelledby="headingId">
+  <section class="we-surface we-metric" :class="{ 'we-metric--long': display !== null && display.length > 3, 'we-metric--value-only': !hasDetails }" :style="{ '--we-value-length': display?.length || 1 }" :aria-labelledby="headingId">
     <h2 :id="headingId">{{ title }}</h2>
     <div class="we-metric-body">
-      <div class="we-metric-details">
+      <div v-if="hasDetails" class="we-metric-details">
         <p v-if="descriptionLabel" class="we-muted we-metric-label">{{ descriptionLabel }}</p>
         <p v-if="description" class="we-muted">{{ description }}</p>
         <p v-if="source && !estimated" class="we-muted">{{ source }}</p>
@@ -50,5 +51,8 @@ h2 { text-align:left;font-size:var(--we-text-body);font-weight:600;overflow-wrap
 .we-metric-warning { color: var(--we-warning-text); font-size: var(--we-text-small); margin-top: var(--we-space-1); overflow-wrap: anywhere; }
 .we-muted { overflow-wrap: anywhere; }
 .we-metric--long .we-metric-body { grid-template-columns:minmax(0,1fr); }
-@container (max-width:140px) { .we-metric-value { font-size:32px; } .we-metric-body { grid-template-columns:minmax(0,1fr); } }
+@container (max-width:140px) { .we-metric-value { font-size:32px;--we-value-size:32px; } .we-metric-body { grid-template-columns:minmax(0,1fr); } }
+.we-metric--value-only .we-metric-body { grid-template-columns:minmax(0,1fr); }
+.we-metric--value-only .we-metric-value { display:flex;justify-content:flex-end;align-items:baseline;gap:var(--we-space-1);white-space:nowrap;font-size:min(var(--we-value-size,40px),calc((100cqi - 24px) / var(--we-value-length) * 1.7)); }
+.we-metric--value-only .we-metric-unit { flex-shrink:0; }
 </style>

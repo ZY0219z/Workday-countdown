@@ -71,11 +71,21 @@ for(const time of ['0','08:','24:00','08:60','8:30'])test(`raw time ${time} stay
 test('missing salary has a specific field error, and input time explains its range',async()=>{const h=harness({missing:true});await h.controller.load();const editor=structuredClone(h.controller.state.editor);editor.schedule.startTime='08:30';editor.schedule.endTime='18:00';h.controller.edit(editor);assert.equal(await h.controller.save(),false);const issue=h.controller.state.issues.find(issue=>issue.field==='$.salary.day');assert.ok(issue);assert.match(fieldMessage(issue),/每月发薪日.*1–31/);assert.match(fieldMessage({field:'$.schedule.breaks[0].endTime',reason:'FORMAT'}),/HH:MM.*23:59/)})
 
 test('approved factory produces isolated defaults; presentation attributes prior nominal month',()=>{const input={updatedAt:'2026-10-15T00:00:00.000Z',appVersion:'2.0.0'},a=createDefaultAppConfig(input,f.metadata).data,b=createDefaultAppConfig(input,f.metadata).data;assert.equal(a.employee.startDate,'2025-07-17');assert.equal(a.schedule.startTime,'08:30');assert.equal(a.schedule.endTime,'18:00');assert.equal(a.salary.day,10);assert.equal(a.appearance.accent,'ocean');a.schedule.workWeek.pop();assert.equal(b.schedule.workWeek.length,5);assert.equal(salaryMonthLabel('2026-10-10'),'2026年9月工资');assert.equal(salaryMonthLabel('2027-01-10'),'2026年12月工资');assert.equal(salaryMonthLabel('0001-01-10'),'');assert.equal(salaryMonthLabel('bad'),'')})
-test('common settings coexist without switching sections and advanced features remain',async()=>{const html=await renderSettings(editorFrom(createSettingsDraft(f.config).data),f.metadata);for(const text of ['上班时间','下班时间','入职日期','每月发薪日','今天预计下班时间'])assert.ok(html.includes(text));assert.match(html,/<summary[^>]*>更多设置<\/summary>/);assert.ok(html.includes('数据与恢复'));for(const text of ['每周工作日','跨夜班次（下班在次日）','遇休息日<select','value="advance"','value="none"'])assert.ok(!html.includes(text));assert.ok(!html.includes('请先填写发薪日'))})
+test('UI-09 keeps common settings and More/Mini without daily advanced controls',async()=>{const html=await renderSettings(editorFrom(createSettingsDraft(f.config).data),f.metadata);for(const text of ['上班时间','下班时间','入职日期','每月发薪日','今天预计下班时间','启用迷你窗'])assert.ok(html.includes(text));assert.match(html,/<summary[^>]*>更多设置<\/summary>/);for(const text of ['设置分组','离线工作日历','外观主题','窗口与托盘偏好','导出已保存配置','预览最近有效备份','每周工作日','跨夜班次（下班在次日）','遇休息日<select','value="advance"','value="none"'])assert.ok(!html.includes(text),text);assert.ok(!html.includes('请先填写发薪日'))})
+
+test('UI-09 exposes safe recovery only for a loaded read-only configuration',async()=>{
+  const model=editorFrom(createSettingsDraft(f.config).data)
+  const html=await renderSettings(model,f.metadata,{canSave:false})
+  for(const text of ['安全恢复','选择配置并预览','预览最近有效备份'])assert.ok(html.includes(text))
+  for(const text of ['导出已保存配置','导入来源','Python V1','设置分组'])assert.ok(!html.includes(text))
+  assert.match(html,/<fieldset[^>]*disabled[^>]*class="settings-fields"/)
+  const unavailable=await renderSettings(model,f.metadata,{canSave:false,sessionReady:false})
+  assert.ok(!unavailable.includes('aria-label="安全恢复"'))
+})
 
 test('dashboard has exactly three concise metrics, no standalone date, and retains actual target dates',async()=>{
   const snapshot=f.snapshots.working,original=structuredClone(snapshot),html=await renderDashboard(snapshot)
-  assert.equal((html.match(/class="we-surface we-metric"/g)||[]).length,3)
+  assert.equal((html.match(/class="we-surface we-metric(?: [^"]*)?"/g)||[]).length,3)
   for(const text of ['dashboard-date','累计计划工作日','非实际出勤','按工作日历','计划日期，不代表已到账','不包含今天；入职当天为 0','自然日累计','截至 '+snapshot.localDate])assert.ok(!html.includes(text),text)
   assert.ok(html.includes(snapshot.nextRest.date));assert.ok(html.includes(snapshot.salary.actualDate));assert.ok(html.includes('2026-10-15 18:00'))
   assert.equal(typeof snapshot.employment.plannedWorkDays,'number');assert.deepEqual(snapshot,original)
