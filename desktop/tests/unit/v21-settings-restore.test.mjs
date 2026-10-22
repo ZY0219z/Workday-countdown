@@ -7,8 +7,8 @@ import vue from '@vitejs/plugin-vue'
 import { chromium, expect } from '@playwright/test'
 import { fixtures, createSettingsDraft } from '../../test-results/d11-ssr/components.mjs'
 
-test('UI-09 More contains only Mini; full drafts, themes, leave protection and read-only recovery remain', async () => {
-  const directory = resolve('test-results/v21-ui08-ui09/settings'), bundle = resolve(directory, 'bundle')
+test('UI-11 daily rows and direct Mini switch preserve drafts, themes, validation and recovery', async () => {
+  const directory = resolve('test-results/v21-ui10-ui11/settings'), bundle = resolve(directory, 'bundle')
   await mkdir(directory, { recursive: true })
   await build({ configFile: false, plugins: [vue()], logLevel: 'warn', define: { 'process.env.NODE_ENV': '"production"' }, build: {
     outDir: bundle, emptyOutDir: false,
@@ -23,34 +23,38 @@ test('UI-09 More contains only Mini; full drafts, themes, leave protection and r
   const session = { ...createSettingsDraft(config).data, configurationStatus: 'ready', expectedEnd: f.expectedEnd }
   const browser = await chromium.launch({ channel: 'msedge', headless: true, chromiumSandbox: true })
   try {
-    const page = await browser.newPage({ viewport: { width: 720, height: 580 } }), errors = []
+    let page = await browser.newPage({ viewport: { width: 720, height: 580 } })
+    const errors = []
     page.setDefaultTimeout(5000)
     page.on('pageerror', error => errors.push(error.message))
-    await page.route('http://settings.test/**', async route => {
+    const serve = async route => {
       const path = new URL(route.request().url()).pathname.slice(1)
       if (!path) return route.fulfill({ contentType: 'text/html', body: `<html lang="zh-CN"><meta charset="utf-8"><link rel="stylesheet" href="/${css}"><div id="app"></div><script type="module" src="/settings.mjs"></script></html>` })
       if (path !== 'settings.mjs' && path !== css) return route.fulfill({ status: 404, body: '' })
       return route.fulfill({ contentType: path.endsWith('.css') ? 'text/css' : 'text/javascript', body: await readFile(resolve(bundle, path)) })
-    })
+    }
+    await page.route('http://settings.test/**', serve)
     await page.goto('http://settings.test/')
     await page.waitForFunction(() => typeof window.__settingsInit === 'function')
-    const initialize = async (status = 'ready', appearance = config.appearance) => {
-      const value = structuredClone(session)
+    const initialize = async (status = 'ready', appearance = config.appearance, source = session) => {
+      const value = structuredClone(source)
       value.configurationStatus = status; value.saved.appearance = appearance; value.draft.appearance = appearance
       await page.evaluate(value => window.__settingsInit(value), { session: value, snapshot: f.snapshots.working, metadata: f.metadata })
       await page.getByRole('button', { name: '设置', exact: true }).click()
       await expect(page.getByRole('heading', { name: status === 'ready' ? '设置中心' : '配置恢复', exact: true })).toBeVisible()
     }
     await initialize()
-    const root = page.locator('[data-workday-root]'), more = page.locator('.settings-more')
-    await expect(more).not.toHaveAttribute('open', '')
-    await more.locator('summary').click()
-    await expect(more.getByRole('checkbox', { name: '启用迷你窗', exact: true })).toBeVisible()
-    await expect(more.locator('input')).toHaveCount(1)
-    await expect(more.locator('select,button')).toHaveCount(0)
-    assert.doesNotMatch(await page.locator('.settings').innerText(), /设置分组|离线工作日历|外观主题|窗口与托盘|预览最近有效备份|导出已保存配置/)
+    const root = page.locator('[data-workday-root]')
+    await expect(page.locator('details,summary,.settings-more')).toHaveCount(0)
+    await expect(page.getByRole('switch', { name: '启用迷你窗', exact: true })).toBeVisible()
+    await expect(page.locator('.settings-fields input')).toHaveCount(6)
+    assert.doesNotMatch(await page.locator('.settings').innerText(), /更多设置|设置分组|离线工作日历|外观主题|窗口与托盘|预览最近有效备份|导出已保存配置/)
     await expect(page.getByRole('region', { name: '安全恢复', exact: true })).toHaveCount(0)
-    await more.screenshot({ path: resolve(directory, 'more-settings.png') })
+    await page.getByLabel('今天预计下班时间', { exact: true }).fill('19:00')
+    await expect.poll(async () => (await page.evaluate(() => window.__settingsState())).calls.expectedEnd.at(-1)?.input).toBe('19:00')
+    await page.getByRole('button', { name: '取消今天加班', exact: true }).click()
+    await expect.poll(async () => (await page.evaluate(() => window.__settingsState())).calls.expectedEnd.at(-1)?.input).toBe(null)
+    await expect(page.getByLabel('今天预计下班时间', { exact: true })).toHaveValue(f.expectedEnd.normalEnd.time)
     await page.getByLabel('启用迷你窗', { exact: true }).check()
     await page.getByLabel('上班时间', { exact: true }).fill('08:45')
     await page.getByLabel('下班时间', { exact: true }).fill('18:30')
@@ -65,8 +69,12 @@ test('UI-09 More contains only Mini; full drafts, themes, leave protection and r
     assert.deepEqual(stored.salary, { ...session.draft.salary, day: 15 })
     assert.deepEqual(stored.desktop, { ...session.draft.desktop, miniEnabled: true })
     await page.getByRole('button', { name: '设置', exact: true }).click()
-    await more.locator('summary').click()
     await expect(page.getByLabel('启用迷你窗', { exact: true })).toBeChecked()
+    await page.getByLabel('上班时间', { exact: true }).dispatchEvent('compositionstart')
+    await page.getByRole('button', { name: '保存设置', exact: true }).click()
+    await expect(page.locator('.app-error')).toContainText('输入法组合输入')
+    assert.equal((await page.evaluate(() => window.__settingsState())).saves.length, 1)
+    await page.getByLabel('上班时间', { exact: true }).dispatchEvent('compositionend', { data: '' })
     await page.getByLabel('每月发薪日', { exact: true }).fill('0')
     await page.getByRole('button', { name: '保存设置', exact: true }).click()
     assert.equal(await page.getByLabel('每月发薪日', { exact: true }).evaluate(input => input.validity.rangeUnderflow), true)
@@ -118,6 +126,27 @@ test('UI-09 More contains only Mini; full drafts, themes, leave protection and r
       assert.deepEqual((await page.evaluate(() => window.__settingsState())).session.saved, JSON.parse(JSON.stringify(session.saved)))
       await recovery.screenshot({ path: resolve(directory, `recovery-${status}.png`) })
     }
+    const visual = structuredClone(f.defaultConfig)
+    visual.schedule.startTime = '09:00'; visual.schedule.endTime = '22:00'
+    visual.employee.startDate = '2025-07-15'; visual.desktop.miniEnabled = true
+    const visualSession = { ...createSettingsDraft(visual).data, expectedEnd: { ...f.expectedEnd,
+      shiftDate: '2026-10-22', normalEnd: { date: '2026-10-22', time: '22:00' }, finalEnd: { date: '2026-10-22', time: '22:00' } } }
+    await initialize('ready', config.appearance, visualSession)
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+    await page.screenshot({ path: resolve(directory, 'settings-approved.png'), fullPage: true })
+    await page.setViewportSize({ width: 360, height: 580 })
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+    await page.screenshot({ path: resolve(directory, 'settings-360.png'), fullPage: true })
+    await page.close()
+    page = await browser.newPage({ viewport: { width: 480, height: 387 }, deviceScaleFactor: 1.5 })
+    page.on('pageerror', error => errors.push(error.message))
+    await page.route('http://settings.test/**', serve)
+    await page.goto('http://settings.test/')
+    await page.waitForFunction(() => typeof window.__settingsInit === 'function')
+    await initialize('ready', config.appearance, visualSession)
+    assert.equal(await page.evaluate(() => devicePixelRatio), 1.5)
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+    await page.screenshot({ path: resolve(directory, 'settings-dpr150.png'), fullPage: true })
     assert.deepEqual(errors, [])
   } finally {
     await browser.close()

@@ -54,7 +54,34 @@
   --we-bg: #211e29; --we-surface: #2c2938; --we-subtle: #353040; --we-border: #745e70;
   --we-accent: #fda4af; --we-accent-soft: #49303e; --we-track: #634454;
 }
+/* Approved UI-10/11 presentation is scoped to Main; Mini keeps its existing tokens. */
+.workday-ui.app-shell {
+  --we-radius-card:18px; --we-radius-control:10px;
+  --we-card-border:color-mix(in srgb,var(--we-accent) 15%,var(--we-surface));
+  --we-hero-tint:color-mix(in srgb,var(--we-accent) 7%,var(--we-surface));
+  --we-clock:#16375f; --we-clock-seconds:#4e79ae;
+  --we-settings-icon:#216887;
+  --we-water-top:#8bc8f9; --we-water-bottom:#3884d5;
+  --we-rest-tint:#e3f5ff; --we-rest-icon:#17638c;
+  --we-salary-tint:#fff1da; --we-salary-icon:#986014;
+  --we-employment-tint:#eee8ff; --we-employment-icon:#6450a7;
+  --we-control-border:color-mix(in srgb,var(--we-muted) 72%,var(--we-surface));
+}
+.workday-ui.app-shell[data-accent="coral"] {
+  --we-clock-seconds:#a94766; --we-water-top:#eeadbd; --we-water-bottom:#a94362; --we-settings-icon:#a13e5a;
+}
+.workday-ui.app-shell[data-theme="dark"] {
+  --we-clock:#edf5ff; --we-clock-seconds:#9fc4f5; --we-settings-icon:#96c8ed;
+  --we-water-top:#426f9b; --we-water-bottom:#274c77;
+  --we-rest-tint:#203e50; --we-rest-icon:#9ad9fa;
+  --we-salary-tint:#443722; --we-salary-icon:#f6cf8e;
+  --we-employment-tint:#38314e; --we-employment-icon:#c8b6fa;
+}
+.workday-ui.app-shell[data-theme="dark"][data-accent="coral"] {
+  --we-clock-seconds:#f3b5c5; --we-water-top:#875269; --we-water-bottom:#603d56; --we-settings-icon:#f3b5c5;
+}
 @media (forced-colors: active) {
+  .workday-ui.app-shell[data-theme][data-accent] { --we-clock:CanvasText; --we-clock-seconds:CanvasText; --we-settings-icon:CanvasText; --we-card-border:CanvasText; --we-hero-tint:Canvas; }
   .workday-ui[data-theme][data-accent] {
     --we-bg: Canvas; --we-surface: Canvas; --we-subtle: Canvas; --we-text: CanvasText; --we-muted: CanvasText;
     --we-border: CanvasText; --we-control-border: ButtonText; --we-accent: LinkText; --we-track: Canvas;

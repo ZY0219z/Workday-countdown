@@ -7,8 +7,8 @@ import vue from '@vitejs/plugin-vue'
 import { chromium, expect } from '@playwright/test'
 import { fixtures } from '../../test-results/d11-ssr/components.mjs'
 
-test('selected B Hero/pond and C summaries preserve four themes, states and animation gates in isolated Headless', async () => {
-  const directory = resolve('test-results/v21-ui08-ui09/dashboard'), bundle = resolve(directory, 'bundle')
+test('approved UI-10 preserves grouped clock, rounded pond, summaries, themes and animation gates', async () => {
+  const directory = resolve('test-results/v21-ui10-ui11/dashboard'), bundle = resolve(directory, 'bundle')
   await mkdir(directory, { recursive: true })
   await build({ configFile: false, plugins: [vue()], logLevel: 'warn', define: { 'process.env.NODE_ENV': '"production"' }, build: {
     outDir: bundle, emptyOutDir: false,
@@ -23,12 +23,13 @@ test('selected B Hero/pond and C summaries preserve four themes, states and anim
     page = await browser.newPage({ viewport: { width: 720, height: 580 } })
     page.setDefaultTimeout(5000)
     page.on('pageerror', error => errors.push(error.message))
-    await page.route('http://dashboard.test/**', async route => {
+    const serve = async route => {
       const path = new URL(route.request().url()).pathname.slice(1)
       if (!path) return route.fulfill({ contentType: 'text/html', body: `<html><head><link rel="stylesheet" href="/${css}"></head><body><div id="app"></div><script type="module" src="/dashboard.mjs"></script></body></html>` })
       if (path !== 'dashboard.mjs' && path !== css) return route.fulfill({ status: 404, body: '' })
       return route.fulfill({ contentType: path.endsWith('.css') ? 'text/css' : 'text/javascript', body: await readFile(resolve(bundle, path)) })
-    })
+    }
+    await page.route('http://dashboard.test/**', serve)
     await page.goto('http://dashboard.test/')
     await page.waitForFunction(() => typeof window.__dashboard === 'function')
     const set = async value => {
@@ -59,11 +60,13 @@ test('selected B Hero/pond and C summaries preserve four themes, states and anim
       })
       await page.screenshot({ path: resolve(directory, `dashboard-${accent}-${theme}.png`), fullPage: true })
       assert.ok(geometry.font >= 88)
-      assert.equal(geometry.weight, '400')
+      assert.equal(geometry.weight, '700')
+      assert.deepEqual(await page.locator('.we-time-label').allTextContents(), ['小时', '分钟', '秒'])
+      assert.notEqual(await page.locator('.we-time-group').first().evaluate(element => getComputedStyle(element).color), await page.locator('.we-time-group--seconds').evaluate(element => getComputedStyle(element).color))
       assert.ok(Math.abs(geometry.timerCenter - geometry.heroCenter) <= 1)
       assert.ok(Math.abs(geometry.labelCenter - geometry.trackCenter) <= 1)
       assert.ok(geometry.height <= 580, JSON.stringify(geometry))
-      checks.push(`${accent}/${theme}: B light-weight Hero/pond, C left-top titles, accessible progress without visible heading, default fit`)
+      checks.push(`${accent}/${theme}: approved clock hierarchy, tinted cards, accessible progress and default fit`)
     }
     for (const width of [680, 720, 480]) {
       await page.setViewportSize({ width, height: 580 })
@@ -106,7 +109,7 @@ test('selected B Hero/pond and C summaries preserve four themes, states and anim
       if (state === 'estimate') {
         await expect(page.locator('.dashboard')).toContainText('2027')
         const heights = await page.locator('.we-metric').evaluateAll(cards => cards.map(card => card.getBoundingClientRect().height))
-        assert.ok(heights[2] < heights[0], 'natural-day card must not stretch to the height of unrelated estimate notices')
+        assert.ok(Math.max(...heights) - Math.min(...heights) <= 1, 'approved summary row stays uniform while notices expand naturally')
       }
       if (state === 'rest') await expect(page.locator('progress')).toHaveCount(0)
       if (['estimate', 'rest'].includes(state)) await page.screenshot({ path: resolve(directory, `dashboard-${state}.png`), fullPage: true })
@@ -130,7 +133,8 @@ test('selected B Hero/pond and C summaries preserve four themes, states and anim
       const snapshot = structuredClone(f.snapshots.working); snapshot.countdown.seconds = 360000
       await set({ snapshot })
       await fits()
-      await expect(page.getByRole('timer')).toHaveText('100:00:00')
+      assert.equal((await page.locator('.we-time-part').allTextContents()).join(':'), '100:00:00')
+      await expect(page.getByRole('timer')).toHaveAttribute('aria-label', /100:00:00/)
       await page.screenshot({ path: resolve(directory, `dashboard-${width}.png`), fullPage: true })
       checks.push(`${width}px: 100-hour stress and three cards reachable`)
       snapshot.employment.elapsedNaturalDays = 123456789
@@ -146,9 +150,9 @@ test('selected B Hero/pond and C summaries preserve four themes, states and anim
       const geometry = await page.evaluate(() => {
         const rect = selector => document.querySelector(selector).getBoundingClientRect()
         const track = rect('.fish-track'), fill = rect('.fish-fill'), fish = rect('.fish-marker'), label = rect('.fish-readout'), water = rect('.fish-water'), surface = rect('.fish-surface')
-        return { fill: fill.width, track: track.width, surface: surface.width, fishLeft: fish.left, fishRight: fish.right, left: track.left, right: track.right, fishBottom: fish.bottom, labelTop: label.top, labelBottom: label.bottom, waterTop: water.top, waterBottom: water.bottom }
+        return { fill: fill.width, waterInner: document.querySelector('.fish-water').clientWidth, track: track.width, surface: surface.width, fishLeft: fish.left, fishRight: fish.right, left: track.left, right: track.right, fishBottom: fish.bottom, labelTop: label.top, labelBottom: label.bottom, waterTop: water.top, waterBottom: water.bottom }
       })
-      assert.ok(Math.abs(geometry.fill - geometry.track * percent / 100) < 1)
+      assert.ok(Math.abs(geometry.fill - geometry.waterInner * percent / 100) < 1)
       assert.ok(geometry.fishLeft >= geometry.left - 1 && geometry.fishRight <= geometry.right + 1)
       assert.ok(geometry.fishBottom <= geometry.labelTop, JSON.stringify(geometry))
       assert.ok(geometry.labelTop >= geometry.waterTop && geometry.labelBottom <= geometry.waterBottom, 'percentage belongs inside pond')
@@ -175,6 +179,21 @@ test('selected B Hero/pond and C summaries preserve four themes, states and anim
     await fits()
     await page.screenshot({ path: resolve(directory, 'dashboard-forced-colors.png'), fullPage: true })
     checks.push('existing motion gate, reduced motion and forced colors')
+    await page.emulateMedia({ forcedColors: 'none', reducedMotion: 'reduce' })
+    const reference = f.snapshots.approved // Existing engine + fixed clock; never alter business values to match concept art.
+    await set({ snapshot: reference })
+    await page.screenshot({ path: resolve(directory, 'dashboard-approved.png'), fullPage: true })
+    assert.equal(await page.locator('.fish-surface').evaluate(element => getComputedStyle(element).animationName), 'none')
+    await page.close()
+    page = await browser.newPage({ viewport: { width: 480, height: 387 }, deviceScaleFactor: 1.5 })
+    page.on('pageerror', error => errors.push(error.message))
+    await page.route('http://dashboard.test/**', serve)
+    await page.goto('http://dashboard.test/')
+    await page.waitForFunction(() => typeof window.__dashboard === 'function')
+    await set({ snapshot: reference }); await fits()
+    assert.equal(await page.evaluate(() => devicePixelRatio), 1.5)
+    await page.screenshot({ path: resolve(directory, 'dashboard-dpr150.png'), fullPage: true })
+    checks.push('approved reference sample; static surface; DPR 1.5 at 480 CSS pixels, no horizontal clipping (Windows DPI still requires manual acceptance)')
     assert.deepEqual(errors, [])
   } catch (error) {
     if (page) await page.screenshot({ path: resolve(directory, 'failure.png'), fullPage: true }).catch(() => {})

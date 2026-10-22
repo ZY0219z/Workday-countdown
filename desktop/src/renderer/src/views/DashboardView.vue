@@ -26,17 +26,17 @@ const estimate=computed(()=>props.snapshot?.countdown?.quality.approximate?quali
       </section>
     </div>
     <div class="dashboard-metrics">
-      <MetricCard title="下个休息日" description-label="休息日期" :value="snapshot?.nextRest?.days??null" unit="天" :description="snapshot?.nextRest ? (snapshot.nextRest.days===0?'今天休息 · ':'')+snapshot.nextRest.date : '未来查询范围内暂无可用结果'" :source="snapshot?.nextRest?.quality.approximate?qualityText(snapshot.nextRest.quality):''" :estimated="snapshot?.nextRest?.quality.approximate" :warning="snapshot ? affectedWarnings(snapshot,'nextRest'):''" />
-      <MetricCard title="下次预计发薪" description-label="预计日期" :value="snapshot?.salary?.days??null" unit="天" :empty-label="snapshot?.salaryAmbiguity?'发薪周期存在歧义':'暂无计划日期'" :description="salaryDescription" :source="snapshot?.salary?.quality.approximate?qualityText(snapshot.salary.quality):''" :estimated="snapshot?.salary?.quality.approximate" :warning="salaryWarning" />
-      <MetricCard title="已工作" :value="snapshot?.employment.elapsedNaturalDays??null" unit="天" :description="snapshot?.employment.status==='notStarted'?'尚未入职':snapshot?.employment.status==='unset'?'尚未设置入职日期':''" />
+      <MetricCard title="下个休息日" tone="rest" :value="snapshot?.nextRest?.days??null" unit="天" :description="snapshot?.nextRest ? (snapshot.nextRest.days===0?'今天休息 · ':'')+snapshot.nextRest.date : '未来查询范围内暂无可用结果'" :source="snapshot?.nextRest?.quality.approximate?qualityText(snapshot.nextRest.quality):''" :estimated="snapshot?.nextRest?.quality.approximate" :warning="snapshot ? affectedWarnings(snapshot,'nextRest'):''" />
+      <MetricCard title="下次预计发薪" tone="salary" :value="snapshot?.salary?.days??null" unit="天" :empty-label="snapshot?.salaryAmbiguity?'发薪周期存在歧义':'暂无计划日期'" :description="salaryDescription" :source="snapshot?.salary?.quality.approximate?qualityText(snapshot.salary.quality):''" :estimated="snapshot?.salary?.quality.approximate" :warning="salaryWarning" />
+      <MetricCard title="已工作" tone="employment" :value="snapshot?.employment.elapsedNaturalDays??null" unit="天" :description="snapshot?.employment.status==='notStarted'?'尚未入职':snapshot?.employment.status==='unset'?'尚未设置入职日期':''" />
     </div>
   </section>
 </template>
 <style scoped>
 .dashboard { display:grid;gap:var(--we-space-3);container-type:inline-size; }
-.dashboard-primary { min-width:0; }
-.dashboard-progress { padding:0 var(--we-space-6) var(--we-space-3); }
-.dashboard-metrics { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:start;gap:var(--we-space-3); }
+.dashboard .dashboard-primary { min-width:0;background:radial-gradient(ellipse at 5% 2%,var(--we-hero-tint,var(--we-subtle)),transparent 48%),var(--we-surface);border-color:var(--we-card-border,var(--we-border)); }
+.dashboard-progress { padding:0 var(--we-space-6) 8px; }
+.dashboard-metrics { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:stretch;gap:var(--we-space-3); }
 .dashboard-warning { font-size:var(--we-text-small);color:var(--we-warning-text);overflow-wrap:anywhere; }
-@media (max-width:439px) { .dashboard-metrics { grid-template-columns:minmax(0,1fr); } }
+@media (max-width:520px) { .dashboard-metrics { grid-template-columns:minmax(0,1fr); } }
 </style>

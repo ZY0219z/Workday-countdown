@@ -12,7 +12,7 @@ window.__settingsInit = fixture => {
   app?.unmount()
   let session = clone(fixture.session), snapshot = clone(fixture.snapshot)
   let savedSession = clone(session)
-  const saves = [], calls = { recovery: 0, imports: [], apply: 0, quit: 0 }
+  const saves = [], calls = { recovery: 0, imports: [], apply: 0, quit: 0, expectedEnd: [] }
   window.workdayV2 = {
     settingsDraft: {
       read: async () => ok(session),
@@ -20,7 +20,8 @@ window.__settingsInit = fixture => {
         session = { ...session, draft: clone(request.draft), dirty: true }
         return ok(session)
       },
-      discard: async () => { session = clone(savedSession); return ok(session) }
+      discard: async () => { session = clone(savedSession); return ok(session) },
+      setExpectedEnd: async request => { calls.expectedEnd.push(clone(request)); session.expectedEndEdit = clone(request); return ok(session) }
     },
     config: { save: async request => {
       saves.push(clone(request))

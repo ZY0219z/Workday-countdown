@@ -24,7 +24,7 @@ const display = computed(() => countdownPresentation(props.state, props.text, pr
     <div class="we-countdown-body">
       <div class="we-countdown-copy">
         <h2 :id="headingId">{{ display.heading }}</h2>
-        <output v-if="display.text !== null" class="we-countdown-value" role="timer" aria-live="off" :aria-label="hero ? display.heading+' '+display.text : display.heading" :style="hero ? { '--we-time-length': display.text.length } : undefined"><template v-if="hero"><template v-for="(part,index) in display.text.split(':')" :key="index"><span class="we-time-part">{{ part }}</span><span v-if="index<2" class="we-time-separator" aria-hidden="true">:</span></template></template><template v-else>{{ display.text }}</template></output>
+        <output v-if="display.text !== null" class="we-countdown-value" role="timer" aria-live="off" :aria-label="hero ? display.heading+' '+display.text : display.heading" :style="hero ? { '--we-time-length': display.text.length } : undefined"><template v-if="hero"><template v-for="(part,index) in display.text.split(':')" :key="index"><span class="we-time-group" :class="{'we-time-group--seconds':index===2}"><span class="we-time-part">{{ part }}</span><span class="we-time-label" aria-hidden="true">{{ ['小时','分钟','秒'][index] }}</span></span><span v-if="index<2" class="we-time-separator" aria-hidden="true">:</span></template></template><template v-else>{{ display.text }}</template></output>
         <p v-else class="we-countdown-empty">{{ display.emptyLabel }}</p>
         <p v-if="target && display.text !== null" class="we-muted we-countdown-target">{{ target.kind === 'workStart' ? '上班' : '下班时间' }}：{{ [target.date, target.time].filter(Boolean).join(' ') }}</p>
       </div>
@@ -58,18 +58,23 @@ h2 { font-size: var(--we-text-title); font-weight: 600; }
 .we-countdown--compact .we-countdown-illustration { flex-basis: 36px; width: 36px; }
 .we-countdown--compact .we-countdown-empty { font-size: 14px; }
 .we-countdown--compact .we-countdown-hint { margin-top: var(--we-space-1); }
-.we-countdown--hero { position:relative;padding:var(--we-space-4) var(--we-space-6) var(--we-space-3);text-align:center; }
+.we-countdown--hero { position:relative;padding:12px var(--we-space-6) 0;text-align:center; }
 .we-countdown--hero .we-countdown-header { position:absolute;top:var(--we-space-4);right:var(--we-space-6); }
 .we-countdown--hero .we-countdown-body { margin-top:0; }
-.we-countdown--hero h2 { color:var(--we-muted);font-size:var(--we-text-body);font-weight:500; }
-.we-countdown--hero .we-countdown-value { display:flex;justify-content:center;align-items:baseline;gap:6px;margin:var(--we-space-2) 0;font-size:min(96px,calc(150cqi / var(--we-time-length)));font-weight:400;line-height:1.12;letter-spacing:-.035em;overflow-wrap:normal; }
+.we-countdown--hero h2 { color:var(--we-clock,var(--we-text));font-size:17px;font-weight:600; }
+.we-countdown--hero .we-countdown-value { display:flex;justify-content:center;align-items:start;gap:8px;margin:4px 0 8px;font-size:min(96px,calc(145cqi / var(--we-time-length)));font-weight:700;line-height:1.03;letter-spacing:-.035em;color:var(--we-clock,var(--we-text));overflow-wrap:normal; }
+.we-time-group { display:grid;justify-items:center; }
+.we-time-group--seconds { color:var(--we-clock-seconds,var(--we-accent)); }
+.we-time-label { font:400 12px/16px var(--we-font);letter-spacing:0;color:var(--we-muted); }
 .we-countdown--hero .we-time-part { flex:none; }
-.we-countdown--hero .we-time-separator { color:var(--we-muted);font-size:.75em;font-weight:300; }
-.we-countdown--hero .we-countdown-hint { margin-top:var(--we-space-2); }
+.we-countdown--hero .we-time-separator { color:var(--we-clock-seconds,var(--we-muted));font-size:.7em;font-weight:400;line-height:1.25; }
+.we-countdown--hero .we-countdown-hint { margin-top:4px; }
+.we-countdown--hero .we-countdown-target,.we-countdown--hero .we-countdown-hint { font-size:13px; }
 .we-countdown--hero .we-countdown-notices { display:grid;justify-items:center;gap:var(--we-space-1); }
 @container (max-width: 440px) {
-  .we-countdown--hero .we-countdown-value { gap:4px;font-size:min(72px,calc(150cqi / var(--we-time-length))); }
+  .we-countdown--hero .we-countdown-value { gap:4px;font-size:min(72px,calc(138cqi / var(--we-time-length))); }
   .we-countdown-illustration { flex-basis: 80px; width: 80px; }
   .we-countdown--compact .we-countdown-illustration { flex-basis: 36px; width: 36px; }
 }
+@container (max-width:360px) { .we-countdown--hero .we-countdown-header { position:static;justify-content:center;margin-bottom:8px; } }
 </style>

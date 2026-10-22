@@ -57,7 +57,7 @@ function trap(event:KeyboardEvent){if(event.key==='Escape'){event.preventDefault
 async function miniMode(){
   error.value=''
   if(composing.value||confirmLeave.value){error.value='请先完成输入或当前确认，再切换迷你模式。';return}
-  if(!state.value.session?.saved?.desktop.miniEnabled){error.value='请在“更多设置”中启用迷你窗并保存。';return}
+  if(!state.value.session?.saved?.desktop.miniEnabled){error.value='请在设置中启用迷你窗并保存。';return}
   const synced=await controller.flush();await nextTick()
   if(!synced.ok||pending.value){error.value='设置尚未同步，输入保留；请完成同步后再切换。';return}
   const result=await api.window.perform({action:'showMini'});if(!result.ok)error.value='迷你模式未打开，主窗口与设置保留；请完成同步后重试。'
