@@ -7,8 +7,8 @@ import vue from '@vitejs/plugin-vue'
 import { chromium, expect } from '@playwright/test'
 import { fixtures } from '../../test-results/d11-ssr/components.mjs'
 
-test('V2.1 Dashboard hierarchy, four themes, key states and progress boundaries in isolated Headless', async () => {
-  const directory = resolve('test-results/v21-dashboard'), bundle = resolve(directory, 'bundle')
+test('selected B Hero/pond and C summaries preserve four themes, states and animation gates in isolated Headless', async () => {
+  const directory = resolve('test-results/v21-dashboard-selected'), bundle = resolve(directory, 'bundle')
   await mkdir(directory, { recursive: true })
   await build({ configFile: false, plugins: [vue()], logLevel: 'warn', define: { 'process.env.NODE_ENV': '"production"' }, build: {
     outDir: bundle, emptyOutDir: false,
@@ -39,8 +39,11 @@ test('V2.1 Dashboard hierarchy, four themes, key states and progress boundaries 
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
       const cards = await page.locator('.we-metric').count()
       assert.equal(cards, 3)
-      await expect(page.getByRole('heading', { name: '已工作', exact: true })).toHaveCount(1)
+      for (const name of ['下个休息日', '下次预计发薪', '已工作']) await expect(page.getByRole('heading', { name, exact: true })).toHaveCount(1)
       await expect(page.getByRole('heading', { name: '在职自然日', exact: true })).toHaveCount(0)
+      await expect(page.getByRole('heading', { name: '今日工作进度', exact: true })).toHaveCount(0)
+      await expect(page.getByRole('region', { name: '今日工作进度', exact: true })).toHaveCount(1)
+      assert.equal(await page.locator('.we-metric h2').evaluateAll(headings => headings.every(heading => getComputedStyle(heading).textAlign === 'left')), true)
     }
     for (const theme of ['light', 'dark']) for (const accent of ['ocean', 'coral']) {
       await set({ snapshot: f.snapshots.working, theme, accent })
@@ -51,24 +54,37 @@ test('V2.1 Dashboard hierarchy, four themes, key states and progress boundaries 
         const hero = rect('.we-countdown'), track = rect('.fish-track'), label = rect('.fish-readout')
         return { timerCenter: (parts[0].left + parts.at(-1).right) / 2, heroCenter: hero.x + hero.width / 2,
           trackCenter: track.x + track.width / 2, labelCenter: label.x + label.width / 2,
-          font: parseFloat(getComputedStyle(document.querySelector('.we-countdown-value')).fontSize), height: document.documentElement.scrollHeight }
+          font: parseFloat(getComputedStyle(document.querySelector('.we-countdown-value')).fontSize), weight: getComputedStyle(document.querySelector('.we-countdown-value')).fontWeight, height: document.documentElement.scrollHeight }
       })
       await page.screenshot({ path: resolve(directory, `dashboard-${accent}-${theme}.png`), fullPage: true })
-      assert.ok(geometry.font >= 72)
+      assert.ok(geometry.font >= 88)
+      assert.equal(geometry.weight, '400')
       assert.ok(Math.abs(geometry.timerCenter - geometry.heroCenter) <= 1)
       assert.ok(Math.abs(geometry.labelCenter - geometry.trackCenter) <= 1)
       assert.ok(geometry.height <= 580, JSON.stringify(geometry))
-      checks.push(`${accent}/${theme}: centered Hero, bar readout and default fit`)
+      checks.push(`${accent}/${theme}: B light-weight Hero/pond, C left-top titles, accessible progress without visible heading, default fit`)
     }
     for (const state of ['beforeWork', 'break', 'overtime', 'overnight', 'finished', 'rest', 'estimate']) {
       await set({ snapshot: f.snapshots[state] })
       await fits()
       if (state === 'overnight') await expect(page.locator('.we-countdown-target')).toContainText('2026-10-16 06:00')
-      if (state === 'estimate') await expect(page.locator('.dashboard')).toContainText('2027')
+      if (state === 'estimate') {
+        await expect(page.locator('.dashboard')).toContainText('2027')
+        const heights = await page.locator('.we-metric').evaluateAll(cards => cards.map(card => card.getBoundingClientRect().height))
+        assert.ok(heights[2] < heights[0], 'natural-day card must not stretch to the height of unrelated estimate notices')
+      }
       if (state === 'rest') await expect(page.locator('progress')).toHaveCount(0)
       if (['estimate', 'rest'].includes(state)) await page.screenshot({ path: resolve(directory, `dashboard-${state}.png`), fullPage: true })
       checks.push(`${state}: content reachable, no horizontal overflow`)
     }
+    const widths = []
+    for (const seconds of [11399, 11400, 40271]) {
+      const snapshot = structuredClone(f.snapshots.working); snapshot.countdown.seconds = seconds
+      await set({ snapshot })
+      widths.push(await page.locator('.we-countdown-value').evaluate(element => [...element.querySelectorAll('.we-time-part')].map(part => part.getBoundingClientRect().width)))
+    }
+    assert.deepEqual(widths[0], widths[1]); assert.deepEqual(widths[1], widths[2])
+    checks.push('tabular digits: widths stable across second/minute rollover and different glyphs')
     await set({ snapshot: null })
     await fits()
     await expect(page.locator('[role="timer"],progress')).toHaveCount(0)
@@ -82,6 +98,11 @@ test('V2.1 Dashboard hierarchy, four themes, key states and progress boundaries 
       await expect(page.getByRole('timer')).toHaveText('100:00:00')
       await page.screenshot({ path: resolve(directory, `dashboard-${width}.png`), fullPage: true })
       checks.push(`${width}px: 100-hour stress and three cards reachable`)
+      snapshot.employment.elapsedNaturalDays = 123456789
+      await set({ snapshot })
+      await fits()
+      await expect(page.locator('.we-metric').last()).toContainText('123456789')
+      checks.push(`${width}px: long natural-day value remains readable without horizontal overflow`)
     }
     await page.setViewportSize({ width: 720, height: 580 })
     for (const percent of [0, 1, 5, 10, 50, 100]) {
@@ -89,16 +110,26 @@ test('V2.1 Dashboard hierarchy, four themes, key states and progress boundaries 
       await set({ snapshot })
       const geometry = await page.evaluate(() => {
         const rect = selector => document.querySelector(selector).getBoundingClientRect()
-        const track = rect('.fish-track'), fill = rect('.fish-fill'), fish = rect('.fish-marker'), label = rect('.fish-readout')
-        return { fill: fill.width, track: track.width, fishLeft: fish.left, fishRight: fish.right, left: track.left, right: track.right, fishBottom: fish.bottom, labelTop: label.top }
+        const track = rect('.fish-track'), fill = rect('.fish-fill'), fish = rect('.fish-marker'), label = rect('.fish-readout'), water = rect('.fish-water'), surface = rect('.fish-surface')
+        return { fill: fill.width, track: track.width, surface: surface.width, fishLeft: fish.left, fishRight: fish.right, left: track.left, right: track.right, fishBottom: fish.bottom, labelTop: label.top, labelBottom: label.bottom, waterTop: water.top, waterBottom: water.bottom }
       })
       assert.ok(Math.abs(geometry.fill - geometry.track * percent / 100) < 1)
       assert.ok(geometry.fishLeft >= geometry.left - 1 && geometry.fishRight <= geometry.right + 1)
       assert.ok(geometry.fishBottom <= geometry.labelTop, JSON.stringify(geometry))
+      assert.ok(geometry.labelTop >= geometry.waterTop && geometry.labelBottom <= geometry.waterBottom, 'percentage belongs inside pond')
+      assert.ok(Math.abs(geometry.surface - geometry.track) < 1, 'surface is cropped at full-track scale, never squeezed')
       await expect(page.locator('.fish-readout')).toHaveText(`${percent}%`)
       await expect(page.locator('.fish-wave,.fish-wave-path')).toHaveCount(0)
-      checks.push(`${percent}%: exact fill, bounded mascot, unobstructed readout, no wave cluster`)
+      if ([1, 50, 100].includes(percent)) await page.screenshot({ path: resolve(directory, `dashboard-progress-${percent}.png`), fullPage: true })
+      checks.push(`${percent}%: exact fill, bounded mascot, unobstructed pond readout, full-scale surface, no wave cluster`)
     }
+    for (const state of ['working', 'overtime', 'beforeWork', 'break', 'finished', 'rest']) {
+      await set({ snapshot: f.snapshots[state], reduced: false, motionAllowed: true })
+      await expect(page.locator('.moyu-animated')).toHaveCount(['working', 'overtime'].includes(state) ? 1 : 0)
+    }
+    await set({ snapshot: f.snapshots.working, reduced: false, motionAllowed: false })
+    await expect(page.locator('.moyu-animated')).toHaveCount(0)
+    checks.push('GIF: working/overtime only; before-work/break/finished/rest and disabled visibility/motion gate stay static')
     await set({ snapshot: f.snapshots.working, reduced: false, motionAllowed: true })
     await expect(page.locator('.moyu-animated')).toHaveCount(1)
     await page.emulateMedia({ reducedMotion: 'reduce' })
