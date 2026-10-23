@@ -7,8 +7,8 @@ import vue from '@vitejs/plugin-vue'
 import { chromium, expect } from '@playwright/test'
 import { fixtures } from '../../test-results/d11-ssr/components.mjs'
 
-test('UI-12 renders centred mascot, readable capsule, underwater cards and original motion gates', async () => {
-  const directory = resolve('test-results/v21-ui12/dashboard'), bundle = resolve(directory, 'bundle')
+test('UI-13 renders continuous gated water flow, centred summaries and a stable readout', async () => {
+  const directory = resolve('test-results/v21-ui13/dashboard'), bundle = resolve(directory, 'bundle')
   await mkdir(directory, { recursive: true })
   await build({ configFile: false, plugins: [vue()], logLevel: 'warn', define: { 'process.env.NODE_ENV': '"production"' }, build: {
     outDir: bundle, emptyOutDir: false,
@@ -36,6 +36,14 @@ test('UI-12 renders centred mascot, readable capsule, underwater cards and origi
       await page.evaluate(value => window.__dashboard(value), value)
       await page.waitForFunction(() => [...document.querySelectorAll('canvas')].every(canvas => canvas.dataset.ready === 'true'))
     }
+    const pixelDifference=async(first,second)=>page.evaluate(async sources=>{
+      const decode=async source=>{const image=new Image();image.src='data:image/png;base64,'+source;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;const context=canvas.getContext('2d');context.drawImage(image,0,0);return context.getImageData(0,0,canvas.width,canvas.height)}
+      const a=await decode(sources[0]),b=await decode(sources[1]);if(a.width!==b.width||a.height!==b.height)throw Error('frame size changed')
+      let changed=0
+      for(let i=0;i<a.data.length;i+=4)if([0,1,2,3].some(channel=>Math.abs(a.data[i+channel]-b.data[i+channel])>4))changed++
+      const bottom=(Math.floor(a.width/2)+(a.height-4)*a.width)*4
+      return {changed,total:a.width*a.height,ratio:changed/(a.width*a.height),bottomCentre:[...a.data.slice(bottom,bottom+4)]}
+    },[first.toString('base64'),second.toString('base64')])
     const fits = async () => {
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
       const columns = await page.locator('.we-metric').evaluateAll(cards => cards.map(card => card.getBoundingClientRect().top))
@@ -47,6 +55,12 @@ test('UI-12 renders centred mascot, readable capsule, underwater cards and origi
       await expect(page.getByRole('heading', { name: '今日工作进度', exact: true })).toHaveCount(0)
       await expect(page.getByRole('region', { name: '今日工作进度', exact: true })).toHaveCount(1)
       assert.equal(await page.locator('.we-metric h2').evaluateAll(headings => headings.every(heading => getComputedStyle(heading).textAlign === 'left')), true)
+      const centres=await page.locator('.we-metric').evaluateAll(cards=>cards.map(card=>{
+        const r=card.getBoundingClientRect(),middle=r.x+r.width/2
+        return [...card.querySelectorAll('.we-metric-value,.we-metric-details')].map(element=>{const b=element.getBoundingClientRect();return Math.abs(b.x+b.width/2-middle)})
+      }))
+      assert.ok(centres.flat().every(offset=>offset<=1),'values with units and dates must be horizontally centred')
+      await expect(page.locator('.we-time-label')).toHaveCount(0)
     }
     for (const theme of ['light', 'dark']) for (const accent of ['ocean', 'coral']) {
       await set({ snapshot: f.snapshots.working, theme, accent })
@@ -66,7 +80,7 @@ test('UI-12 renders centred mascot, readable capsule, underwater cards and origi
       await page.screenshot({ path: resolve(directory, `dashboard-${accent}-${theme}.png`), fullPage: true })
       assert.ok(geometry.font >= 88)
       assert.equal(geometry.weight, '700')
-      assert.deepEqual(await page.locator('.we-time-label').allTextContents(), ['小时', '分钟', '秒'])
+      await expect(page.locator('.we-time-label')).toHaveCount(0)
       assert.notEqual(await page.locator('.we-time-group').first().evaluate(element => getComputedStyle(element).color), await page.locator('.we-time-group--seconds').evaluate(element => getComputedStyle(element).color))
       assert.ok(Math.abs(geometry.timerCenter - geometry.heroCenter) <= 1)
       assert.ok(Math.abs(geometry.labelCenter - geometry.trackCenter) <= 1)
@@ -132,6 +146,7 @@ test('UI-12 renders centred mascot, readable capsule, underwater cards and origi
     await fits()
     await expect(page.locator('[role="timer"],progress')).toHaveCount(0)
     await expect(page.locator('.fish-idle')).toContainText('无工作进度')
+    await expect(page.locator('.fish-surface')).toHaveCount(0)
     checks.push('unavailable: no fabricated countdown or zero progress')
     for (const width of [480, 360]) {
       await page.setViewportSize({ width, height: 580 })
@@ -148,11 +163,11 @@ test('UI-12 renders centred mascot, readable capsule, underwater cards and origi
       await expect(page.locator('.we-metric').last()).toContainText('123456789')
       checks.push(`${width}px: long natural-day value remains readable without horizontal overflow`)
     }
-    const progressCases = [0, 1, 8.3, 50, 78, 100]
+    const progressCases = [0, 1, 8.3, 19.6, 50, 78, 100]
     const checkPond = async percent => {
       const geometry = await page.evaluate(() => {
         const rect = selector => document.querySelector(selector).getBoundingClientRect().toJSON()
-        return { track: rect('.fish-track'), fill: rect('.fish-fill'), fish: rect('.fish-marker'), label: rect('.fish-readout'), water: rect('.fish-water'), surface: rect('.fish-surface'), inner: document.querySelector('.fish-water').clientWidth }
+        return { track: rect('.fish-track'), fill: rect('.fish-fill'), fish: rect('.fish-marker'), label: rect('.fish-readout'), water: rect('.fish-water'), surface: rect('.fish-surface--front'), inner: document.querySelector('.fish-water').clientWidth }
       })
       const {track,fill,fish,label,water,surface,inner} = geometry
       assert.ok(Math.abs(fill.width - inner * percent / 100) < 1, JSON.stringify(geometry))
@@ -163,11 +178,11 @@ test('UI-12 renders centred mascot, readable capsule, underwater cards and origi
       assert.ok(Math.abs(label.x+label.width/2-track.x-track.width/2) < 1, 'capsule stays horizontally centred')
       assert.ok(label.left >= track.left && label.right <= track.right && label.top >= track.top && label.bottom <= track.bottom)
       assert.ok(fish.right <= label.left || fish.left >= label.right || fish.bottom <= label.top || fish.top >= label.bottom, 'capsule and mascot do not overlap')
-      assert.ok(Math.abs(surface.width-track.width) < 1, 'waves retain full-track scale at low fill')
+      assert.ok(Math.abs(surface.width-2*track.width) < 1, 'two full-track tiles retain their scale at low fill')
       await expect(page.locator('.fish-readout')).toHaveText(`${percent}%`)
       await expect(page.locator('progress')).toHaveAttribute('aria-label','有效工作进度')
       await expect(page.locator('.fish-wave,.fish-wave-path')).toHaveCount(0)
-      assert.equal(await page.locator('.fish-surface').evaluate(element => getComputedStyle(element).animationName), 'none')
+      await expect(page.locator('.fish-surface')).toHaveCount(2)
       return geometry
     }
     for (const width of [720, 480, 360]) {
@@ -177,32 +192,76 @@ test('UI-12 renders centred mascot, readable capsule, underwater cards and origi
         await set({ snapshot }); await fits(); await checkPond(percent)
         await page.screenshot({ path: resolve(directory, `pond-${width}-${percent}.png`), fullPage: true })
       }
-      checks.push(`${width}px / 0,1,8.3,50,78,100%: true fill/position, vertical centre, bounded mascot, central capsule with collision avoidance, full-scale waves`)
+      checks.push(`${width}px / 0,1,8.3,19.6,50,78,100%: true fill/position, vertical centre, bounded mascot, stable rim capsule with no overlap, full-scale waves`)
     }
     await page.setViewportSize({ width: 720, height: 580 })
+    const flow=structuredClone(f.snapshots.pond);flow.progress.percent=50
+    await set({snapshot:flow,motionAllowed:true,reduced:false})
+    // Exclude the independently animated GIF from wave pixel evidence only; normal UI/GIF checks keep it visible.
+    const isolateWater=await page.addStyleTag({content:'.fish-marker{visibility:hidden!important}'})
+    const water=page.locator('.fish-water')
+    const sample=()=>page.evaluate(()=>({at:performance.now(),fill:document.querySelector('.fish-fill').getBoundingClientRect().width,fish:document.querySelector('.fish-marker').getBoundingClientRect().x,layers:[...document.querySelectorAll('.fish-surface')].map(element=>({transform:getComputedStyle(element).transform,x:new DOMMatrixReadOnly(getComputedStyle(element).transform).m41,time:element.getAnimations()[0]?.currentTime,state:element.getAnimations()[0]?.playState}))}))
+    const running0=await sample(),frame0=await water.screenshot({animations:'allow'})
+    await page.waitForTimeout(1400) // Real elapsed time; production animation uses CSS only.
+    const running1=await sample(),frame1=await water.screenshot({animations:'allow'})
+    const runningPixels=await pixelDifference(frame0,frame1)
+    assert.ok(runningPixels.changed>20,'running water must visibly change pixels')
+    assert.ok(running0.layers.every((layer,index)=>layer.state==='running'&&running1.layers[index].transform!==layer.transform))
+    assert.equal(running0.fill,running1.fill);assert.equal(running0.fish,running1.fish)
+    await writeFile(resolve(directory,'water-running-t0.png'),frame0);await writeFile(resolve(directory,'water-running-t1.png'),frame1)
+    await set({snapshot:flow,motionAllowed:false,reduced:false})
+    const paused0=await sample(),pauseFrame0=await water.screenshot({animations:'allow'})
+    await page.waitForTimeout(700)
+    const paused1=await sample(),pauseFrame1=await water.screenshot({animations:'allow'})
+    const pausedPixels=await pixelDifference(pauseFrame0,pauseFrame1)
+    assert.equal(pausedPixels.changed,0,'paused water pixels stay still')
+    assert.deepEqual(paused0.layers,paused1.layers)
+    assert.ok(paused1.layers.every(layer=>layer.state==='paused'))
+    await writeFile(resolve(directory,'water-paused-t0.png'),pauseFrame0);await writeFile(resolve(directory,'water-paused-t1.png'),pauseFrame1)
+    await set({snapshot:flow,motionAllowed:true,reduced:false})
+    const resumed=await sample()
+    assert.ok(resumed.layers.every((layer,index)=>layer.time>=paused1.layers[index].time&&layer.time-paused1.layers[index].time<500),'resume continues the existing phase')
+    const seam=async offset=>{
+      await page.locator('.fish-surface').evaluateAll((elements,offset)=>{for(const element of elements){const animation=element.getAnimations()[0],timing=animation.effect.getTiming();animation.pause();animation.currentTime=timing.delay+timing.duration+offset}},offset)
+      return water.screenshot({animations:'allow'})
+    }
+    const seamBefore=await seam(-0.01),seamStateBefore=await sample(),seamAfter=await seam(0.01),seamStateAfter=await sample()
+    const seamPixels=await pixelDifference(seamBefore,seamAfter)
+    assert.ok(seamPixels.ratio<0.005,'loop boundary must be visually continuous despite a full-tile transform wrap')
+    assert.ok(seamStateBefore.layers.every((layer,index)=>Math.abs(layer.x-seamStateAfter.layers[index].x)>100))
+    await writeFile(resolve(directory,'water-loop-before.png'),seamBefore);await writeFile(resolve(directory,'water-loop-after.png'),seamAfter)
+    await writeFile(resolve(directory,'water-motion.json'),JSON.stringify({running0,running1,runningPixels,paused0,paused1,pausedPixels,resumed,seamStateBefore,seamStateAfter,seamPixels},null,2))
+    // Release test-only timeline control before checking normal gates again.
+    await page.locator('.fish-surface').evaluateAll(elements=>elements.forEach(element=>element.getAnimations()[0].play()))
+    await isolateWater.evaluate(element=>element.remove())
+    checks.push('real-time water frames change; paused pixels/time stay identical; resume retains phase; both repeated layers cross loop seam without a visible jump; fill and mascot position unchanged')
     const moving = structuredClone(f.snapshots.working)
     moving.progress.percent = 1
     await set({snapshot:moving,motionAllowed:true,reduced:false})
     moving.progress.percent = 8.3
     await set({snapshot:moving,motionAllowed:true,reduced:false})
-    // An interrupted move must protect the capsule along the actual swept path, not only at the destination.
+    // The central rim capsule remains stationary even when the mascot crosses the centre.
     moving.progress.percent = 50
     await set({snapshot:moving,motionAllowed:true,reduced:false})
-    await expect(page.locator('.fish-readout')).toHaveClass(/fish-readout--lifted/)
+    const readoutBefore=await page.locator('.fish-readout').boundingBox()
     moving.progress.percent = 100
     await set({snapshot:moving,motionAllowed:true,reduced:false})
     await expect.poll(() => page.locator('.fish-marker').evaluate(element => element.getAnimations().length)).toBe(0)
-    await expect(page.locator('.fish-readout')).not.toHaveClass(/fish-readout--lifted/)
+    const readoutAfter=await page.locator('.fish-readout').boundingBox()
+    assert.equal(readoutAfter.y,readoutBefore.y)
+    assert.ok(Math.abs(readoutAfter.x+readoutAfter.width/2-readoutBefore.x-readoutBefore.width/2)<1,'different text widths retain the same centre')
     await checkPond(100)
     await page.setViewportSize({width:360,height:580})
     await expect.poll(() => page.locator('.fish-track').evaluate(element => element.clientWidth)).toBeLessThan(360)
     await checkPond(100)
     await expect(page.locator('.fish-marker')).not.toHaveClass(/fish-marker--moving/)
     await page.setViewportSize({width:720,height:580})
-    checks.push('interrupted progress transition: central capsule protected during sweep; resize remeasures without movement transition')
+    checks.push('interrupted progress transition: capsule remains stationary during sweep; resize remeasures without movement transition')
     for (const state of ['working', 'overtime', 'beforeWork', 'break', 'finished', 'rest']) {
       await set({ snapshot: f.snapshots[state], reduced: false, motionAllowed: true })
       await expect(page.locator('.moyu-animated')).toHaveCount(['working', 'overtime'].includes(state) ? 1 : 0)
+      const playing=['working','overtime'].includes(state)
+      assert.ok(await page.locator('.fish-surface').evaluateAll((elements,playing)=>elements.every(element=>getComputedStyle(element).animationPlayState===(playing?'running':'paused')),playing))
     }
     await set({ snapshot: f.snapshots.working, reduced: false, motionAllowed: false })
     await expect(page.locator('.moyu-animated')).toHaveCount(0)
@@ -247,10 +306,19 @@ test('UI-12 renders centred mascot, readable capsule, underwater cards and origi
     await page.screenshot({ path: resolve(directory, 'dashboard-forced-colors.png'), fullPage: true })
     checks.push('existing motion gate, reduced motion and forced colors')
     await page.emulateMedia({ forcedColors: 'none', reducedMotion: 'reduce' })
-    const reference = f.snapshots.refined // Existing engine + fixed clock; never alter business values to match concept art.
+    const reference = f.snapshots.pond // Existing engine + fixed clock; never alter business values to match concept art.
     await set({ snapshot: reference })
     await page.screenshot({ path: resolve(directory, 'dashboard-approved.png'), fullPage: true })
-    assert.equal(await page.locator('.fish-surface').evaluate(element => getComputedStyle(element).animationName), 'none')
+    const primary=await page.locator('.dashboard-primary').screenshot()
+    const background=await pixelDifference(primary,primary)
+    assert.ok(background.bottomCentre[2]>background.bottomCentre[0]+6,'ocean label area must retain a blue tint instead of a white strip')
+    assert.equal(await page.locator('.fish-endpoints').evaluate(element=>getComputedStyle(element).backgroundColor),'rgba(0, 0, 0, 0)','labels do not cover the seam with a separate background')
+    assert.deepEqual(await page.locator('.fish-endpoints span').allTextContents(),['上班','下班'])
+    const decoration=await page.locator('.dashboard-atmosphere img').evaluate(element=>({height:element.getBoundingClientRect().height,parent:element.closest('.dashboard-primary').getBoundingClientRect().height}))
+    assert.ok(Math.abs(decoration.height-decoration.parent)<=2,'decoration covers the whole primary card')
+    await writeFile(resolve(directory,'background-continuity.json'),JSON.stringify({bottomCentre:background.bottomCentre,decoration},null,2))
+    checks.push('blue primary background continues below the pond; full-height decoration; endpoint labels stay visible on transparent background')
+    assert.ok(await page.locator('.fish-surface').evaluateAll(elements => elements.every(element => getComputedStyle(element).animationName === 'none')))
     await page.close()
     page = await browser.newPage({ viewport: { width: 480, height: 387 }, deviceScaleFactor: 1.5 })
     page.on('pageerror', error => errors.push(error.message))
@@ -265,13 +333,15 @@ test('UI-12 renders centred mascot, readable capsule, underwater cards and origi
     }
     await set({ snapshot: reference })
     await page.screenshot({ path: resolve(directory, 'dashboard-dpr150.png'), fullPage: true })
-    checks.push('approved reference sample; static surface; DPR 1.5 at 480 CSS pixels, no horizontal clipping (Windows DPI still requires manual acceptance)')
-    checks.push('DPR 1.5 / 0,1,8.3,50,78,100%: mascot centre and no overlap')
+    checks.push('real-engine sample with reduced-motion still capture; DPR 1.5 at 480 CSS pixels, no horizontal clipping (Windows DPI still requires manual acceptance)')
+    checks.push('DPR 1.5 / 0,1,8.3,19.6,50,78,100%: mascot centre and no overlap')
     const actual = await readFile(resolve(directory, 'dashboard-approved.png'))
-    const approved = await readFile(resolve('../docs/version/V2.1.0/design-reference/UI-12-dashboard-approved.png'))
+    const beforePath=process.env.UI13_WINDOWS_REFERENCE
+    const approved = await readFile(beforePath || resolve('../docs/version/V2.1.0/design-reference/UI-12-dashboard-approved.png'))
+    const beforeLabel=beforePath?'UI-13 修改前（用户 Windows 截图）':'UI-12 视觉参考（未提供 Windows 截图）'
     await page.setViewportSize({width:1536,height:700})
-    await page.setContent(`<style>body{margin:0;padding:16px;background:#edf4fa;font:16px 'Microsoft YaHei',sans-serif;color:#16375f}.comparison{display:grid;grid-template-columns:1fr 1fr;gap:16px}h2{font-size:18px;margin:0 0 12px}img{display:block;width:100%;height:auto;border:1px solid #becddd;border-radius:12px;box-sizing:border-box}</style><div class="comparison"><section><h2>用户确认的 UI-12 参考图</h2><img src="data:image/png;base64,${approved.toString('base64')}"></section><section><h2>真实 Vue 渲染（真实引擎：09:40，8.3%）</h2><img src="data:image/png;base64,${actual.toString('base64')}"></section></div>`)
-    await page.screenshot({path:resolve(directory,'reference-vs-vue.png'),fullPage:true})
+    await page.setContent(`<style>body{margin:0;padding:16px;background:#edf4fa;font:16px 'Microsoft YaHei',sans-serif;color:#16375f}.comparison{display:grid;grid-template-columns:1fr 1fr;gap:16px}h2{font-size:18px;margin:0 0 12px}img{display:block;width:100%;height:auto;border:1px solid #becddd;border-radius:12px;box-sizing:border-box}</style><div class="comparison"><section><h2>${beforeLabel}</h2><img src="data:image/png;base64,${approved.toString('base64')}"></section><section><h2>UI-13 真实 Vue 渲染（固定时钟，19.6%）</h2><img src="data:image/png;base64,${actual.toString('base64')}"></section></div>`)
+    await page.screenshot({path:resolve(directory,'before-vs-after.png'),fullPage:true})
     assert.deepEqual(errors, [])
   } catch (error) {
     if (page) await page.screenshot({ path: resolve(directory, 'failure.png'), fullPage: true }).catch(() => {})

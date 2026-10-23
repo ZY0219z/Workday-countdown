@@ -33,6 +33,7 @@ export function fixtures(){
   const expectedByTime=Object.fromEntries(['18:00','19:00','20:00','00:30'].map(time=>{const overtime=value(expectedEndOvertime(config,shift,time,context)),minutes=overtime.entries.find(x=>x.shiftDate===shift.shiftDate)?.minutes??0;return [time,{overtime,end:value(shiftEndLabel(shift.normalEndsAt+minutes*60000,context))}]}))
   return { config,defaultConfig,defaultSnapshot,expectedEnd,expectedByTime,metadata:calendars.listMetadata(),snapshots:{
     working:read('2026-10-15T15:00:00Z'),beforeWork:read('2026-10-15T08:30:00Z'),break:read('2026-10-15T12:30:00Z'),finished:read('2026-10-15T18:00:00Z'),rest:read('2026-10-17T12:00:00Z'),
+    pond:read('2026-10-23T10:34:00Z',c=>{c.employee.startDate='2025-07-17'}),
     refined:read('2026-10-23T09:40:00Z',c=>{c.employee.startDate='2025-07-17'}),
     approved:read('2026-10-22T19:04:24Z',c=>{c.employee.startDate='2025-07-17';c.overtime.entries=[{shiftDate:'2026-10-22',minutes:240}]}),
     overtime:read('2026-10-15T18:15:00Z',c=>{c.overtime.entries=[{shiftDate:'2026-10-15',minutes:60}]}),
