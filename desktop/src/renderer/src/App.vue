@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import type { CalendarDatasetMetadata, DashboardSnapshot } from '../../shared/contracts'
 import DashboardView from './views/DashboardView.vue'
 import SettingsView from './views/SettingsView.vue'
+import AppTitle from './components/AppTitle.vue'
 import { createSettingsController } from './ui/settings-controller'
 import { useTheme } from './composables/useTheme'
 import { useWindowVisibility } from './composables/useWindowVisibility'
@@ -81,7 +82,7 @@ onBeforeUnmount(()=>{stopTraySettings?.();controller.dispose();void api.snapshot
 <template>
   <div ref="host" class="workday-ui app-shell" data-workday-root :data-pending="String(pending)" @compositionstart="composing=true" @compositionend="composing=false">
     <div class="app-content" :inert="confirmLeave">
-      <header class="app-header"><h1>今天你摸鱼了吗</h1><div class="app-header-actions"><button type="button" class="we-button app-mini" :disabled="loading||syncing||defaultPending" @click="miniMode">迷你模式</button><button type="button" class="we-button app-menu" :aria-label="settingsOpen?'返回倒计时':'设置'" :title="settingsOpen?'返回倒计时':'设置'" :aria-expanded="settingsOpen" aria-controls="settings-panel" :disabled="loading||defaultPending" @click="settingsOpen?leave():openSettings()"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M4 5h12M4 10h12M4 15h12" /></svg></button></div></header>
+      <header class="app-header"><AppTitle /><div class="app-header-actions"><button type="button" class="we-button app-mini" :disabled="loading||syncing||defaultPending" @click="miniMode">迷你模式</button><button type="button" class="we-button app-menu" :aria-label="settingsOpen?'返回倒计时':'设置'" :title="settingsOpen?'返回倒计时':'设置'" :aria-expanded="settingsOpen" aria-controls="settings-panel" :disabled="loading||defaultPending" @click="settingsOpen?leave():openSettings()"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M4 5h12M4 10h12M4 15h12" /></svg></button></div></header>
       <p v-if="errorText" role="alert" class="app-error">{{ errorText }}</p>
       <button v-if="!loading&&!state.session" type="button" class="we-button" @click="initialize">重新连接配置</button>
       <button v-if="state.unsynced && state.pending===0" type="button" class="we-button" @click="error='';controller.retry()">重试同步草稿</button>
@@ -89,7 +90,7 @@ onBeforeUnmount(()=>{stopTraySettings?.();controller.dispose();void api.snapshot
       <p v-if="loading" role="status">正在读取正式配置…</p>
       <p v-if="defaultPending" class="we-muted app-default-note" role="status">正在保存默认设置…</p>
       <p v-else-if="state.session?.defaultPersistence?.status==='failed'" class="app-error" role="alert">默认设置尚未保存，本次仍可查看倒计时。请在设置中重试保存。</p>
-      <main v-if="!loading">
+      <main v-if="!loading" :class="{'app-main--dashboard':!settingsOpen}">
         <section v-if="settingsOpen" id="settings-panel" class="we-surface app-settings">
           <SettingsView :expected-end="state.expectedEnd" :expected-end-input="state.expectedEndInput" :quit-disabled="syncing||quitting||defaultPending" :model="state.editor" :issues="state.issues" :busy="state.busy||dataBusy||defaultPending" :dirty="state.dirty||state.pending>0" :initialized="!!state.session?.saved" :default-unpersisted="!!state.session?.defaultPersistence" :session-ready="!!state.session" :validation-attempt="validationAttempt" :can-save="canSave" :metadata="metadata" :api="api" @expected-end="value=>{error='';controller.editExpectedEnd(value)}" @change="edit" @save="saved" @cancel="leave" @quit="quit" @imported="imported" @data-busy="value=>dataBusy=value" />
           <p v-if="state.session?.configurationStatus==='recoverable'" class="app-error">当前只读使用有效备份，请在安全恢复区预览并确认恢复；损坏源文件已保留。</p>

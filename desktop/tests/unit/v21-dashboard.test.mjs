@@ -7,8 +7,8 @@ import vue from '@vitejs/plugin-vue'
 import { chromium, expect } from '@playwright/test'
 import { fixtures } from '../../test-results/d11-ssr/components.mjs'
 
-test('UI-14 compacts the pond and keeps the progress capsule inside with bounded horizontal avoidance', async () => {
-  const directory = resolve('test-results/v21-ui14/dashboard'), bundle = resolve(directory, 'bundle')
+test('UI-15 shared title and viewport layout preserve Dashboard visuals and pond behavior', async () => {
+  const directory = resolve('test-results/v21-ui15/dashboard'), bundle = resolve(directory, 'bundle')
   await mkdir(directory, { recursive: true })
   await build({ configFile: false, plugins: [vue()], logLevel: 'warn', define: { 'process.env.NODE_ENV': '"production"' }, build: {
     outDir: bundle, emptyOutDir: false,
@@ -46,6 +46,12 @@ test('UI-14 compacts the pond and keeps the progress capsule inside with bounded
     },[first.toString('base64'),second.toString('base64')])
     const fits = async () => {
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+      await expect(page.getByRole('heading', { name: '今天你摸鱼了吗', level: 1, exact: true })).toHaveCount(1)
+      const heading = await page.locator('.app-title').evaluate(element => {
+        const r=element.getBoundingClientRect(), buttons=document.querySelector('.app-header-actions').getBoundingClientRect()
+        return {clear:r.right<=buttons.left||r.bottom<=buttons.top,selectable:getComputedStyle(element.querySelector('span')).userSelect!=='none',decorations:[...element.querySelectorAll('svg')].every(svg=>svg.getAttribute('aria-hidden')==='true')}
+      })
+      assert.ok(heading.clear&&heading.selectable&&heading.decorations, 'real HTML title and decorative SVGs stay clear of controls')
       const columns = await page.locator('.we-metric').evaluateAll(cards => cards.map(card => card.getBoundingClientRect().top))
       assert.ok(Math.max(...columns) - Math.min(...columns) <= 1, 'summary cards remain in three columns')
       const cards = await page.locator('.we-metric').count()
@@ -311,7 +317,9 @@ test('UI-14 compacts the pond and keeps the progress capsule inside with bounded
     assert.equal(await page.locator('.we-metric-art').first().evaluate(element => getComputedStyle(element).display), 'none')
     assert.equal(await page.locator('.we-countdown h2').evaluate(element => getComputedStyle(element).zIndex), '1', 'heading stays above the forced-colors clock backplate')
     await page.screenshot({ path: resolve(directory, 'dashboard-forced-colors.png'), fullPage: true })
-    checks.push('existing motion gate, reduced motion and forced colors')
+    assert.equal(await page.locator('.app-title-fish').evaluate(element=>getComputedStyle(element).display),'none')
+    assert.equal(await page.locator('.app-title-text').evaluate(element=>getComputedStyle(element).webkitTextFillColor),await page.locator('.app-title').evaluate(element=>getComputedStyle(element).color))
+    checks.push('existing motion gate, reduced motion and forced colors; shared title uses system text without decoration')
     await page.emulateMedia({ forcedColors: 'none', reducedMotion: 'reduce' })
     const reference = f.snapshots.pond // Existing engine + fixed clock; never alter business values to match concept art.
     await set({ snapshot: reference })
@@ -319,6 +327,7 @@ test('UI-14 compacts the pond and keeps the progress capsule inside with bounded
     const primary=await page.locator('.dashboard-primary').screenshot()
     const background=await pixelDifference(primary,primary)
     assert.ok(background.bottomCentre[2]>background.bottomCentre[0]+6,'ocean label area must retain a blue tint instead of a white strip')
+    await page.locator('.app-title').screenshot({path:resolve(directory,'title.png')})
     await expect(page.locator('.fish-endpoints')).toHaveCount(0)
     const decoration=await page.locator('.dashboard-atmosphere img').evaluate(element=>({height:element.getBoundingClientRect().height,parent:element.closest('.dashboard-primary').getBoundingClientRect().height}))
     assert.ok(Math.abs(decoration.height-decoration.parent)<=2,'decoration covers the whole primary card')
@@ -326,28 +335,31 @@ test('UI-14 compacts the pond and keeps the progress capsule inside with bounded
     checks.push('blue primary background reaches the bottom; old endpoint labels and their container are removed')
     assert.ok(await page.locator('.fish-surface').evaluateAll(elements => elements.every(element => getComputedStyle(element).animationName === 'none')))
     const layouts=[]
-    for(const width of [720,480,360]){
-      await page.setViewportSize({width,height:580});await set({snapshot:reference})
-      layouts.push(await page.evaluate(()=>{
+    for(const [width,height] of [[720,580],[720,640],[720,800],[720,440],[480,580],[360,580]]){
+      await page.setViewportSize({width,height});await set({snapshot:reference});await fits()
+      const layout=await page.evaluate(()=>{
         const r=selector=>document.querySelector(selector).getBoundingClientRect().toJSON()
-        return {width:innerWidth,component:r('.fish-progress'),track:r('.fish-track'),water:r('.fish-water'),marker:r('.fish-marker'),primary:r('.dashboard-primary'),clock:r('.we-countdown'),metrics:r('.dashboard-metrics'),cards:[...document.querySelectorAll('.we-metric')].map(e=>e.getBoundingClientRect().toJSON()),bottomGap:r('.dashboard-primary').bottom-r('.fish-water').bottom}
-      }))
+        return {width:innerWidth,height:innerHeight,shell:r('.app-shell'),content:r('.app-content'),header:r('.app-header'),main:r('main'),dashboard:r('.dashboard'),primary:r('.dashboard-primary'),clock:r('.we-countdown'),pond:r('.fish-water'),metrics:r('.dashboard-metrics'),cards:[...document.querySelectorAll('.we-metric')].map(e=>e.getBoundingClientRect().toJSON()),bottomBlank:innerHeight-r('.dashboard-metrics').bottom}
+      })
+      assert.equal(layout.pond.height,60,'UI-14 pond height is preserved')
+      assert.ok(layout.cards.every(card=>Math.abs(card.height-145)<.1),'summary cards do not stretch to fill the viewport')
+      if(height>=580)assert.ok(Math.abs(layout.bottomBlank-12)<1,'remaining viewport height is distributed inside the main card')
+      if(height===440)assert.ok(await page.evaluate(()=>document.documentElement.scrollHeight>innerHeight),'short windows retain natural scrolling')
+      layouts.push(layout)
+      await page.screenshot({path:resolve(directory,`layout-${width}-${height}.png`),fullPage:true})
     }
-    await writeFile(resolve(directory,'after-geometry.json'),JSON.stringify(layouts,null,2))
-    if(process.env.UI14_BASELINE_GEOMETRY){
-      const before=JSON.parse(await readFile(resolve(process.env.UI14_BASELINE_GEOMETRY),'utf8'))
+    await writeFile(resolve(directory,'after-layout.json'),JSON.stringify(layouts,null,2))
+    if(process.env.UI15_BASELINE_LAYOUT){
+      const before=JSON.parse(await readFile(resolve(process.env.UI15_BASELINE_LAYOUT),'utf8'))
       const comparison=layouts.map(after=>{
-        const previous=before.find(row=>row.width===after.width)
-        for(const key of ['x','y','width','height'])assert.ok(Math.abs(previous.clock[key]-after.clock[key])<.1,'clock layout remains unchanged')
-        previous.cards.forEach((card,index)=>{for(const key of ['x','width','height'])assert.ok(Math.abs(card[key]-after.cards[index][key])<.1,'summary card layout remains unchanged')})
-        assert.equal(after.component.height,60);assert.equal(after.track.height,60);assert.equal(after.water.height,60);assert.equal(after.bottomGap,9)
-        assert.ok(Math.abs(previous.primary.height-after.primary.height-64)<.1)
-        assert.ok(Math.abs(previous.metrics.top-after.metrics.top-64)<.1,'summaries move only by the natural height reduction')
-        return {width:after.width,before:{component:previous.component.height,track:previous.track.height,water:previous.water.height,bottomGap:previous.bottomGap},after:{component:after.component.height,track:after.track.height,water:after.water.height,bottomGap:after.bottomGap},primaryReduction:previous.primary.height-after.primary.height}
+        const previous=before.find(row=>row.width===after.width&&row.height===after.height)
+        for(const key of ['width','height'])assert.ok(Math.abs(previous.clock[key]-after.clock[key])<.1,'clock numeric area size remains unchanged')
+        previous.cards.forEach((card,index)=>{for(const key of ['width','height'])assert.ok(Math.abs(card[key]-after.cards[index][key])<.1,'summary card size remains unchanged')})
+        return {width:after.width,height:after.height,before:{content:previous.content.height,primary:previous.primary.height,bottomBlank:previous.bottomBlank},after:{content:after.content.height,primary:after.primary.height,bottomBlank:after.bottomBlank},pondHeight:after.pond.height,cardHeight:after.cards[0].height}
       })
       await writeFile(resolve(directory,'layout-comparison.json'),JSON.stringify(comparison,null,2))
-      checks.push('same-data before/after measurement: pond 80→60px, component 124→60px, bottom gap 25→9px, clock unchanged and summaries only move naturally')
     }
+    checks.push('UI-15: shared selectable title clears actions; viewport space enters the primary card, clock/60px pond/145px summaries retain sizes; short windows scroll')
     await page.close()
     page = await browser.newPage({ viewport: { width: 480, height: 387 }, deviceScaleFactor: 1.5 })
     page.on('pageerror', error => errors.push(error.message))
@@ -362,12 +374,20 @@ test('UI-14 compacts the pond and keeps the progress capsule inside with bounded
     }
     await set({ snapshot: reference })
     await page.screenshot({ path: resolve(directory, 'dashboard-dpr150.png'), fullPage: true })
+    await page.setViewportSize({width:360,height:580})
+    await set({snapshot:reference,theme:'dark',accent:'coral'});await fits()
+    await page.screenshot({path:resolve(directory,'title-dark-360.png'),fullPage:true})
+    await page.emulateMedia({forcedColors:'active'});await fits()
+    await page.screenshot({path:resolve(directory,'title-forced-colors-360.png'),fullPage:true})
+    await page.emulateMedia({forcedColors:'none'})
+    await page.setViewportSize({width:720,height:580});await set({snapshot:reference})
+    await page.locator('.app-title').screenshot({path:resolve(directory,'title-zoom-dpr150.png')})
     checks.push('real-engine sample with reduced-motion still capture; DPR 1.5 at 480 CSS pixels, no horizontal clipping (Windows DPI still requires manual acceptance)')
     checks.push('DPR 1.5 / 0,1,19.6,27.6,50,78,100%: mascot centre and no overlap')
-    if(process.env.UI14_BEFORE_IMAGE){
-      const actual=await readFile(resolve(directory,'dashboard-approved.png')),before=await readFile(resolve(process.env.UI14_BEFORE_IMAGE))
+    if(process.env.UI15_BEFORE_IMAGE){
+      const actual=await readFile(resolve(directory,'dashboard-approved.png')),before=await readFile(resolve(process.env.UI15_BEFORE_IMAGE))
       await page.setViewportSize({width:1536,height:700})
-      await page.setContent(`<style>body{margin:0;padding:16px;background:#edf4fa;font:16px 'Microsoft YaHei',sans-serif;color:#16375f}.comparison{display:grid;grid-template-columns:1fr 1fr;gap:16px}h2{font-size:18px;margin:0 0 12px}img{display:block;width:100%;height:auto;border:1px solid #becddd;border-radius:12px;box-sizing:border-box}</style><div class="comparison"><section><h2>UI-13 修改前（真实 Vue）</h2><img src="data:image/png;base64,${before.toString('base64')}"></section><section><h2>UI-14 修改后（相同数据 / 视口）</h2><img src="data:image/png;base64,${actual.toString('base64')}"></section></div>`)
+      await page.setContent(`<style>body{margin:0;padding:16px;background:#edf4fa;font:16px 'Microsoft YaHei',sans-serif;color:#16375f}.comparison{display:grid;grid-template-columns:1fr 1fr;gap:16px}h2{font-size:18px;margin:0 0 12px}img{display:block;width:100%;height:auto;border:1px solid #becddd;border-radius:12px;box-sizing:border-box}</style><div class="comparison"><section><h2>UI-14 修改前（真实 Vue）</h2><img src="data:image/png;base64,${before.toString('base64')}"></section><section><h2>UI-15 修改后（相同数据 / 视口）</h2><img src="data:image/png;base64,${actual.toString('base64')}"></section></div>`)
       await page.screenshot({path:resolve(directory,'before-vs-after.png'),fullPage:true})
     }
     assert.deepEqual(errors, [])

@@ -31,10 +31,12 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
     <form @submit.prevent="emit('save')">
       <fieldset :disabled="busy||!sessionReady||!canSave" class="settings-fields">
         <section class="settings-time-group" aria-label="时间与日程">
+          <div class="settings-work-times">
           <div class="settings-field"><TimeInput row v-model="form.schedule.startTime" label="上班时间" :invalid="hasErrors('$.schedule.startTime')" :described-by="errorDescription('$.schedule.startTime')" @update:model-value="update" />
             <FieldErrors :id="errorId('$.schedule.startTime')" :issues="issues" path="$.schedule.startTime" /></div>
           <div class="settings-field"><TimeInput row v-model="form.schedule.endTime" label="下班时间" :invalid="hasErrors('$.schedule.endTime')" :described-by="errorDescription('$.schedule.endTime')" @update:model-value="update" />
             <FieldErrors :id="errorId('$.schedule.endTime')" :issues="issues" path="$.schedule.endTime" /></div>
+          </div>
           <div class="settings-field settings-expected">
             <fieldset :disabled="!expectedEnd?.available" class="settings-expected-fields">
               <TimeInput row icon="coffee" :model-value="expectedEndInput||''" label="今天预计下班时间" :invalid="hasErrors('$.expectedEndTime')" :described-by="errorDescription('$.expectedEndTime')" @update:model-value="value=>emit('expectedEnd',value)" />
@@ -90,6 +92,10 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
 .settings-fields,.settings-expected-fields { border:0;padding:0;margin:0;min-width:0; }
 .settings-fields,.settings-time-group { display:grid;gap:14px; }
 .settings-field { min-width:0; }
+.settings-work-times { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px; }
+.settings-work-times :deep(.time-input--row) { grid-template-columns:auto minmax(120px,1fr);gap:8px; }
+.settings-work-times :deep(.time-input-label) { gap:6px; }
+@media(max-width:600px) { .settings-work-times { grid-template-columns:minmax(0,1fr); } }
 .settings-row { display:grid;grid-template-columns:minmax(0,1fr) minmax(120px,180px);gap:12px;align-items:center; }
 .settings-label { display:flex;align-items:center;gap:12px;font-size:15px;color:var(--we-muted); }
 .settings-label svg { width:22px;height:22px;flex:none;color:var(--we-settings-icon,var(--we-accent)); }
