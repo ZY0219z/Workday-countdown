@@ -25,7 +25,7 @@ test('the mascot retains the existing work/overtime and stopped-state gates',asy
   assert.ok(!(await render({...f.snapshots.working,progress:null})).includes('fish-mascot--floating'))
 })
 test('low and complete progress keep one fill, one readout and no wave array without mutating data',async()=>{
-  for(const percent of [0,1,8.3,19.6,50,78,100]){const snapshot=structuredClone(f.snapshots.working);snapshot.progress.percent=percent;const original=structuredClone(snapshot);const html=await render(snapshot);assert.equal((html.match(/class="fish-fill"/g)||[]).length,1);assert.equal((html.match(/class="(?:[^"]* )?fish-readout(?: [^"]*)?"/g)||[]).length,1);assert.ok(html.includes(`${percent}%`));assert.ok(!html.includes('fish-wave'));assert.deepEqual(snapshot,original)}
+  for(const percent of [0,1,19.6,27.6,50,78,100]){const snapshot=structuredClone(f.snapshots.working);snapshot.progress.percent=percent;const original=structuredClone(snapshot);const html=await render(snapshot);assert.equal((html.match(/class="fish-fill"/g)||[]).length,1);assert.equal((html.match(/class="(?:[^"]* )?fish-readout(?: [^"]*)?"/g)||[]).length,1);assert.ok(html.includes(`${percent}%`));assert.ok(!html.includes('fish-wave'));assert.deepEqual(snapshot,original)}
   assert.ok(!(await render({...f.snapshots.working,progress:null})).includes('class="fish-readout"'))
 })
 for(const state of [{visible:true,minimized:false,destroyed:false,expected:true},{visible:false,minimized:false,destroyed:false,expected:false},{visible:true,minimized:true,destroyed:false,expected:false},{visible:true,minimized:false,destroyed:true,expected:false}])test(`native presentation ${JSON.stringify(state)} ignores document visibility`,()=>{
@@ -108,4 +108,13 @@ test('UI-13 uses two gated water layers, one stable readout and no Hero unit lab
     assert.ok(!html.includes('fish-readout--lifted'))
     assert.ok(html.includes('有效工作进度'))
   }
+})
+
+
+test('UI-14 removes endpoint layout and keeps one accessible progress with a single active capsule',async()=>{
+  const html=await render(f.snapshots.working)
+  assert.ok(!html.includes('fish-endpoints'))
+  assert.equal((html.match(/<progress /g)||[]).length,1)
+  assert.equal((html.match(/data-active="true"/g)||[]).length,1)
+  assert.ok(html.includes('aria-label="有效工作进度"'))
 })
