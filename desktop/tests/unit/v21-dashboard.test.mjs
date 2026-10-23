@@ -7,8 +7,8 @@ import vue from '@vitejs/plugin-vue'
 import { chromium, expect } from '@playwright/test'
 import { fixtures } from '../../test-results/d11-ssr/components.mjs'
 
-test('UI-16 circular progress bubble preserves approved Dashboard proportions and motion', async () => {
-  const directory = resolve('test-results/v21-ui16/dashboard'), bundle = resolve(directory, 'bundle')
+test('UI-16R glass bubble and drops preserve approved Dashboard proportions and motion', async () => {
+  const directory = resolve('test-results/v21-ui16r/dashboard'), bundle = resolve(directory, 'bundle')
   await mkdir(directory, { recursive: true })
   await build({ configFile: false, plugins: [vue()], logLevel: 'warn', define: { 'process.env.NODE_ENV': '"production"' }, build: {
     outDir: bundle, emptyOutDir: false,
@@ -80,7 +80,7 @@ test('UI-16 circular progress bubble preserves approved Dashboard proportions an
         const parts = [...document.querySelectorAll('.we-time-part')].map(element => element.getBoundingClientRect())
         const hero = rect('.we-countdown'), track = rect('.fish-track'), label = rect('.fish-readout-pill[data-active="true"]')
         return { timerCenter: (parts[0].left + parts.at(-1).right) / 2, heroCenter: hero.x + hero.width / 2,
-          trackCenter: track.x + track.width / 2, labelCenter: label.x + label.width / 2,
+          trackCenter: track.x + track.width / 2, labelCenter: label.x + label.width / 2, labelWidth:label.width,fish:rect('.fish-marker').toJSON(),label:label.toJSON(),
           font: parseFloat(getComputedStyle(document.querySelector('.we-countdown-value')).fontSize), weight: getComputedStyle(document.querySelector('.we-countdown-value')).fontWeight, height: document.documentElement.scrollHeight }
       })
       await page.screenshot({ path: resolve(directory, `dashboard-${accent}-${theme}.png`), fullPage: true })
@@ -89,7 +89,9 @@ test('UI-16 circular progress bubble preserves approved Dashboard proportions an
       await expect(page.locator('.we-time-label')).toHaveCount(0)
       assert.notEqual(await page.locator('.we-time-group').first().evaluate(element => getComputedStyle(element).color), await page.locator('.we-time-group--seconds').evaluate(element => getComputedStyle(element).color))
       assert.ok(Math.abs(geometry.timerCenter - geometry.heroCenter) <= 1)
-      assert.ok(Math.abs(geometry.labelCenter - geometry.trackCenter) <= 1)
+      const centreLeft=geometry.trackCenter-geometry.labelWidth/2
+      if(geometry.fish.right+8<=centreLeft||geometry.fish.left-8>=centreLeft+geometry.labelWidth)assert.ok(Math.abs(geometry.labelCenter-geometry.trackCenter)<=1)
+      else assert.ok(geometry.fish.right+7.9<=geometry.label.left||geometry.fish.left-7.9>=geometry.label.right,'theme sample avoids the mascot including the new droplets')
       assert.ok(geometry.height <= 580, JSON.stringify(geometry))
       checks.push(`${accent}/${theme}: approved clock hierarchy, tinted cards, accessible progress and default fit`)
     }
@@ -131,6 +133,8 @@ test('UI-16 circular progress bubble preserves approved Dashboard proportions an
       await set({ snapshot: f.snapshots[state] })
       await fits()
       if (state === 'overnight') await expect(page.locator('.we-countdown-target')).toContainText('2026-10-16 06:00')
+      await expect(page.locator('.dashboard')).not.toContainText(/班次 \d{4}-\d{2}-\d{2} · 加班 \d+ 分钟/)
+      if(state==='overtime')await expect(page.locator('.we-countdown')).toContainText('加班中')
       if (state === 'estimate') {
         await expect(page.locator('.dashboard')).toContainText('2027')
         const heights = await page.locator('.we-metric').evaluateAll(cards => cards.map(card => card.getBoundingClientRect().height))
@@ -173,7 +177,7 @@ test('UI-16 circular progress bubble preserves approved Dashboard proportions an
     const checkPond = async percent => {
       const geometry = await page.evaluate(() => {
         const rect = selector => document.querySelector(selector).getBoundingClientRect().toJSON()
-        const labels=[...document.querySelectorAll('.fish-readout-pill')].map(element=>({...element.getBoundingClientRect().toJSON(),opacity:Number(getComputedStyle(element).opacity),active:element.dataset.active==='true'}))
+        const labels=[...document.querySelectorAll('.fish-readout-pill')].map(element=>({...element.getBoundingClientRect().toJSON(),opacity:Number(getComputedStyle(element).opacity),active:element.dataset.active==='true',face:element.querySelector('.fish-bubble-face').getBoundingClientRect().toJSON(),drops:[...element.querySelectorAll('.fish-bubble-drops')].map(drop=>drop.getBoundingClientRect().toJSON())}))
         return {track:rect('.fish-track'),fill:rect('.fish-fill'),fish:rect('.fish-marker'),water:rect('.fish-water'),surface:rect('.fish-surface--front'),inner:document.querySelector('.fish-water').clientWidth,labels}
       })
       const {track,fill,fish,water,surface,inner,labels}=geometry
@@ -188,8 +192,13 @@ test('UI-16 circular progress bubble preserves approved Dashboard proportions an
       for(const label of labels.filter(label=>label.opacity>.01||label.active)){
         assert.ok(label.left>=water.left+1&&label.right<=water.right-1&&label.top>=water.top-4.1&&label.bottom<=water.bottom+4.1,'bubble stays horizontally inside the tank with at most 4px vertical overhang')
         assert.ok(Math.abs(label.y+label.height/2-water.y-water.height/2)<1,'bubble remains vertically centred')
-        assert.ok(Math.abs(label.width-label.height)<.1&&label.width===68,'readout is a circle, not a capsule')
-        assert.ok(fish.right<=label.left||fish.left>=label.right,'visible percentage and mascot do not overlap')
+        assert.equal(label.width,100,'measured footprint includes both side drops')
+        assert.equal(label.face.width,68);assert.equal(label.face.height,68,'glass body stays circular without increasing the component height')
+        assert.ok(Math.abs(label.face.x+label.face.width/2-label.x-label.width/2)<.1,'glass circle shares the readout centre')
+        assert.equal(label.drops.length,2)
+        for(const drop of label.drops)assert.ok(drop.left>=label.left&&drop.right<=label.right&&drop.top>=label.top&&drop.bottom<=label.bottom,'all drops fit in the measured footprint')
+        assert.ok(label.drops[0].right<=label.face.left&&label.drops[1].left>=label.face.right,'drops stay outside the reading circle')
+        assert.ok(fish.right+7.9<=label.left||fish.left-7.9>=label.right,'glass and both drops stay clear of the mascot')
         const centre=water.x+water.width/2,centreLeft=centre-label.width/2
         if(fish.right+9<=centreLeft||fish.left-9>=centreLeft+label.width)assert.ok(Math.abs(label.x+label.width/2-centre)<1,'safe normal position stays at exact centre')
         if(Math.abs(label.x+label.width/2-centre)>1)assert.ok(Math.abs(label.left-fish.right-8)<1||Math.abs(fish.left-label.right-8)<1,'avoidance uses the nearest clear position beside the mascot')
@@ -198,7 +207,7 @@ test('UI-16 circular progress bubble preserves approved Dashboard proportions an
       const active=page.locator('.fish-readout-pill[data-active="true"]')
       await expect(active).toHaveText(`${percent}%`)
       assert.ok(await active.evaluate(element=>{
-        const box=element.getBoundingClientRect(),range=document.createRange();range.selectNodeContents(element)
+        const box=element.querySelector('.fish-bubble-face').getBoundingClientRect(),range=document.createRange();range.selectNodeContents(element.querySelector('.fish-readout-value'))
         const text=range.getBoundingClientRect()
         return text.width<=box.width-10&&Math.abs(text.x+text.width/2-box.x-box.width/2)<1&&Math.abs(text.y+text.height/2-box.y-box.height/2)<3
       }),'longest percentage text fits and stays centred in the bubble')
@@ -359,8 +368,8 @@ test('UI-16 circular progress bubble preserves approved Dashboard proportions an
       await page.screenshot({path:resolve(directory,`layout-${width}-${height}.png`),fullPage:true})
     }
     await writeFile(resolve(directory,'after-layout.json'),JSON.stringify(layouts,null,2))
-    if(process.env.UI16_BASELINE_LAYOUT){
-      const before=JSON.parse(await readFile(resolve(process.env.UI16_BASELINE_LAYOUT),'utf8'))
+    if(process.env.UI16R_BASELINE_LAYOUT){
+      const before=JSON.parse(await readFile(resolve(process.env.UI16R_BASELINE_LAYOUT),'utf8'))
       const comparison=layouts.map(after=>{
         const previous=before.find(row=>row.width===after.width&&row.height===after.height)
         for(const key of ['width','height'])assert.ok(Math.abs(previous.clock[key]-after.clock[key])<.1,'clock numeric area size remains unchanged')
@@ -372,7 +381,7 @@ test('UI-16 circular progress bubble preserves approved Dashboard proportions an
     const desktopLayouts=layouts.filter(row=>row.width===720)
     assert.ok(desktopLayouts.every(row=>Math.abs(row.primary.height-desktopLayouts[0].primary.height)<.1),'a taller window must not stretch the primary card')
     await expect(page.locator('.app-title image,.app-title img,.app-title rect,.app-title foreignObject')).toHaveCount(0)
-    checks.push('UI-16: approved title/primary/clock/cards retain geometry; 68px circular bubble has true centred text and measured avoidance; no extra component height')
+    checks.push('UI-16R: approved title/primary/clock/cards retain geometry; 68px glass circle with two side splashes uses a measured 100px footprint; all artwork stays clear of the mascot without increasing component height; shift/overtime auxiliary line absent')
     await page.close()
     page = await browser.newPage({ viewport: { width: 480, height: 387 }, deviceScaleFactor: 1.5 })
     page.on('pageerror', error => errors.push(error.message))
@@ -399,16 +408,17 @@ test('UI-16 circular progress bubble preserves approved Dashboard proportions an
     await set({snapshot:bubbleSample});await checkPond(87.2)
     await page.screenshot({path:resolve(directory,'dashboard-bubble.png'),fullPage:true})
     await page.locator('.fish-readout-pill[data-active="true"]').screenshot({path:resolve(directory,'bubble-zoom-dpr150.png')})
+    await writeFile(resolve(directory,'bubble-geometry.json'),JSON.stringify(await page.locator('.fish-readout-pill[data-active="true"]').boundingBox()))
     await page.setViewportSize({width:360,height:580});bubbleSample.progress.percent=50
     await set({snapshot:bubbleSample});await checkPond(50)
     await page.screenshot({path:resolve(directory,'bubble-50-360.png'),fullPage:true})
 
     checks.push('real-engine sample with reduced-motion still capture; DPR 1.5 at 480 CSS pixels, no horizontal clipping (Windows DPI still requires manual acceptance)')
     checks.push('DPR 1.5 / 0,1,19.6,27.6,50,78,87.2,99.9,100%: mascot centre and no overlap')
-    if(process.env.UI16_BEFORE_IMAGE){
-      const actual=await readFile(resolve(directory,'dashboard-approved.png')),before=await readFile(resolve(process.env.UI16_BEFORE_IMAGE))
+    if(process.env.UI16R_BEFORE_IMAGE){
+      const actual=await readFile(resolve(directory,'dashboard-bubble.png')),before=await readFile(resolve(process.env.UI16R_BEFORE_IMAGE))
       await page.setViewportSize({width:1536,height:700})
-      await page.setContent(`<style>body{margin:0;padding:16px;background:#edf4fa;font:16px 'Microsoft YaHei',sans-serif;color:#16375f}.comparison{display:grid;grid-template-columns:1fr 1fr;gap:16px}h2{font-size:18px;margin:0 0 12px}img{display:block;width:100%;height:auto;border:1px solid #becddd;border-radius:12px;box-sizing:border-box}</style><div class="comparison"><section><h2>UI-15R 修改前（真实 Vue）</h2><img src="data:image/png;base64,${before.toString('base64')}"></section><section><h2>UI-16 修改后（相同数据 / 视口）</h2><img src="data:image/png;base64,${actual.toString('base64')}"></section></div>`)
+      await page.setContent(`<style>body{margin:0;padding:16px;background:#edf4fa;font:16px 'Microsoft YaHei',sans-serif;color:#16375f}.comparison{display:grid;grid-template-columns:1fr 1fr;gap:16px}h2{font-size:18px;margin:0 0 12px}img{display:block;width:100%;height:auto;border:1px solid #becddd;border-radius:12px;box-sizing:border-box}</style><div class="comparison"><section><h2>UI-16 修改前（真实 Vue）</h2><img src="data:image/png;base64,${before.toString('base64')}"></section><section><h2>UI-16R 修改后（相同数据 / 视口 / DPR）</h2><img src="data:image/png;base64,${actual.toString('base64')}"></section></div>`)
       await page.screenshot({path:resolve(directory,'before-vs-after.png'),fullPage:true})
     }
     assert.deepEqual(errors, [])

@@ -45,6 +45,14 @@ function harness({missing=false,saveFail=null,timers}={}){
 for(const [name,label] of Object.entries({working:'工作中',beforeWork:'上班前',break:'午休中',finished:'已下班',rest:'休息日',overtime:'加班中'}))test(`real D09 ${name} snapshot renders correct state`,async()=>{const html=await renderDashboard(f.snapshots[name]);assert.ok(html.includes(label));for(const title of ['下个休息日','下次预计发薪','已工作'])assert.ok(html.includes(title));assert.ok(!html.includes('在职自然日'));assert.ok(!html.includes('累计计划工作日'))})
 test('lunch counts to final end; supplied net progress is rendered without new computation',async()=>{const s=f.snapshots.break,html=await renderDashboard(s);assert.equal(s.countdown.seconds,19800);assert.ok(html.includes('05:30:00'));assert.ok(html.includes(s.progress.percent.toFixed(1).replace(/\.0$/,'')))})
 test('overnight target shows explicit next-day date; active shift stays original',async()=>{const s=f.snapshots.overnight,html=await renderDashboard(s);assert.equal(s.activeShift.shiftDate,'2026-10-15');assert.ok(html.includes('2026-10-16 06:00'));assert.ok(html.includes('05:59:00'))})
+test('UI-16R removes redundant shift/overtime copy without changing active shifts or status',async()=>{
+  for(const state of ['working','overtime','overnight']){
+    const snapshot=f.snapshots[state],before=structuredClone(snapshot),html=await renderDashboard(snapshot)
+    assert.doesNotMatch(html,/班次 \d{4}-\d{2}-\d{2} · 加班 \d+ 分钟/)
+    if(state==='overtime')assert.ok(html.includes('加班中'))
+    assert.deepEqual(snapshot,before)
+  }
+})
 test('overtime changes supplied progress backwards without stale value',async()=>{assert.ok(f.snapshots.rollback.progress.percent<f.snapshots.working.progress.percent);const html=await renderDashboard(f.snapshots.rollback);assert.ok(html.includes(f.snapshots.rollback.progress.percent.toFixed(1)))})
 test('missing-year warnings appear at dependent cards; natural days remain independent',async()=>{const html=await renderDashboard(f.snapshots.estimate);assert.ok(html.includes('2027'));assert.ok(html.includes('估算'));assert.ok(!qualityText(f.snapshots.estimate.employment.naturalQuality).includes('估算'))})
 test('null snapshot has no invented timer or progress zero',async()=>{const html=await renderDashboard(null);assert.ok(html.includes('暂无可用倒计时'));assert.ok(!html.includes('role="timer"'));assert.ok(html.includes('无工作进度'))})

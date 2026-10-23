@@ -24,7 +24,6 @@ const estimate=computed(()=>props.snapshot?.countdown?.quality.approximate?quali
         <p v-if="!snapshot?.progress" class="we-muted">无有效班次或暂不可计算，不代表 0%</p>
         <p v-if="snapshot?.progress?.quality.approximate" class="dashboard-warning">{{ qualityText(snapshot.progress.quality) }}</p>
         <p v-if="snapshot && affectedWarnings(snapshot,'progress')" class="dashboard-warning">{{ affectedWarnings(snapshot,'progress') }}</p>
-        <p v-if="snapshot?.activeShift && (snapshot.activeShift.overtimeMinutes>0 || snapshot.activeShift.shiftDate!==snapshot.localDate)" class="we-muted">班次 {{ snapshot.activeShift.shiftDate }} · 加班 {{ snapshot.activeShift.overtimeMinutes }} 分钟</p>
       </section>
     </div>
     <div class="dashboard-metrics">
