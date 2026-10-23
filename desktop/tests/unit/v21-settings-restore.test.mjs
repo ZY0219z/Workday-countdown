@@ -7,8 +7,8 @@ import vue from '@vitejs/plugin-vue'
 import { chromium, expect } from '@playwright/test'
 import { fixtures, createSettingsDraft } from '../../test-results/d11-ssr/components.mjs'
 
-test('UI-15 paired work times and shared title preserve drafts, themes, validation and recovery', async () => {
-  const directory = resolve('test-results/v21-ui15/settings'), bundle = resolve(directory, 'bundle')
+test('UI-15R title and preserved paired work times preserve drafts, themes, validation and recovery', async () => {
+  const directory = resolve('test-results/v21-ui15r/settings'), bundle = resolve(directory, 'bundle')
   await mkdir(directory, { recursive: true })
   await build({ configFile: false, plugins: [vue()], logLevel: 'warn', define: { 'process.env.NODE_ENV': '"production"' }, build: {
     outDir: bundle, emptyOutDir: false,
@@ -172,7 +172,7 @@ test('UI-15 paired work times and shared title preserve drafts, themes, validati
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
     await page.screenshot({ path: resolve(directory, 'settings-360.png'), fullPage: true })
     await page.emulateMedia({forcedColors:'active'})
-    assert.equal(await page.locator('.app-title-fish').evaluate(element=>getComputedStyle(element).display),'none')
+    assert.equal(await page.locator('.app-title-art').evaluate(element=>getComputedStyle(element).display),'none')
     await workTimes(false)
     await page.screenshot({path:resolve(directory,'settings-forced-colors-360.png'),fullPage:true})
     await page.close()

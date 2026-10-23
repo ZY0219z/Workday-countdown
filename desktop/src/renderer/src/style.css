@@ -1,10 +1,9 @@
 html,body,#app { margin:0;min-width:0;min-height:100%; }
 .app-shell { display:flex;flex-direction:column;min-height:100vh;padding:var(--we-space-4);padding-bottom:var(--we-space-3);background:linear-gradient(135deg,var(--we-hero-tint,var(--we-bg)),var(--we-bg)); }
 .app-content { display:flex;flex-direction:column;flex:1;width:100%;max-width:920px;margin:0 auto; }
+.app-content--dashboard { flex:none;margin-block:auto; }
 .app-header { display:flex;align-items:center;justify-content:space-between;gap:var(--we-space-3);margin-bottom:14px;flex-wrap:wrap; }
-.app-main--dashboard { display:flex;flex-direction:column;flex:1; }
-.app-main--dashboard .dashboard { flex:1;grid-template-rows:minmax(min-content,1fr) auto; }
-.app-main--dashboard .dashboard-primary { display:grid;grid-template-rows:1fr auto; }
+.app-main--dashboard .dashboard-primary { display:grid;grid-template-rows:minmax(min-content,1fr) auto;min-block-size:calc(100cqi / 2.18); }
 .app-main--dashboard .we-countdown { align-self:center; }
 .app-actions { display:flex;flex-wrap:wrap;gap:var(--we-space-2); }
 .app-default-note { font-size:var(--we-text-small);margin-bottom:var(--we-space-2)!important; }

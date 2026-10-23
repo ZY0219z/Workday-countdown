@@ -7,8 +7,8 @@ import vue from '@vitejs/plugin-vue'
 import { chromium, expect } from '@playwright/test'
 import { fixtures } from '../../test-results/d11-ssr/components.mjs'
 
-test('UI-15 shared title and viewport layout preserve Dashboard visuals and pond behavior', async () => {
-  const directory = resolve('test-results/v21-ui15/dashboard'), bundle = resolve(directory, 'bundle')
+test('UI-15R approved title contours and bounded proportions preserve Dashboard behavior', async () => {
+  const directory = resolve('test-results/v21-ui15r/dashboard'), bundle = resolve(directory, 'bundle')
   await mkdir(directory, { recursive: true })
   await build({ configFile: false, plugins: [vue()], logLevel: 'warn', define: { 'process.env.NODE_ENV': '"production"' }, build: {
     outDir: bundle, emptyOutDir: false,
@@ -317,7 +317,7 @@ test('UI-15 shared title and viewport layout preserve Dashboard visuals and pond
     assert.equal(await page.locator('.we-metric-art').first().evaluate(element => getComputedStyle(element).display), 'none')
     assert.equal(await page.locator('.we-countdown h2').evaluate(element => getComputedStyle(element).zIndex), '1', 'heading stays above the forced-colors clock backplate')
     await page.screenshot({ path: resolve(directory, 'dashboard-forced-colors.png'), fullPage: true })
-    assert.equal(await page.locator('.app-title-fish').evaluate(element=>getComputedStyle(element).display),'none')
+    assert.equal(await page.locator('.app-title-art').evaluate(element=>getComputedStyle(element).display),'none')
     assert.equal(await page.locator('.app-title-text').evaluate(element=>getComputedStyle(element).webkitTextFillColor),await page.locator('.app-title').evaluate(element=>getComputedStyle(element).color))
     checks.push('existing motion gate, reduced motion and forced colors; shared title uses system text without decoration')
     await page.emulateMedia({ forcedColors: 'none', reducedMotion: 'reduce' })
@@ -335,31 +335,37 @@ test('UI-15 shared title and viewport layout preserve Dashboard visuals and pond
     checks.push('blue primary background reaches the bottom; old endpoint labels and their container are removed')
     assert.ok(await page.locator('.fish-surface').evaluateAll(elements => elements.every(element => getComputedStyle(element).animationName === 'none')))
     const layouts=[]
-    for(const [width,height] of [[720,580],[720,640],[720,800],[720,440],[480,580],[360,580]]){
+    for(const [width,height] of [[720,580],[720,640],[720,800],[720,440],[708,664],[480,580],[360,580]]){
       await page.setViewportSize({width,height});await set({snapshot:reference});await fits()
       const layout=await page.evaluate(()=>{
         const r=selector=>document.querySelector(selector).getBoundingClientRect().toJSON()
-        return {width:innerWidth,height:innerHeight,shell:r('.app-shell'),content:r('.app-content'),header:r('.app-header'),main:r('main'),dashboard:r('.dashboard'),primary:r('.dashboard-primary'),clock:r('.we-countdown'),pond:r('.fish-water'),metrics:r('.dashboard-metrics'),cards:[...document.querySelectorAll('.we-metric')].map(e=>e.getBoundingClientRect().toJSON()),bottomBlank:innerHeight-r('.dashboard-metrics').bottom}
+        return {width:innerWidth,height:innerHeight,shell:r('.app-shell'),content:r('.app-content'),header:r('.app-header'),main:r('main'),dashboard:r('.dashboard'),primary:r('.dashboard-primary'),clock:r('.we-countdown'),pond:r('.fish-water'),hint:r('.we-countdown-hint'),title:r('.app-title'),metrics:r('.dashboard-metrics'),cards:[...document.querySelectorAll('.we-metric')].map(e=>e.getBoundingClientRect().toJSON()),bottomBlank:innerHeight-r('.dashboard-metrics').bottom}
       })
       assert.equal(layout.pond.height,60,'UI-14 pond height is preserved')
       assert.ok(layout.cards.every(card=>Math.abs(card.height-145)<.1),'summary cards do not stretch to fill the viewport')
-      if(height>=580)assert.ok(Math.abs(layout.bottomBlank-12)<1,'remaining viewport height is distributed inside the main card')
+      assert.ok(layout.hint.bottom<layout.pond.top,'clock copy remains above the pond at every width')
+      assert.ok(layout.metrics.top>=layout.primary.bottom+11,'summary row stays clear of the primary card')
+      if(width>=700)assert.ok(Math.abs(layout.primary.height/layout.primary.width-1/2.18)<.001,'desktop proportions follow the approved reference, independently of viewport height')
+      if(height>=580)assert.ok(Math.abs((layout.content.top-parseFloat(await page.locator('.app-shell').evaluate(e=>getComputedStyle(e).paddingTop)))-(layout.bottomBlank-12))<1,'extra height is shared above and below the whole content group')
       if(height===440)assert.ok(await page.evaluate(()=>document.documentElement.scrollHeight>innerHeight),'short windows retain natural scrolling')
       layouts.push(layout)
       await page.screenshot({path:resolve(directory,`layout-${width}-${height}.png`),fullPage:true})
     }
     await writeFile(resolve(directory,'after-layout.json'),JSON.stringify(layouts,null,2))
-    if(process.env.UI15_BASELINE_LAYOUT){
-      const before=JSON.parse(await readFile(resolve(process.env.UI15_BASELINE_LAYOUT),'utf8'))
+    if(process.env.UI15R_BASELINE_LAYOUT){
+      const before=JSON.parse(await readFile(resolve(process.env.UI15R_BASELINE_LAYOUT),'utf8'))
       const comparison=layouts.map(after=>{
         const previous=before.find(row=>row.width===after.width&&row.height===after.height)
         for(const key of ['width','height'])assert.ok(Math.abs(previous.clock[key]-after.clock[key])<.1,'clock numeric area size remains unchanged')
         previous.cards.forEach((card,index)=>{for(const key of ['width','height'])assert.ok(Math.abs(card[key]-after.cards[index][key])<.1,'summary card size remains unchanged')})
-        return {width:after.width,height:after.height,before:{content:previous.content.height,primary:previous.primary.height,bottomBlank:previous.bottomBlank},after:{content:after.content.height,primary:after.primary.height,bottomBlank:after.bottomBlank},pondHeight:after.pond.height,cardHeight:after.cards[0].height}
+        return {width:after.width,height:after.height,before:{content:previous.content.height,primary:previous.primary.height,ratio:previous.primary.height/previous.primary.width,hintToPond:previous.pond.top-previous.hint.bottom,bottomBlank:previous.bottomBlank},after:{content:after.content.height,primary:after.primary.height,ratio:after.primary.height/after.primary.width,hintToPond:after.pond.top-after.hint.bottom,bottomBlank:after.bottomBlank},pondHeight:after.pond.height,cardHeight:after.cards[0].height}
       })
       await writeFile(resolve(directory,'layout-comparison.json'),JSON.stringify(comparison,null,2))
     }
-    checks.push('UI-15: shared selectable title clears actions; viewport space enters the primary card, clock/60px pond/145px summaries retain sizes; short windows scroll')
+    const desktopLayouts=layouts.filter(row=>row.width===720)
+    assert.ok(desktopLayouts.every(row=>Math.abs(row.primary.height-desktopLayouts[0].primary.height)<.1),'a taller window must not stretch the primary card')
+    await expect(page.locator('.app-title image,.app-title img,.app-title rect,.app-title foreignObject')).toHaveCount(0)
+    checks.push('UI-15R: traced approved title and real H1; primary proportions are stable across window heights, narrow content grows naturally, breathing space is shared outside the group; clock/pond/cards keep their sizes')
     await page.close()
     page = await browser.newPage({ viewport: { width: 480, height: 387 }, deviceScaleFactor: 1.5 })
     page.on('pageerror', error => errors.push(error.message))
@@ -384,10 +390,10 @@ test('UI-15 shared title and viewport layout preserve Dashboard visuals and pond
     await page.locator('.app-title').screenshot({path:resolve(directory,'title-zoom-dpr150.png')})
     checks.push('real-engine sample with reduced-motion still capture; DPR 1.5 at 480 CSS pixels, no horizontal clipping (Windows DPI still requires manual acceptance)')
     checks.push('DPR 1.5 / 0,1,19.6,27.6,50,78,100%: mascot centre and no overlap')
-    if(process.env.UI15_BEFORE_IMAGE){
-      const actual=await readFile(resolve(directory,'dashboard-approved.png')),before=await readFile(resolve(process.env.UI15_BEFORE_IMAGE))
+    if(process.env.UI15R_BEFORE_IMAGE){
+      const actual=await readFile(resolve(directory,'dashboard-approved.png')),before=await readFile(resolve(process.env.UI15R_BEFORE_IMAGE))
       await page.setViewportSize({width:1536,height:700})
-      await page.setContent(`<style>body{margin:0;padding:16px;background:#edf4fa;font:16px 'Microsoft YaHei',sans-serif;color:#16375f}.comparison{display:grid;grid-template-columns:1fr 1fr;gap:16px}h2{font-size:18px;margin:0 0 12px}img{display:block;width:100%;height:auto;border:1px solid #becddd;border-radius:12px;box-sizing:border-box}</style><div class="comparison"><section><h2>UI-14 修改前（真实 Vue）</h2><img src="data:image/png;base64,${before.toString('base64')}"></section><section><h2>UI-15 修改后（相同数据 / 视口）</h2><img src="data:image/png;base64,${actual.toString('base64')}"></section></div>`)
+      await page.setContent(`<style>body{margin:0;padding:16px;background:#edf4fa;font:16px 'Microsoft YaHei',sans-serif;color:#16375f}.comparison{display:grid;grid-template-columns:1fr 1fr;gap:16px}h2{font-size:18px;margin:0 0 12px}img{display:block;width:100%;height:auto;border:1px solid #becddd;border-radius:12px;box-sizing:border-box}</style><div class="comparison"><section><h2>UI-15 返工前（真实 Vue）</h2><img src="data:image/png;base64,${before.toString('base64')}"></section><section><h2>UI-15R 返工后（相同数据 / 视口）</h2><img src="data:image/png;base64,${actual.toString('base64')}"></section></div>`)
       await page.screenshot({path:resolve(directory,'before-vs-after.png'),fullPage:true})
     }
     assert.deepEqual(errors, [])

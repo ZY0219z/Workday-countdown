@@ -81,7 +81,7 @@ onBeforeUnmount(()=>{stopTraySettings?.();controller.dispose();void api.snapshot
 </script>
 <template>
   <div ref="host" class="workday-ui app-shell" data-workday-root :data-pending="String(pending)" @compositionstart="composing=true" @compositionend="composing=false">
-    <div class="app-content" :inert="confirmLeave">
+    <div class="app-content" :class="{'app-content--dashboard':!settingsOpen&&!loading}" :inert="confirmLeave">
       <header class="app-header"><AppTitle /><div class="app-header-actions"><button type="button" class="we-button app-mini" :disabled="loading||syncing||defaultPending" @click="miniMode">迷你模式</button><button type="button" class="we-button app-menu" :aria-label="settingsOpen?'返回倒计时':'设置'" :title="settingsOpen?'返回倒计时':'设置'" :aria-expanded="settingsOpen" aria-controls="settings-panel" :disabled="loading||defaultPending" @click="settingsOpen?leave():openSettings()"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M4 5h12M4 10h12M4 15h12" /></svg></button></div></header>
       <p v-if="errorText" role="alert" class="app-error">{{ errorText }}</p>
       <button v-if="!loading&&!state.session" type="button" class="we-button" @click="initialize">重新连接配置</button>
