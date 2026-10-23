@@ -26,20 +26,20 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
 </script>
 <template>
   <section class="settings" aria-label="设置中心">
-    <h2 class="settings-title"><UiIcon name="settings" />{{ !sessionReady?'设置暂不可用':canSave?'设置中心':'配置恢复' }}</h2>
+    <h2 class="settings-title"><UiIcon name="settings" tile />{{ !sessionReady?'设置暂不可用':canSave?'设置中心':'配置恢复' }}</h2>
     <p v-if="!sessionReady" role="alert">尚未读取 Main 草稿，请先重新连接配置；当前不能编辑或保存。</p>
     <form @submit.prevent="emit('save')">
       <fieldset :disabled="busy||!sessionReady||!canSave" class="settings-fields">
         <section class="settings-time-group" aria-label="时间与日程">
-          <div class="settings-work-times">
-          <div class="settings-field"><TimeInput row v-model="form.schedule.startTime" label="上班时间" :invalid="hasErrors('$.schedule.startTime')" :described-by="errorDescription('$.schedule.startTime')" @update:model-value="update" />
+          <div class="settings-work-times settings-card">
+          <div class="settings-field"><TimeInput row icon-tile v-model="form.schedule.startTime" label="上班时间" :invalid="hasErrors('$.schedule.startTime')" :described-by="errorDescription('$.schedule.startTime')" @update:model-value="update" />
             <FieldErrors :id="errorId('$.schedule.startTime')" :issues="issues" path="$.schedule.startTime" /></div>
-          <div class="settings-field"><TimeInput row v-model="form.schedule.endTime" label="下班时间" :invalid="hasErrors('$.schedule.endTime')" :described-by="errorDescription('$.schedule.endTime')" @update:model-value="update" />
+          <div class="settings-field"><TimeInput row icon-tile v-model="form.schedule.endTime" label="下班时间" :invalid="hasErrors('$.schedule.endTime')" :described-by="errorDescription('$.schedule.endTime')" @update:model-value="update" />
             <FieldErrors :id="errorId('$.schedule.endTime')" :issues="issues" path="$.schedule.endTime" /></div>
           </div>
-          <div class="settings-field settings-expected">
+          <div class="settings-field settings-expected settings-card">
             <fieldset :disabled="!expectedEnd?.available" class="settings-expected-fields">
-              <TimeInput row icon="coffee" :model-value="expectedEndInput||''" label="今天预计下班时间" :invalid="hasErrors('$.expectedEndTime')" :described-by="errorDescription('$.expectedEndTime')" @update:model-value="value=>emit('expectedEnd',value)" />
+              <TimeInput row icon-tile icon="coffee" :model-value="expectedEndInput||''" label="今天预计下班时间" :invalid="hasErrors('$.expectedEndTime')" :described-by="errorDescription('$.expectedEndTime')" @update:model-value="value=>emit('expectedEnd',value)" />
               <div class="settings-expected-context"><p class="we-muted">仅本班次有效；较早时刻按次日解释，下个工作日恢复正常下班时间。</p><button type="button" class="we-button" @click="emit('expectedEnd',null)">取消今天加班</button></div>
             </fieldset>
             <p v-if="expectedEnd?.available" class="we-muted settings-note">本班次 {{ expectedEnd.shiftDate }} · 正常结束 {{ expectedEnd.normalEnd.date }} {{ expectedEnd.normalEnd.time }}<template v-if="expectedEnd.minutes>0"> · 现有预计结束 {{ expectedEnd.finalEnd.date }} {{ expectedEnd.finalEnd.time }}</template></p>
@@ -54,19 +54,19 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
           </div>
           <FieldErrors :issues="issues" path="$.schedule" :exclude-paths="['$.schedule.startTime','$.schedule.endTime']" />
         </section>
-        <div class="settings-field">
-          <label class="settings-row"><span class="settings-label"><UiIcon name="briefcase" />入职日期</span><input :value="form.employee.startDate||''" type="date" class="we-control" :aria-invalid="hasErrors('$.employee.startDate')||undefined" :aria-describedby="errorDescription('$.employee.startDate')" @input="form.employee.startDate=($event.target as HTMLInputElement).value||null;update()" /></label>
+        <div class="settings-field settings-card">
+          <label class="settings-row"><span class="settings-label"><UiIcon name="calendar" tile />入职日期</span><input :value="form.employee.startDate||''" type="date" class="we-control" :aria-invalid="hasErrors('$.employee.startDate')||undefined" :aria-describedby="errorDescription('$.employee.startDate')" @input="form.employee.startDate=($event.target as HTMLInputElement).value||null;update()" /></label>
           <FieldErrors :id="errorId('$.employee.startDate')" :issues="issues" path="$.employee.startDate" />
           <p class="we-muted settings-note">可留空。不含今天，入职当天为 0；计划工作日并非实际出勤。</p><FieldErrors :issues="issues" path="$.employee" :exclude-paths="['$.employee.startDate']" />
         </div>
-        <div class="settings-field">
-          <label class="settings-row"><span class="settings-label"><UiIcon name="wallet" />每月发薪日</span><input :value="form.salary.day??''" type="number" min="1" max="31" step="1" class="we-control" :aria-invalid="hasErrors('$.salary.day')||undefined" :aria-describedby="errorDescription('$.salary.day')" @input="form.salary.day=numeric($event);update()" /></label>
+        <div class="settings-field settings-card">
+          <label class="settings-row"><span class="settings-label"><UiIcon name="wallet" tile />每月发薪日</span><input :value="form.salary.day??''" type="number" min="1" max="31" step="1" class="we-control" :aria-invalid="hasErrors('$.salary.day')||undefined" :aria-describedby="errorDescription('$.salary.day')" @input="form.salary.day=numeric($event);update()" /></label>
           <FieldErrors :id="errorId('$.salary.day')" :issues="issues" path="$.salary.day" />
           <p v-if="form.salary.nonWorkingPolicy!=='delay'" class="we-muted settings-note">保留历史发薪策略：{{ form.salary.nonWorkingPolicy==='advance'?'提前至上一个工作日':'休息日不调整' }}。</p>
           <p v-else class="we-muted settings-note">每月发上月工资，遇休息日按工作日历顺延。</p><FieldErrors :issues="issues" path="$.salary" :exclude-paths="['$.salary.day']" />
         </div>
-        <div class="settings-field settings-mini">
-          <label class="settings-row"><span class="settings-label"><UiIcon name="monitor" />启用迷你窗</span><input v-model="form.desktop.miniEnabled" class="settings-switch" type="checkbox" role="switch" :aria-invalid="hasErrors('$.desktop.miniEnabled')||undefined" :aria-describedby="errorDescription('$.desktop.miniEnabled')" @change="update" /></label>
+        <div class="settings-field settings-mini settings-card">
+          <label class="settings-row"><span class="settings-label"><UiIcon name="monitor" tile />启用迷你窗</span><input v-model="form.desktop.miniEnabled" class="settings-switch" type="checkbox" role="switch" :aria-invalid="hasErrors('$.desktop.miniEnabled')||undefined" :aria-describedby="errorDescription('$.desktop.miniEnabled')" @change="update" /></label>
           <FieldErrors :id="errorId('$.desktop.miniEnabled')" :issues="issues" path="$.desktop.miniEnabled" />
           <p class="we-muted settings-note">启用并保存后，可从主窗口或托盘进入；每次启动仍打开主窗口。</p>
         </div>
@@ -86,25 +86,27 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
   </section>
 </template>
 <style scoped>
-.settings { display:grid;gap:16px; }
+.settings { display:grid;gap:14px;--we-settings-icon:var(--we-accent); }
 .settings-title { display:flex;align-items:center;gap:12px;font-size:22px; }
-.settings-title svg { width:26px;height:26px;color:var(--we-settings-icon,var(--we-accent)); }
+
 .settings-fields,.settings-expected-fields { border:0;padding:0;margin:0;min-width:0; }
-.settings-fields,.settings-time-group { display:grid;gap:14px; }
+.settings-fields,.settings-time-group { display:grid;gap:10px; }
+.settings :deep(.time-input-label) { color:var(--we-text);font-weight:600; }
+.settings-card { padding:10px;border:1px solid color-mix(in srgb,var(--we-accent) 9%,var(--we-surface));border-radius:12px;background:color-mix(in srgb,var(--we-accent) 3%,var(--we-surface)); }
 .settings-field { min-width:0; }
-.settings-work-times { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px; }
+.settings-work-times { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px; }
 .settings-work-times :deep(.time-input--row) { grid-template-columns:auto minmax(120px,1fr);gap:8px; }
 .settings-work-times :deep(.time-input-label) { gap:6px; }
 @media(max-width:600px) { .settings-work-times { grid-template-columns:minmax(0,1fr); } }
-.settings-row { display:grid;grid-template-columns:minmax(0,1fr) minmax(120px,180px);gap:12px;align-items:center; }
-.settings-label { display:flex;align-items:center;gap:12px;font-size:15px;color:var(--we-muted); }
-.settings-label svg { width:22px;height:22px;flex:none;color:var(--we-settings-icon,var(--we-accent)); }
+.settings-row { display:grid;grid-template-columns:minmax(0,1fr) minmax(120px,180px);gap:12px;align-items:center;min-height:40px; }
+.settings-label { display:flex;align-items:center;gap:12px;font-size:15px;font-weight:600;color:var(--we-text); }
+.settings-label svg { flex:none; }
 .settings-row .we-control { width:100%;min-width:0;min-height:40px;font-size:15px;font-variant-numeric:tabular-nums; }
 .settings-note { margin-top:4px; }
 .settings-expected-context { display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:6px; }
 .settings-expected-context .we-button { flex:none;font-size:12px;min-height:28px;padding:2px 8px; }
 .settings-history { display:grid;gap:3px; }
-.settings-mini { border-top:1px solid var(--we-card-border,var(--we-border));padding-top:14px; }
+
 .settings-switch { appearance:none;position:relative;justify-self:end;cursor:pointer;width:44px;height:26px;margin:0;border:1px solid var(--we-control-border);border-radius:20px;background:var(--we-track); }
 .settings-switch::before { content:'';position:absolute;width:18px;height:18px;left:3px;top:3px;border-radius:50%;background:var(--we-surface);box-shadow:0 1px 3px rgb(20 40 60 / 20%); }
 .settings-switch:checked { background:var(--we-button);border-color:var(--we-button); }.settings-switch:checked::before { transform:translateX(18px);background:#fff; }
@@ -118,5 +120,5 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
 .settings-recovery { display:grid;gap:12px;border-top:1px solid var(--we-border);padding-top:16px; }
 .settings-deferred { color:var(--we-warning-text);font-size:var(--we-text-small); }
 @media(max-width:400px) { .settings-row { grid-template-columns:minmax(0,1fr) 132px;gap:8px; }.settings-label { gap:8px;font-size:13px; }.settings-expected-context { flex-wrap:wrap; } }
-@media(forced-colors:active) { .settings-switch { background:Canvas;border-color:ButtonText; }.settings-switch::before { background:ButtonText; }.settings-switch:checked { background:Highlight; }.settings-switch:checked::before { background:HighlightText; } }
+@media(forced-colors:active) { .settings-card { background:Canvas;border-color:CanvasText; }.settings-switch { background:Canvas;border-color:ButtonText; }.settings-switch::before { background:ButtonText; }.settings-switch:checked { background:Highlight; }.settings-switch:checked::before { background:HighlightText; } }
 </style>

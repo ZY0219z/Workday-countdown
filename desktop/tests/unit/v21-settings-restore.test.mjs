@@ -1,14 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile, readdir, mkdir } from 'node:fs/promises'
+import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { build } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { chromium, expect } from '@playwright/test'
 import { fixtures, createSettingsDraft } from '../../test-results/d11-ssr/components.mjs'
 
-test('UI-15R title and preserved paired work times preserve drafts, themes, validation and recovery', async () => {
-  const directory = resolve('test-results/v21-ui15r/settings'), bundle = resolve(directory, 'bundle')
+test('UI-16 grouped settings and square icons preserve drafts, themes, validation and recovery', async () => {
+  const directory = resolve('test-results/v21-ui16/settings'), bundle = resolve(directory, 'bundle')
   await mkdir(directory, { recursive: true })
   await build({ configFile: false, plugins: [vue()], logLevel: 'warn', define: { 'process.env.NODE_ENV': '"production"' }, build: {
     outDir: bundle, emptyOutDir: false,
@@ -52,6 +52,18 @@ test('UI-15R title and preserved paired work times preserve drafts, themes, vali
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true)
     }
     await workTimes(true)
+    const checkIcons=async()=>{
+      const icons=await page.locator('.settings .ui-icon--tile').evaluateAll(elements=>elements.map(element=>({
+        bounds:element.getBoundingClientRect().toJSON(),viewBox:element.getAttribute('viewBox'),aspect:element.getAttribute('preserveAspectRatio'),stroke:element.getAttribute('stroke-width'),shrink:getComputedStyle(element).flexShrink,
+        paths:[...element.querySelectorAll('path')].map(p=>{const b=p.getBBox();return {x:b.x,y:b.y,width:b.width,height:b.height}})
+      })))
+      assert.equal(icons.length,7,'heading and six field labels use the same framed icon')
+      assert.ok(icons.every(icon=>icon.bounds.width===34&&icon.bounds.height===34&&icon.viewBox==='0 0 24 24'&&icon.aspect==='xMidYMid meet'&&icon.stroke==='1.9'&&icon.shrink==='0'),'icons retain identical square geometry and stroke')
+      const gear=icons[0].paths[0]
+      assert.ok(Math.abs(gear.x+gear.width/2-12)<.01&&Math.abs(gear.y+gear.height/2-12)<.01,'gear outline is centred on the inner circle')
+    }
+    await checkIcons()
+    await expect(page.locator('.settings-card')).toHaveCount(5)
     const root = page.locator('[data-workday-root]')
     await expect(page.locator('details,summary,.settings-more')).toHaveCount(0)
     await expect(page.getByRole('switch', { name: '启用迷你窗', exact: true })).toBeVisible()
@@ -129,6 +141,8 @@ test('UI-15R title and preserved paired work times preserve drafts, themes, vali
         await page.emulateMedia({ colorScheme }); await expect(root).toHaveAttribute('data-theme', colorScheme)
       }
       else await expect(root).toHaveAttribute('data-theme', 'dark')
+      await checkIcons()
+      await page.screenshot({path:resolve(directory,`settings-${appearance.mode}-${appearance.accent}.png`),fullPage:true})
     }
     for (const status of ['recoverable', 'invalid', 'future']) {
       await initialize(status)
@@ -151,10 +165,10 @@ test('UI-15R title and preserved paired work times preserve drafts, themes, vali
       await recovery.screenshot({ path: resolve(directory, `recovery-${status}.png`) })
     }
     const visual = structuredClone(f.defaultConfig)
-    visual.schedule.startTime = '09:00'; visual.schedule.endTime = '22:00'
-    visual.employee.startDate = '2025-07-15'; visual.desktop.miniEnabled = true
+    visual.schedule.startTime = '08:30'; visual.schedule.endTime = '18:00'
+    visual.employee.startDate = '2025-07-17'; visual.desktop.miniEnabled = true
     const visualSession = { ...createSettingsDraft(visual).data, expectedEnd: { ...f.expectedEnd,
-      shiftDate: '2026-10-22', normalEnd: { date: '2026-10-22', time: '22:00' }, finalEnd: { date: '2026-10-22', time: '22:00' } } }
+      shiftDate: '2026-10-23', normalEnd: { date: '2026-10-23', time: '18:00' }, finalEnd: { date: '2026-10-23', time: '18:00' } } }
     await initialize('ready', config.appearance, visualSession)
     await workTimes(true)
     await expect(page.getByRole('heading',{name:'今天你摸鱼了吗',level:1,exact:true})).toHaveCount(1)
@@ -162,8 +176,9 @@ test('UI-15R title and preserved paired work times preserve drafts, themes, vali
     await page.screenshot({ path: resolve(directory, 'settings-approved.png'), fullPage: true })
     await page.locator('.settings-work-times').screenshot({path:resolve(directory,'work-times.png')})
     await page.locator('.app-title').screenshot({path:resolve(directory,'title.png')})
+    await page.locator('.settings-title').screenshot({path:resolve(directory,'settings-icons.png')})
     for(const width of [600,480,360]) {
-      await page.setViewportSize({width,height:580});await workTimes(false)
+      await page.setViewportSize({width,height:580});await workTimes(false);await checkIcons()
       await page.getByRole('button',{name:'保存设置',exact:true}).scrollIntoViewIfNeeded()
       assert.ok(await page.evaluate(()=>scrollY>0),'long settings remain vertically scrollable')
       await page.evaluate(()=>scrollTo(0,0))
@@ -184,7 +199,25 @@ test('UI-15R title and preserved paired work times preserve drafts, themes, vali
     await initialize('ready', config.appearance, visualSession)
     assert.equal(await page.evaluate(() => devicePixelRatio), 1.5)
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+    await checkIcons()
     await page.screenshot({ path: resolve(directory, 'settings-dpr150.png'), fullPage: true })
+    await page.locator('.settings-work-times').screenshot({path:resolve(directory,'icons-zoom-dpr150.png')})
+    await page.close()
+    page = await browser.newPage({viewport:{width:720,height:580},deviceScaleFactor:3})
+    page.on('pageerror',error=>errors.push(error.message))
+    await page.route('http://settings.test/**',serve);await page.goto('http://settings.test/')
+    await page.waitForFunction(()=>typeof window.__settingsInit==='function')
+    await initialize('ready',config.appearance,visualSession);await checkIcons();await workTimes(true)
+    const names=['设置','上班','下班','预计下班','入职','发薪','迷你窗'],frames=[]
+    for(const [i,name] of names.entries()){
+      const buffer=await page.locator('.settings .ui-icon--tile').nth(i).screenshot()
+      await writeFile(resolve(directory,`icon-${i}.png`),buffer)
+      frames.push(`<figure><img src="data:image/png;base64,${buffer.toString('base64')}"><figcaption>${name}</figcaption></figure>`)
+    }
+    await page.close()
+    page=await browser.newPage({viewport:{width:900,height:190}})
+    await page.setContent(`<style>body{margin:0;padding:16px;background:#f0f7fd;color:#16375f;font:14px 'Microsoft YaHei',sans-serif}p{margin:0 0 12px}.icons{display:flex;gap:16px}figure{margin:0;text-align:center}img{display:block;width:102px;height:102px}figcaption{margin-top:8px}</style><p>真实 Vue 图标局部截图 · DPR 3 · 保持原始像素</p><div class="icons">${frames.join('')}</div>`)
+    await page.screenshot({path:resolve(directory,'icons-strip.png'),fullPage:true})
     assert.deepEqual(errors, [])
   } finally {
     await browser.close()

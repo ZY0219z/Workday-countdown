@@ -7,8 +7,8 @@ import vue from '@vitejs/plugin-vue'
 import { chromium, expect } from '@playwright/test'
 import { fixtures } from '../../test-results/d11-ssr/components.mjs'
 
-test('UI-15R approved title contours and bounded proportions preserve Dashboard behavior', async () => {
-  const directory = resolve('test-results/v21-ui15r/dashboard'), bundle = resolve(directory, 'bundle')
+test('UI-16 circular progress bubble preserves approved Dashboard proportions and motion', async () => {
+  const directory = resolve('test-results/v21-ui16/dashboard'), bundle = resolve(directory, 'bundle')
   await mkdir(directory, { recursive: true })
   await build({ configFile: false, plugins: [vue()], logLevel: 'warn', define: { 'process.env.NODE_ENV': '"production"' }, build: {
     outDir: bundle, emptyOutDir: false,
@@ -169,7 +169,7 @@ test('UI-15R approved title contours and bounded proportions preserve Dashboard 
       await expect(page.locator('.we-metric').last()).toContainText('123456789')
       checks.push(`${width}px: long natural-day value remains readable without horizontal overflow`)
     }
-    const progressCases = [0, 1, 19.6, 27.6, 50, 78, 100]
+    const progressCases = [0, 1, 19.6, 27.6, 50, 78, 87.2, 99.9, 100]
     const checkPond = async percent => {
       const geometry = await page.evaluate(() => {
         const rect = selector => document.querySelector(selector).getBoundingClientRect().toJSON()
@@ -186,15 +186,22 @@ test('UI-15R approved title contours and bounded proportions preserve Dashboard 
       assert.equal(labels.filter(label=>label.active).length,1)
       assert.ok(labels.reduce((sum,label)=>sum+label.opacity,0)>=.99,'percentage never disappears during a handoff')
       for(const label of labels.filter(label=>label.opacity>.01||label.active)){
-        assert.ok(label.left>=water.left+1&&label.right<=water.right-1&&label.top>=water.top&&label.bottom<=water.bottom,'capsule remains fully inside the tank')
-        assert.ok(Math.abs(label.y+label.height/2-water.y-water.height/2)<1,'capsule never moves above or below the centre')
+        assert.ok(label.left>=water.left+1&&label.right<=water.right-1&&label.top>=water.top-4.1&&label.bottom<=water.bottom+4.1,'bubble stays horizontally inside the tank with at most 4px vertical overhang')
+        assert.ok(Math.abs(label.y+label.height/2-water.y-water.height/2)<1,'bubble remains vertically centred')
+        assert.ok(Math.abs(label.width-label.height)<.1&&label.width===68,'readout is a circle, not a capsule')
         assert.ok(fish.right<=label.left||fish.left>=label.right,'visible percentage and mascot do not overlap')
         const centre=water.x+water.width/2,centreLeft=centre-label.width/2
         if(fish.right+9<=centreLeft||fish.left-9>=centreLeft+label.width)assert.ok(Math.abs(label.x+label.width/2-centre)<1,'safe normal position stays at exact centre')
         if(Math.abs(label.x+label.width/2-centre)>1)assert.ok(Math.abs(label.left-fish.right-8)<1||Math.abs(fish.left-label.right-8)<1,'avoidance uses the nearest clear position beside the mascot')
       }
       assert.ok(Math.abs(surface.width-2*track.width)<1,'wave tiles do not shrink with the fill')
-      await expect(page.locator('.fish-readout-pill[data-active="true"]')).toHaveText(`${percent}%`)
+      const active=page.locator('.fish-readout-pill[data-active="true"]')
+      await expect(active).toHaveText(`${percent}%`)
+      assert.ok(await active.evaluate(element=>{
+        const box=element.getBoundingClientRect(),range=document.createRange();range.selectNodeContents(element)
+        const text=range.getBoundingClientRect()
+        return text.width<=box.width-10&&Math.abs(text.x+text.width/2-box.x-box.width/2)<1&&Math.abs(text.y+text.height/2-box.y-box.height/2)<3
+      }),'longest percentage text fits and stays centred in the bubble')
       await expect(page.locator('progress')).toHaveAttribute('aria-label','有效工作进度')
       assert.ok(Math.abs(Number(await page.locator('progress').getAttribute('value'))-percent)<1e-6)
       await expect(page.locator('.fish-endpoints')).toHaveCount(0)
@@ -210,7 +217,7 @@ test('UI-15R approved title contours and bounded proportions preserve Dashboard 
         await set({ snapshot }); await fits(); await checkPond(percent)
         await page.screenshot({ path: resolve(directory, `pond-${width}-${percent}.png`), fullPage: true })
       }
-      checks.push(`${width}px / 0,1,19.6,27.6,50,78,100%: true fill/position, vertical centre, bounded mascot, in-tank capsule with horizontal avoidance and no overlap, full-scale waves`)
+      checks.push(`${width}px / 0,1,19.6,27.6,50,78,87.2,99.9,100%: true fill/position, vertical centre, bounded mascot, circular bubble with bounded overhang and horizontal avoidance and no overlap, full-scale waves`)
     }
     await page.setViewportSize({ width: 720, height: 580 })
     const flow=structuredClone(f.snapshots.pond);flow.progress.percent=50
@@ -352,8 +359,8 @@ test('UI-15R approved title contours and bounded proportions preserve Dashboard 
       await page.screenshot({path:resolve(directory,`layout-${width}-${height}.png`),fullPage:true})
     }
     await writeFile(resolve(directory,'after-layout.json'),JSON.stringify(layouts,null,2))
-    if(process.env.UI15R_BASELINE_LAYOUT){
-      const before=JSON.parse(await readFile(resolve(process.env.UI15R_BASELINE_LAYOUT),'utf8'))
+    if(process.env.UI16_BASELINE_LAYOUT){
+      const before=JSON.parse(await readFile(resolve(process.env.UI16_BASELINE_LAYOUT),'utf8'))
       const comparison=layouts.map(after=>{
         const previous=before.find(row=>row.width===after.width&&row.height===after.height)
         for(const key of ['width','height'])assert.ok(Math.abs(previous.clock[key]-after.clock[key])<.1,'clock numeric area size remains unchanged')
@@ -365,7 +372,7 @@ test('UI-15R approved title contours and bounded proportions preserve Dashboard 
     const desktopLayouts=layouts.filter(row=>row.width===720)
     assert.ok(desktopLayouts.every(row=>Math.abs(row.primary.height-desktopLayouts[0].primary.height)<.1),'a taller window must not stretch the primary card')
     await expect(page.locator('.app-title image,.app-title img,.app-title rect,.app-title foreignObject')).toHaveCount(0)
-    checks.push('UI-15R: traced approved title and real H1; primary proportions are stable across window heights, narrow content grows naturally, breathing space is shared outside the group; clock/pond/cards keep their sizes')
+    checks.push('UI-16: approved title/primary/clock/cards retain geometry; 68px circular bubble has true centred text and measured avoidance; no extra component height')
     await page.close()
     page = await browser.newPage({ viewport: { width: 480, height: 387 }, deviceScaleFactor: 1.5 })
     page.on('pageerror', error => errors.push(error.message))
@@ -388,12 +395,20 @@ test('UI-15R approved title contours and bounded proportions preserve Dashboard 
     await page.emulateMedia({forcedColors:'none'})
     await page.setViewportSize({width:720,height:580});await set({snapshot:reference})
     await page.locator('.app-title').screenshot({path:resolve(directory,'title-zoom-dpr150.png')})
+    const bubbleSample=structuredClone(reference);bubbleSample.progress.percent=87.2
+    await set({snapshot:bubbleSample});await checkPond(87.2)
+    await page.screenshot({path:resolve(directory,'dashboard-bubble.png'),fullPage:true})
+    await page.locator('.fish-readout-pill[data-active="true"]').screenshot({path:resolve(directory,'bubble-zoom-dpr150.png')})
+    await page.setViewportSize({width:360,height:580});bubbleSample.progress.percent=50
+    await set({snapshot:bubbleSample});await checkPond(50)
+    await page.screenshot({path:resolve(directory,'bubble-50-360.png'),fullPage:true})
+
     checks.push('real-engine sample with reduced-motion still capture; DPR 1.5 at 480 CSS pixels, no horizontal clipping (Windows DPI still requires manual acceptance)')
-    checks.push('DPR 1.5 / 0,1,19.6,27.6,50,78,100%: mascot centre and no overlap')
-    if(process.env.UI15R_BEFORE_IMAGE){
-      const actual=await readFile(resolve(directory,'dashboard-approved.png')),before=await readFile(resolve(process.env.UI15R_BEFORE_IMAGE))
+    checks.push('DPR 1.5 / 0,1,19.6,27.6,50,78,87.2,99.9,100%: mascot centre and no overlap')
+    if(process.env.UI16_BEFORE_IMAGE){
+      const actual=await readFile(resolve(directory,'dashboard-approved.png')),before=await readFile(resolve(process.env.UI16_BEFORE_IMAGE))
       await page.setViewportSize({width:1536,height:700})
-      await page.setContent(`<style>body{margin:0;padding:16px;background:#edf4fa;font:16px 'Microsoft YaHei',sans-serif;color:#16375f}.comparison{display:grid;grid-template-columns:1fr 1fr;gap:16px}h2{font-size:18px;margin:0 0 12px}img{display:block;width:100%;height:auto;border:1px solid #becddd;border-radius:12px;box-sizing:border-box}</style><div class="comparison"><section><h2>UI-15 返工前（真实 Vue）</h2><img src="data:image/png;base64,${before.toString('base64')}"></section><section><h2>UI-15R 返工后（相同数据 / 视口）</h2><img src="data:image/png;base64,${actual.toString('base64')}"></section></div>`)
+      await page.setContent(`<style>body{margin:0;padding:16px;background:#edf4fa;font:16px 'Microsoft YaHei',sans-serif;color:#16375f}.comparison{display:grid;grid-template-columns:1fr 1fr;gap:16px}h2{font-size:18px;margin:0 0 12px}img{display:block;width:100%;height:auto;border:1px solid #becddd;border-radius:12px;box-sizing:border-box}</style><div class="comparison"><section><h2>UI-15R 修改前（真实 Vue）</h2><img src="data:image/png;base64,${before.toString('base64')}"></section><section><h2>UI-16 修改后（相同数据 / 视口）</h2><img src="data:image/png;base64,${actual.toString('base64')}"></section></div>`)
       await page.screenshot({path:resolve(directory,'before-vs-after.png'),fullPage:true})
     }
     assert.deepEqual(errors, [])

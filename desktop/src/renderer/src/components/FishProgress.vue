@@ -4,7 +4,7 @@ import { fishPosition, progressRatio } from '../ui/fish-progress'
 import MoyuIllustration from './MoyuIllustration.vue'
 const props=defineProps<{percent:number|null;animate:boolean}>()
 const track=ref<HTMLElement|null>(null),fish=ref<HTMLElement|null>(null),readout=ref<HTMLElement|null>(null)
-const trackWidth=ref(0),fishWidth=ref(52),readoutWidth=ref(72),side=ref<'left'|'right'>('right')
+const trackWidth=ref(0),fishWidth=ref(52),readoutWidth=ref(68),side=ref<'left'|'right'>('right')
 const ratio=computed(()=>progressRatio(props.percent))
 const x=computed(()=>fishPosition(props.percent,trackWidth.value,fishWidth.value)??0)
 const labels=computed(()=>{
@@ -27,7 +27,7 @@ onMounted(()=>{
   const measure=()=>{
     trackWidth.value=track.value?.clientWidth??0
     fishWidth.value=fish.value?.offsetWidth??52
-    readoutWidth.value=readout.value?.offsetWidth??72
+    readoutWidth.value=readout.value?.offsetWidth??68
   }
   observer=new ResizeObserver(measure)
   stopObserving=watch([track,fish,readout],()=>{observer!.disconnect();for(const element of [track.value,fish.value,readout.value])if(element)observer!.observe(element);measure()},{immediate:true,flush:'post'})
@@ -69,7 +69,9 @@ onBeforeUnmount(()=>{stopObserving?.();observer?.disconnect()})
 .fish-bubbles{position:absolute;top:18px;left:0;width:100cqw;height:32px;fill:color-mix(in srgb,var(--we-surface) 12%,transparent);stroke:color-mix(in srgb,var(--we-surface) 45%,transparent);stroke-width:1;}
 .fish-marker{position:absolute;top:50%;left:0;translate:0 -50%;display:block;width:52px;max-width:100%;aspect-ratio:226/217;z-index:2;}
 .fish-readout{position:absolute;inset:0;pointer-events:none;z-index:3;}
-.fish-readout-pill{position:absolute;top:50%;left:0;translate:0 -50%;padding:0 10px;border:1px solid color-mix(in srgb,var(--we-surface) 80%,var(--we-water-top,var(--we-border)));border-radius:999px;background:color-mix(in srgb,var(--we-surface) 92%,transparent);color:var(--we-clock,var(--we-text));font:700 16px/22px var(--we-font-numeric);font-variant-numeric:tabular-nums;white-space:nowrap;}
+.fish-readout-pill{position:absolute;top:50%;left:0;translate:0 -50%;display:grid;place-items:center;width:68px;height:68px;padding:0 5px;border:1px solid color-mix(in srgb,var(--fish-water-color) 65%,var(--we-surface));border-radius:50%;background:linear-gradient(140deg,color-mix(in srgb,var(--we-surface) 92%,transparent),color-mix(in srgb,var(--we-water-top,var(--we-accent-soft)) 65%,transparent));box-shadow:inset -3px -4px 8px color-mix(in srgb,var(--fish-water-color) 22%,transparent),0 2px 6px color-mix(in srgb,var(--fish-water-color) 18%,transparent);color:var(--we-clock,var(--we-text));font:700 16px/1 var(--we-font-numeric);font-variant-numeric:tabular-nums;white-space:nowrap;}
+.fish-readout-pill::before{content:"";position:absolute;inset:3px;border:1px solid color-mix(in srgb,var(--we-surface) 80%,transparent);border-radius:inherit;pointer-events:none;}
+.fish-readout-pill::after{content:"";position:absolute;top:7px;left:12px;width:19px;height:5px;border-radius:50%;background:color-mix(in srgb,var(--we-surface) 90%,transparent);transform:rotate(-30deg);pointer-events:none;}
 .fish-track--flowing .fish-readout-pill{transition:opacity 160ms cubic-bezier(.23,1,.32,1);}
 .fish-readout--settled .fish-readout-pill{transition:none;}
 .fish-mascot{display:block;width:100%;}
@@ -80,5 +82,5 @@ onBeforeUnmount(()=>{stopObserving?.();observer?.disconnect()})
 @keyframes fish-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.5px)}}
 @keyframes fish-water-flow{from{transform:translateX(-50%)}to{transform:translateX(0)}}
 @media(prefers-reduced-motion:reduce){.fish-readout-pill{transition:none!important;}.fish-mascot,.fish-surface{animation:none!important;}}
-@media(forced-colors:active){.fish-water{background:Canvas;border:1px solid CanvasText;box-shadow:none;}.fish-water::after,.fish-fill::after{display:none;}.fish-fill,.fish-fill::before{background:Highlight;forced-color-adjust:none;}.fish-readout-pill{color:CanvasText;background:Canvas;border-color:CanvasText;}.fish-bubbles,.fish-surface{display:none;animation:none;}}
+@media(forced-colors:active){.fish-water{background:Canvas;border:1px solid CanvasText;box-shadow:none;}.fish-water::after,.fish-fill::after,.fish-readout-pill::before,.fish-readout-pill::after{display:none;}.fish-fill,.fish-fill::before{background:Highlight;forced-color-adjust:none;}.fish-readout-pill{color:CanvasText;background:Canvas;border-color:CanvasText;box-shadow:none;}.fish-bubbles,.fish-surface{display:none;animation:none;}}
 </style>
