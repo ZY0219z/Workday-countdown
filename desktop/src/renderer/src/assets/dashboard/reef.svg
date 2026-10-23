@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 290" fill="none">
+  <defs>
+    <linearGradient id="kelp" x2="0" y2="1"><stop stop-color="#3aadd3" stop-opacity=".5"/><stop offset="1" stop-color="#a2dff4" stop-opacity=".2"/></linearGradient>
+    <radialGradient id="bubble" cx=".3" cy=".25"><stop stop-color="#fff" stop-opacity=".15"/><stop offset=".7" stop-color="#fff" stop-opacity=".04"/><stop offset="1" stop-color="#fff" stop-opacity=".8"/></radialGradient>
+    <linearGradient id="ray" x2="0" y2="1"><stop stop-color="#fff" stop-opacity=".65"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  </defs>
+  <path d="M180 0h22L72 230H25zm57 0h14L168 220h-35zM506 0h16l85 215h-35zm38 0h20l142 205h-49z" fill="url(#ray)"/>
+  <g stroke="url(#kelp)" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 275c24-38-5-45 4-70s-6-30 0-57m16 127c-5-32 21-39 11-59s-2-24 5-40M8 278c0-27 7-34 1-46m54 48c-6-32 26-43 15-60m-8 32-17-12m-29-3-14-15" stroke-width="9"/>
+    <path d="M702 275c-24-38 5-45-4-70s6-30 0-57m-16 127c5-32-21-39-11-59s2-24-5-40m48 102c0-27-7-34-1-46m-54 48c6-32-26-43-15-60m8 32 17-12m29-3 14-15" stroke-width="9"/>
+  </g>
+  <path d="M0 282c35-23 47-2 68-12s36-1 46 15c22-23 38-5 49 5H0zm720 0c-35-23-47-2-68-12s-36-1-46 15c-22-23-38-5-49 5h163z" fill="#b0e4f5" opacity=".5"/>
+  <g fill="url(#bubble)" stroke="#fff" stroke-opacity=".6">
+    <circle cx="53" cy="40" r="8"/><circle cx="109" cy="112" r="12"/><circle cx="119" cy="186" r="7"/><circle cx="47" cy="207" r="9"/><circle cx="662" cy="64" r="8"/><circle cx="617" cy="140" r="13"/><circle cx="661" cy="207" r="7"/>
+  </g>
+  <g fill="#fff" opacity=".65"><circle cx="26" cy="78" r="3"/><circle cx="79" cy="156" r="2"/><circle cx="155" cy="51" r="2"/><circle cx="640" cy="28" r="2"/><circle cx="679" cy="114" r="2.5"/><circle cx="586" cy="190" r="2"/></g>
+</svg>

@@ -77,4 +77,6 @@ h2 { font-size: var(--we-text-title); font-weight: 600; }
   .we-countdown--compact .we-countdown-illustration { flex-basis: 36px; width: 36px; }
 }
 @container (max-width:360px) { .we-countdown--hero .we-countdown-header { position:static;justify-content:center;margin-bottom:8px; } }
+/* Keep the heading above the system text backplate around the large clock. */
+@media (forced-colors:active) { .we-countdown--hero h2 { position:relative;z-index:1; } }
 </style>

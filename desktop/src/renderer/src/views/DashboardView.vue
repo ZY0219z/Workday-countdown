@@ -4,6 +4,7 @@ import type { DashboardSnapshot } from '../../../shared/contracts'
 import CountdownCard from '../components/CountdownCard.vue'
 import MetricCard from '../components/MetricCard.vue'
 import FishProgress from '../components/FishProgress.vue'
+import reef from '../assets/dashboard/reef.svg'
 import { fishCanAnimate } from '../ui/fish-progress'
 import { durationText, wallLabel, qualityText, affectedWarnings } from '../ui/dashboard-display'
 const props=withDefaults(defineProps<{snapshot:DashboardSnapshot|null;motionAllowed?:boolean}>(),{motionAllowed:false})
@@ -16,6 +17,7 @@ const estimate=computed(()=>props.snapshot?.countdown?.quality.approximate?quali
 <template>
   <section class="dashboard" aria-label="工作日仪表盘">
     <div class="we-surface dashboard-primary">
+      <div class="dashboard-atmosphere" aria-hidden="true"><img :src="reef" alt="" /></div>
       <CountdownCard hero :state="snapshot?.state || 'incomplete'" :text="durationText(snapshot?.countdown?.seconds)" :target="target" :estimate="estimate" :warning="snapshot ? affectedWarnings(snapshot,'countdown') : '暂时无法计算，请查看设置。'" hint="摸鱼一小步，下班一大步" />
       <section class="dashboard-progress" aria-label="今日工作进度">
         <FishProgress :percent="snapshot?.progress?.percent??null" :animate="animated" />
@@ -34,9 +36,13 @@ const estimate=computed(()=>props.snapshot?.countdown?.quality.approximate?quali
 </template>
 <style scoped>
 .dashboard { display:grid;gap:var(--we-space-3);container-type:inline-size; }
-.dashboard .dashboard-primary { min-width:0;background:radial-gradient(ellipse at 5% 2%,var(--we-hero-tint,var(--we-subtle)),transparent 48%),var(--we-surface);border-color:var(--we-card-border,var(--we-border)); }
-.dashboard-progress { padding:0 var(--we-space-6) 8px; }
+.dashboard .dashboard-primary { position:relative;isolation:isolate;min-width:0;background:radial-gradient(ellipse at 50% 25%,var(--we-surface) 15%,transparent 78%),linear-gradient(180deg,color-mix(in srgb,var(--we-water-top,var(--we-accent-soft)) 32%,var(--we-surface)),var(--we-surface));border-color:var(--we-card-border,var(--we-border)); }
+.dashboard-atmosphere { position:absolute;inset:0;border-radius:inherit;overflow:hidden;pointer-events:none;z-index:-1;background:radial-gradient(ellipse at 0 58%,color-mix(in srgb,var(--we-water-top,var(--we-accent)) 40%,transparent),transparent 45%),radial-gradient(ellipse at 100% 58%,color-mix(in srgb,var(--we-water-top,var(--we-accent)) 40%,transparent),transparent 45%); }
+.dashboard-atmosphere img { width:100%;height:100%;object-fit:fill;opacity:.8; }
+.dashboard-progress { position:relative;padding:0 var(--we-space-6) 8px; }
 .dashboard-metrics { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:stretch;gap:var(--we-space-3); }
 .dashboard-warning { font-size:var(--we-text-small);color:var(--we-warning-text);overflow-wrap:anywhere; }
-@media (max-width:520px) { .dashboard-metrics { grid-template-columns:minmax(0,1fr); } }
+@media (max-width:520px) { .dashboard-metrics { gap:8px; }.dashboard-progress { padding-inline:16px; } }
+[data-theme="dark"] .dashboard-atmosphere img { opacity:.22; }
+@media (forced-colors:active) { .dashboard .dashboard-primary { background:Canvas;border-color:CanvasText; }.dashboard-atmosphere { display:none; } }
 </style>
