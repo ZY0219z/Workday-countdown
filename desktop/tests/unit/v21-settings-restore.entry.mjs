@@ -21,7 +21,13 @@ window.__settingsInit = fixture => {
         return ok(session)
       },
       discard: async () => { session = clone(savedSession); return ok(session) },
-      setExpectedEnd: async request => { calls.expectedEnd.push(clone(request)); session.expectedEndEdit = clone(request); return ok(session) }
+      setExpectedEnd: async request => {
+        calls.expectedEnd.push(clone(request)); session.expectedEndEdit = clone(request)
+        // Scripted Main contract responses, not another implementation of time calculations.
+        const response=fixture.expectedEndResponses?.[request.input??'cancel']
+        if(response){session.expectedEnd=clone(response.context);session.issues=clone(response.issues??[])}
+        return ok(session)
+      }
     },
     config: { save: async request => {
       saves.push(clone(request))

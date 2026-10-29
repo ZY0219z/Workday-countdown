@@ -21,12 +21,19 @@ const days=['周一','周二','周三','周四','周五','周六','周日']
 // Hidden legacy fields remain in the full draft; these labels never normalize it.
 const customWorkWeek=computed(()=>form.value.schedule.workWeek.length!==5||([1,2,3,4,5] as const).some(day=>!form.value.schedule.workWeek.includes(day)))
 const workWeekLabel=computed(()=>form.value.schedule.workWeek.map(day=>days[day-1]).join('、')||'无固定工作日')
+const endComparison=computed(()=>{
+  const end=props.expectedEnd
+  if(!end?.available||!end.previewEnd||hasErrors('$.expectedEndTime')||props.expectedEndInput!==end.previewEnd.time)return null
+  return end.previewEnd.date!==end.finalEnd.date||end.previewEnd.time!==end.finalEnd.time?end.previewEnd:null
+})
+// Dates come from Main; only abbreviate an end that belongs to the same shift date.
+function endLabel(end:{date:string;time:string}){return props.expectedEnd?.available&&end.date===props.expectedEnd.shiftDate?end.time:`${end.date} ${end.time}`}
 function update(){emit('change',JSON.parse(JSON.stringify(form.value)))}
 function numeric(event:Event):number|null{const value=(event.target as HTMLInputElement).value;return value===''?null:Number(value)}
 </script>
 <template>
   <section class="settings" aria-label="设置中心">
-    <h2 class="settings-title"><UiIcon name="settings" tile />{{ !sessionReady?'设置暂不可用':canSave?'设置中心':'配置恢复' }}</h2>
+    <h2 v-if="!sessionReady||!canSave" class="settings-title"><UiIcon name="settings" tile />{{ !sessionReady?'设置暂不可用':'配置恢复' }}</h2>
     <p v-if="!sessionReady" role="alert">尚未读取 Main 草稿，请先重新连接配置；当前不能编辑或保存。</p>
     <form @submit.prevent="emit('save')">
       <fieldset :disabled="busy||!sessionReady||!canSave" class="settings-fields">
@@ -42,9 +49,15 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
               <TimeInput row icon-tile icon="coffee" :model-value="expectedEndInput||''" label="今天预计下班时间" :invalid="hasErrors('$.expectedEndTime')" :described-by="errorDescription('$.expectedEndTime')" @update:model-value="value=>emit('expectedEnd',value)" />
               <div class="settings-expected-context"><p class="we-muted">仅本班次有效；较早时刻按次日解释，下个工作日恢复正常下班时间。</p><button type="button" class="we-button" @click="emit('expectedEnd',null)">取消今天加班</button></div>
             </fieldset>
-            <p v-if="expectedEnd?.available" class="we-muted settings-note">本班次 {{ expectedEnd.shiftDate }} · 正常结束 {{ expectedEnd.normalEnd.date }} {{ expectedEnd.normalEnd.time }}<template v-if="expectedEnd.minutes>0"> · 现有预计结束 {{ expectedEnd.finalEnd.date }} {{ expectedEnd.finalEnd.time }}</template></p>
+            <template v-if="expectedEnd?.available">
+              <div v-if="endComparison" class="settings-end-comparison">
+                <p class="we-muted settings-note">当前生效：{{ endLabel(expectedEnd.finalEnd) }}<template v-if="expectedEnd.minutes>0">（已设置加班 {{ expectedEnd.minutes }} 分钟）</template></p>
+                <p class="settings-note">保存后：{{ endLabel(endComparison) }}</p>
+              </div>
+              <p v-else-if="expectedEnd.finalEnd.date!==expectedEnd.shiftDate" class="we-muted settings-note">当前生效：{{ endLabel(expectedEnd.finalEnd) }}<template v-if="expectedEnd.minutes>0">（已设置加班 {{ expectedEnd.minutes }} 分钟）</template></p>
+              <p v-else-if="expectedEnd.minutes>0" class="we-muted settings-note">已设置加班 {{ expectedEnd.minutes }} 分钟</p>
+            </template>
             <p v-else class="we-muted settings-note">{{ expectedEnd&&!expectedEnd.available?expectedEnd.message:'正在确认当前班次…' }}</p>
-            <p v-if="expectedEnd?.available&&expectedEnd.previewEnd" class="we-muted settings-note">本次预计结束：{{ expectedEnd.previewEnd.date }} {{ expectedEnd.previewEnd.time }}（保存后生效）</p>
             <FieldErrors :id="errorId('$.expectedEndTime')" :issues="issues" path="$.expectedEndTime" />
           </div>
           <div v-if="form.schedule.crossMidnight||customWorkWeek||form.schedule.breaks.length" class="settings-history">
@@ -54,16 +67,18 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
           </div>
           <FieldErrors :issues="issues" path="$.schedule" :exclude-paths="['$.schedule.startTime','$.schedule.endTime']" />
         </section>
+        <div class="settings-personal-fields">
         <div class="settings-field settings-card">
-          <label class="settings-row"><span class="settings-label"><UiIcon name="calendar" tile />入职日期</span><input :value="form.employee.startDate||''" type="date" class="we-control" :aria-invalid="hasErrors('$.employee.startDate')||undefined" :aria-describedby="errorDescription('$.employee.startDate')" @input="form.employee.startDate=($event.target as HTMLInputElement).value||null;update()" /></label>
+          <label class="settings-row settings-personal-row"><span class="settings-label"><UiIcon name="calendar" tile />入职日期</span><input :value="form.employee.startDate||''" type="date" class="we-control" :aria-invalid="hasErrors('$.employee.startDate')||undefined" :aria-describedby="errorDescription('$.employee.startDate')" @input="form.employee.startDate=($event.target as HTMLInputElement).value||null;update()" /></label>
           <FieldErrors :id="errorId('$.employee.startDate')" :issues="issues" path="$.employee.startDate" />
           <p class="we-muted settings-note">可留空。不含今天，入职当天为 0；计划工作日并非实际出勤。</p><FieldErrors :issues="issues" path="$.employee" :exclude-paths="['$.employee.startDate']" />
         </div>
         <div class="settings-field settings-card">
-          <label class="settings-row"><span class="settings-label"><UiIcon name="wallet" tile />每月发薪日</span><input :value="form.salary.day??''" type="number" min="1" max="31" step="1" class="we-control" :aria-invalid="hasErrors('$.salary.day')||undefined" :aria-describedby="errorDescription('$.salary.day')" @input="form.salary.day=numeric($event);update()" /></label>
+          <label class="settings-row settings-personal-row"><span class="settings-label"><UiIcon name="wallet" tile />每月发薪日</span><input :value="form.salary.day??''" type="number" min="1" max="31" step="1" class="we-control" :aria-invalid="hasErrors('$.salary.day')||undefined" :aria-describedby="errorDescription('$.salary.day')" @input="form.salary.day=numeric($event);update()" /></label>
           <FieldErrors :id="errorId('$.salary.day')" :issues="issues" path="$.salary.day" />
           <p v-if="form.salary.nonWorkingPolicy!=='delay'" class="we-muted settings-note">保留历史发薪策略：{{ form.salary.nonWorkingPolicy==='advance'?'提前至上一个工作日':'休息日不调整' }}。</p>
           <p v-else class="we-muted settings-note">每月发上月工资，遇休息日按工作日历顺延。</p><FieldErrors :issues="issues" path="$.salary" :exclude-paths="['$.salary.day']" />
+        </div>
         </div>
         <div class="settings-field settings-mini settings-card">
           <label class="settings-row"><span class="settings-label"><UiIcon name="monitor" tile />启用迷你窗</span><input v-model="form.desktop.miniEnabled" class="settings-switch" type="checkbox" role="switch" :aria-invalid="hasErrors('$.desktop.miniEnabled')||undefined" :aria-describedby="errorDescription('$.desktop.miniEnabled')" @change="update" /></label>
@@ -97,12 +112,15 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
 .settings-work-times { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px; }
 .settings-work-times :deep(.time-input--row) { grid-template-columns:auto minmax(120px,1fr);gap:8px; }
 .settings-work-times :deep(.time-input-label) { gap:6px; }
-@media(max-width:600px) { .settings-work-times { grid-template-columns:minmax(0,1fr); } }
+.settings-personal-fields { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px; }
+@media(max-width:600px) { .settings-work-times,.settings-personal-fields { grid-template-columns:minmax(0,1fr); } }
 .settings-row { display:grid;grid-template-columns:minmax(0,1fr) minmax(120px,180px);gap:12px;align-items:center;min-height:40px; }
 .settings-label { display:flex;align-items:center;gap:12px;font-size:15px;font-weight:600;color:var(--we-text); }
 .settings-label svg { flex:none; }
 .settings-row .we-control { width:100%;min-width:0;min-height:40px;font-size:15px;font-variant-numeric:tabular-nums; }
+.settings .settings-personal-row { grid-template-columns:minmax(0,1fr);gap:8px; }
 .settings-note { margin-top:4px; }
+.settings-end-comparison { margin-top:6px; }
 .settings-expected-context { display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:6px; }
 .settings-expected-context .we-button { flex:none;font-size:12px;min-height:28px;padding:2px 8px; }
 .settings-history { display:grid;gap:3px; }

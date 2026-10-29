@@ -37,6 +37,43 @@ test('UI-02 keeps stable error IDs and drops invalid state and stale references 
   assert.ok(!valid.includes('class="field-error"'))
   for(const match of valid.matchAll(/aria-describedby="([^"]+)"/g))for(const id of match[1].split(' '))assert.equal(valid.split(`id="${id}"`).length-1,1,id)
 })
+test('UI-17 compares only valid changed Main projections and keeps current overtime clear',async()=>{
+  const model=initialEditor(),expectedEnd={available:true,targetKey:'ui17',shiftDate:'2026-10-29',normalEnd:{date:'2026-10-29',time:'12:00'},finalEnd:{date:'2026-10-29',time:'13:00'},minutes:60}
+  const preview={date:'2026-10-29',time:'12:00'},context={...expectedEnd,previewEnd:preview},original=structuredClone(context)
+  const changed=await renderSettings(model,f.metadata,{expectedEnd:context,expectedEndInput:'12:00',dirty:true})
+  assert.ok(changed.includes('当前生效：13:00'));assert.ok(changed.includes('已设置加班 60 分钟'));assert.ok(changed.includes('保存后：12:00'))
+  assert.doesNotMatch(changed,/本次预计结束|现有预计结束|正常结束|本班次 2026-/)
+  for(const options of [
+    {expectedEnd},
+    {expectedEnd:{...expectedEnd,previewEnd:expectedEnd.finalEnd},expectedEndInput:'13:00'},
+    {expectedEnd:context,expectedEndInput:'12:'},
+    {expectedEnd:context,expectedEndInput:'12:00',issues:[{field:'$.expectedEndTime',reason:'RANGE',message:'预计时间无效'}]}
+  ]){
+    const html=await renderSettings(model,f.metadata,options)
+    assert.ok(!html.includes('保存后：'));assert.ok(html.includes('已设置加班 60 分钟'))
+    assert.ok(!html.includes('当前生效：13:00'),'same-day unchanged time is already in its input')
+  }
+  assert.deepEqual(context,original)
+})
+test('UI-17 preserves full dates across shifts, unavailable reasons, recovery and page semantics',async()=>{
+  const model=initialEditor(),context={available:true,targetKey:'overnight',shiftDate:'2026-10-29',normalEnd:{date:'2026-10-30',time:'00:00'},finalEnd:{date:'2026-10-30',time:'01:00'},minutes:60}
+  for(const previewEnd of [undefined,{date:'2026-10-30',time:'02:00'},{date:'2026-10-31',time:'01:00'}]){
+    const html=await renderSettings(model,f.metadata,{expectedEnd:{...context,previewEnd},expectedEndInput:previewEnd?.time??'01:00'})
+    assert.ok(html.includes('当前生效：2026-10-30 01:00'))
+    if(previewEnd)assert.ok(html.includes(`保存后：${previewEnd.date} ${previewEnd.time}`))
+    else assert.ok(!html.includes('保存后：'))
+  }
+  for(const expectedEnd of [null,{available:false,message:'当前没有可用班次'}]){
+    const html=await renderSettings(model,f.metadata,{expectedEnd})
+    assert.ok(html.includes(expectedEnd?'当前没有可用班次':'正在确认当前班次'))
+    assert.ok(!html.includes('保存后：'))
+  }
+  const html=await renderSettings(model,f.metadata)
+  assert.ok(html.includes('aria-label="设置中心"'));assert.ok(!html.includes('class="settings-title"'))
+  assert.ok(html.includes('settings-personal-fields'));assert.match(html,/type="date"/);assert.match(html,/type="number" min="1" max="31" step="1"/)
+  assert.ok((await renderSettings(model,f.metadata,{canSave:false})).includes('配置恢复'))
+  assert.ok((await renderSettings(model,f.metadata,{sessionReady:false,canSave:false})).includes('设置暂不可用'))
+})
 function harness({missing=false,saveFail=null,timers}={}){
   let session=missing?{saved:null,draft:{},dirty:false,issues:[],expectedRevision:0,save:{status:'idle'},configurationStatus:'missing'}:{...createSettingsDraft(f.config).data,configurationStatus:'ready'}
   const calls=[],api={settingsDraft:{read:async()=>ok(structuredClone(session)),update:async request=>{calls.push(['update',structuredClone(request)]);session={...session,draft:request.draft,dirty:true};return ok(structuredClone(session))},discard:async()=>{calls.push(['discard']);session=missing?{saved:null,draft:{},dirty:false,issues:[],expectedRevision:0,save:{status:'idle'},configurationStatus:'missing'}:{...createSettingsDraft(f.config).data,configurationStatus:'ready'};return ok(session)}},config:{save:async request=>{calls.push(['save',structuredClone(request)]);if(saveFail)return fail(saveFail);const config={...structuredClone(f.config),...structuredClone(request.settings),calendar:{...structuredClone(f.config.calendar),...structuredClone(request.settings.calendar)},revision:request.expectedRevision+1};session={...createSettingsDraft(config).data,configurationStatus:'ready'};return ok({config,warnings:[]})}}}
