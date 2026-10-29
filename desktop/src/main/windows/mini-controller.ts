@@ -20,7 +20,7 @@ export function createMiniController(options:{
   async function prepare():Promise<Result<ManagedWindow>>{
     if(!active())return unavailable('应用正在退出，不能打开迷你窗。')
     const config=options.config();if(!config.ok)return config
-    if(!config.data.desktop.miniEnabled)return unavailable('请在更多设置 → 窗口与托盘启用迷你窗并保存。')
+    if(!config.data.desktop.miniEnabled)return unavailable('请在设置页面启用迷你窗并保存。')
     const configured=preferencesChanged();if(!configured.ok)return configured
     const existing=options.windows.getMini();if(existing)return success(existing)
     if(creating)return creating

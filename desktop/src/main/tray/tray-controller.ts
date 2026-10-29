@@ -99,9 +99,15 @@ export function createTrayController(options:{
     })().catch(()=>{remove();return fail('托盘菜单不可用，已撤销隐藏能力，请返回主窗口。')}).finally(()=>{menu=null})
     return menu
   }
+  function closeWithoutConfig():Promise<Result<null>>|Result<null>{
+    // Do not guess a close preference. Keep recovery visible unless the tray
+    // cannot provide an exit path, then let the existing coordinator decide.
+    if(!ensure(false).ok)return requestExit()
+    return fail('正式配置不可用，主窗口保持可见。请在设置页面恢复配置，或通过托盘菜单退出程序。')
+  }
   async function close():Promise<Result<null>>{
     if(!active())return unavailable('退出处理中，窗口与草稿保留。')
-    const config=options.config();if(!config.ok)return fail('正式配置不可用，未隐藏窗口；请检查设置中的配置恢复提示后重试。')
+    const config=options.config();if(!config.ok)return closeWithoutConfig()
     if(config.data.desktop.closeAction==='quit')return requestExit()
     // A user close uses one guarded exit flow, without a competing tray warning.
     const ready=ensure(false);if(!ready.ok)return requestExit()
@@ -110,7 +116,7 @@ export function createTrayController(options:{
       acknowledged=true;options.acknowledgeNotice()
     }
     if(!active())return unavailable('退出处理中，未隐藏窗口。')
-    const latest=options.config();if(!latest.ok)return fail('配置已不可用，未隐藏窗口。')
+    const latest=options.config();if(!latest.ok)return closeWithoutConfig()
     if(latest.data.desktop.closeAction==='quit')return requestExit()
     if(!available()){remove();return requestExit()}
     const hidden=options.windows.hideMain()
