@@ -57,7 +57,7 @@ export function createTrayController(options:{
       return result
     }finally{exiting=false}
   }
-  function ensure():Result<null>{
+  function ensure(reportFailure=true):Result<null>{
     if(!active())return unavailable('应用正在退出。')
     if(available())return success(null)
     remove()
@@ -70,7 +70,11 @@ export function createTrayController(options:{
       const registered=options.windows.registerTrayRecovery({isAvailable:available,registerRestore(callback){restore=callback;return()=>{if(restore===callback)restore=null}}})
       if(!registered.ok)throw Error('Recovery unavailable');releaseRecovery=registered.data
       return success(null)
-    }catch{remove();return fail('系统托盘不可用；主窗口不会隐藏，请使用设置中的退出程序。')}
+    }catch{
+      remove()
+      const message='系统托盘不可用；主窗口不会隐藏。关闭主窗口可安全退出，未保存的修改会先请求确认。'
+      return reportFailure?fail(message):unavailable(message)
+    }
   }
   async function openMenu():Promise<Result<null>>{
     if(menu)return menu
@@ -97,9 +101,10 @@ export function createTrayController(options:{
   }
   async function close():Promise<Result<null>>{
     if(!active())return unavailable('退出处理中，窗口与草稿保留。')
-    const config=options.config();if(!config.ok)return fail('正式配置不可用，未隐藏窗口；请检查设置或使用退出程序。')
+    const config=options.config();if(!config.ok)return fail('正式配置不可用，未隐藏窗口；请检查设置中的配置恢复提示后重试。')
     if(config.data.desktop.closeAction==='quit')return requestExit()
-    const ready=ensure();if(!ready.ok)return ready
+    // A user close uses one guarded exit flow, without a competing tray warning.
+    const ready=ensure(false);if(!ready.ok)return requestExit()
     if(!acknowledged&&!config.data.desktop.tray.firstHideNoticeAcknowledged){
       const notice=await options.confirmFirstHide(FIRST_HIDE_MESSAGE);if(!notice.ok)return notice;if(!notice.data)return {ok:false,error:{code:'CANCELLED',message:'已取消隐藏，窗口保留。'}}
       acknowledged=true;options.acknowledgeNotice()
@@ -107,8 +112,10 @@ export function createTrayController(options:{
     if(!active())return unavailable('退出处理中，未隐藏窗口。')
     const latest=options.config();if(!latest.ok)return fail('配置已不可用，未隐藏窗口。')
     if(latest.data.desktop.closeAction==='quit')return requestExit()
-    if(!available())return fail('托盘恢复能力已失效，未隐藏窗口。')
-    return options.windows.hideMain()
+    if(!available()){remove();return requestExit()}
+    const hidden=options.windows.hideMain()
+    if(!hidden.ok&&!available()){remove();return requestExit()}
+    return hidden
   }
   return {
     ensure,available,openMenu,restoreMain,requestExit,

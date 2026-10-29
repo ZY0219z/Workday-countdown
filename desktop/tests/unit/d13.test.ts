@@ -54,12 +54,17 @@ test('100 hide/restore and menu operations keep one window, icon and listener pa
 test('menu has only status/main/settings/quit and invokes the existing operations',async()=>{const h=setup();value(h.controller.ensure());value(await h.controller.openMenu());assert.deepEqual(h.icons[0].items.map(i=>i.label??i.type),['工作中 · 距下班约 3 小时 26 分','打开主窗口','打开设置','separator','退出程序']);assert.equal(h.icons[0].items[0].enabled,false);h.icons[0].items[2].click!();assert.equal(h.counts().settings,1);h.icons[0].items[4].click!();await Promise.resolve();assert.equal(h.counts().quits,1);h.controller.dispose()})
 test('menu and native callbacks are invalid after disposal',async()=>{const h=setup();value(h.controller.ensure());value(await h.controller.openMenu());const stale=h.icons[0].items[2].click!,click=h.icons[0].listeners('click')[0] as ()=>void;h.controller.dispose();stale();click();assert.equal(h.counts().settings,0);assert.equal(h.controller.available(),false)})
 test('old callbacks cannot restore through a newly created tray generation',async()=>{const h=setup();value(h.controller.ensure());const stale=h.icons[0].listeners('click')[0] as ()=>void;h.icons[0].destroyed=true;value(h.controller.ensure());value(await h.controller.closeMain());stale();assert.equal(h.window.visible,false);h.icons[1].emit('click');assert.equal(h.window.visible,true);h.controller.dispose()})
-test('creation failure never hides the active window',async()=>{const h=setup();h.fail=true;rejected(await h.controller.closeMain(),'UNAVAILABLE');assert.equal(h.window.visible,true);assert.equal(h.controller.available(),false);assert.equal(h.feedback.length,1)})
+test('creation failure on close requests safe exit without hiding or a competing warning',async()=>{const h=setup();h.fail=true;value(await h.controller.closeMain());assert.equal(h.window.visible,true);assert.equal(h.controller.available(),false);assert.equal(h.counts().quits,1);assert.equal(h.counts().notices,0);assert.equal(h.config.desktop.closeAction,'hideToTray');assert.equal(h.feedback.length,0);h.controller.dispose()})
+test('background tray creation failure only reports the close-window fallback, never exits',()=>{const h=setup();h.fail=true;rejected(h.controller.ensure(),'UNAVAILABLE');assert.equal(h.counts().quits,0);assert.equal(h.window.visible,true);assert.equal(h.feedback.length,1);assert.match(h.feedback[0],/关闭主窗口.*安全退出/);assert.doesNotMatch(h.feedback[0],/设置.*退出/);h.controller.dispose()})
 test('lost recovery while hidden restores the main window before failed recreation',async()=>{const h=setup();value(await h.controller.closeMain());h.icons[0].destroyed=true;h.fail=true;rejected(h.controller.ensure(),'UNAVAILABLE');assert.equal(h.window.visible,true)})
-test('no recovery registration means no hidden process',async()=>{const h=setup();h.windows.dispose();rejected(await h.controller.closeMain(),'UNAVAILABLE');assert.equal(h.window.visible,true);assert.equal(h.icons[0].isDestroyed(),true)})
+test('failed recovery registration on close requests safe exit without hiding',async()=>{const h=setup();h.windows.registerTrayRecovery=()=>unavailable;value(await h.controller.closeMain());assert.equal(h.window.visible,true);assert.equal(h.icons[0].isDestroyed(),true);assert.equal(h.counts().quits,1);assert.equal(h.feedback.length,0);h.controller.dispose()})
 test('recover and stale callbacks are ignored while quitting',async()=>{const h=setup();value(await h.controller.closeMain());h.exiting=true;h.icons[0].emit('click');rejected(h.controller.restoreMain(),'UNAVAILABLE');assert.equal(h.window.visible,false);h.windows.beginQuit();h.controller.dispose()})
 test('unreadable saved configuration never hides or acknowledges',async()=>{const h=setup({config:()=>unavailable});rejected(await h.controller.closeMain(),'UNAVAILABLE');assert.equal(h.window.visible,true);assert.equal(h.counts().acks,0);h.controller.dispose()})
-test('an empty or destroyed native icon cannot authorize hiding',async()=>{const icon=new Icon();icon.destroyed=true;const h=setup({create:()=>icon});rejected(await h.controller.closeMain(),'UNAVAILABLE');assert.equal(h.window.visible,true);h.controller.dispose()})
+test('an empty or destroyed native icon routes close to safe exit instead of hiding',async()=>{const icon=new Icon();icon.destroyed=true;const h=setup({create:()=>icon});value(await h.controller.closeMain());assert.equal(h.window.visible,true);assert.equal(h.counts().quits,1);h.controller.dispose()})
+
+test('recovery lost during an accepted first-hide notice routes close to safe exit',async()=>{const h=setup({confirmFirstHide:async()=>{h.icons[0].destroyed=true;return success(true)}});value(await h.controller.closeMain());assert.equal(h.counts().quits,1);assert.equal(h.window.visible,true);assert.equal(h.controller.available(),false);h.controller.dispose()})
+test('cancelling first-hide still cancels close even if recovery was lost meanwhile',async()=>{const h=setup({confirmFirstHide:async()=>{h.icons[0].destroyed=true;return success(false)}});rejected(await h.controller.closeMain(),'CANCELLED');assert.equal(h.counts().quits,0);assert.equal(h.window.visible,true);h.controller.dispose()})
+test('recovery lost at the hide boundary uses safe exit and leaves the window visible',async()=>{const h=setup(),hide=h.windows.hideMain;h.windows.hideMain=()=>{h.icons[0].destroyed=true;return hide()};value(await h.controller.closeMain());assert.equal(h.counts().quits,1);assert.equal(h.window.visible,true);assert.equal(h.controller.available(),false);h.controller.dispose()})
 test('menu failure revokes recovery and restores the hidden main',async()=>{const h=setup();value(await h.controller.closeMain());h.icons[0].popUpMenu=()=>{throw Error('native menu failure')};rejected(await h.controller.openMenu(),'UNAVAILABLE');assert.equal(h.window.visible,true);assert.equal(h.controller.available(),false);h.controller.dispose()})
 test('each menu reads a fresh Snapshot, with no extra polling',async()=>{let reads=0;const h=setup({snapshot:async()=>{reads++;return snap('working',reads*60)}});value(h.controller.ensure());assert.equal(reads,0);value(await h.controller.openMenu());assert.ok(h.icons[0].items[0].label?.includes('1 分'));value(await h.controller.openMenu());assert.ok(h.icons[0].items[0].label?.includes('2 分'));assert.equal(reads,2);h.controller.dispose()})
 test('disposed async menu cannot publish or invoke stale native commands',async()=>{let finish!:(snapshot:Result<DashboardSnapshot>)=>void;const h=setup({snapshot:()=>new Promise(resolve=>{finish=resolve})});value(h.controller.ensure());const opening=h.controller.openMenu();h.controller.dispose();finish(snap());rejected(await opening,'UNAVAILABLE');assert.equal(h.icons[0].menus,0)})
@@ -76,7 +81,8 @@ test('tray menu reports a resolved business failure once and preserves its Resul
   }finally{h.controller.dispose()}
 })
 
-for(const scenario of ['clean','continueEditing','save','discard','saveFailure','syncFailure'] as const)test(`tray menu through the real quit coordinator: ${scenario}`,async()=>{
+for(const entry of ['trayMenu','creationFailure','runtimeFailure'] as const)
+for(const scenario of ['clean','continueEditing','save','discard','saveFailure','syncFailure'] as const)test(`${entry} through the real quit coordinator: ${scenario}`,async()=>{
   let coordinator!:ReturnType<typeof createQuitCoordinator>
   const h=setup({quit:()=>coordinator.requestQuit(),exiting:()=>coordinator.isAuthorized()})
   const state={dirty:!['clean','syncFailure'].includes(scenario),saving:false,identity:'tray-draft'}
@@ -88,20 +94,49 @@ for(const scenario of ['clean','continueEditing','save','discard','saveFailure',
     async save(){calls.save++;if(scenario==='saveFailure')return {ok:false,error:{code:'IO_DENIED',message:'设置保存失败。'}};state.dirty=false;return success(null)},
     async discard(){calls.discard++;state.dirty=false;return success(null)}})
   try{
-    value(await h.controller.closeMain());value(await h.controller.openMenu());assert.equal(h.window.visible,false)
-    const result=await h.icons[0].items.find(item=>item.label==='退出程序')!.click!() as Result<null>
+    let result:Result<null>
+    if(entry==='trayMenu'){
+      value(await h.controller.closeMain());value(await h.controller.openMenu());assert.equal(h.window.visible,false)
+      result=await h.icons[0].items.find(item=>item.label==='退出程序')!.click!() as Result<null>
+    }else{
+      if(entry==='runtimeFailure'){value(await h.controller.closeMain());value(h.windows.showMain());h.icons[0].destroyed=true}
+      h.fail=true
+      result=await h.controller.closeMain()
+      assert.equal(h.config.desktop.closeAction,'hideToTray')
+    }
     const failed=['continueEditing','saveFailure','syncFailure'].includes(scenario)
     assert.equal(result.ok,!failed);assert.equal(coordinator.isAuthorized(),!failed);assert.equal(calls.commit,failed?0:1)
     assert.equal(calls.confirm,scenario==='clean'||scenario==='syncFailure'?0:1)
     if(failed){
       rejected(result,scenario==='continueEditing'?'CANCELLED':scenario==='saveFailure'?'IO_DENIED':'IO_BUSY')
       assert.equal(h.window.visible,true);assert.equal(h.window.destroyed,false)
+      assert.equal(h.windows.state(),'mainVisible')
       assert.equal(state.dirty,scenario!=='syncFailure')
       assert.equal(h.feedback.length,scenario==='continueEditing'?0:1)
     }else{assert.equal(state.dirty,false);assert.equal(h.feedback.length,0)}
     assert.equal(calls.save,scenario==='save'||scenario==='saveFailure'?1:0)
     assert.equal(calls.discard,scenario==='discard'?1:0)
   }finally{h.controller.dispose();coordinator.dispose()}
+})
+
+for(const scenario of ['saving','saveTimeout','confirmationTimeout'] as const)test(`failed-tray close preserves drafts during ${scenario} and shares repeated closes`,async()=>{
+  let coordinator!:ReturnType<typeof createQuitCoordinator>,finish!:()=>void,quitCalls=0,confirmCalls=0,saveCalls=0,commits=0
+  const held=new Promise<void>(resolve=>{finish=resolve})
+  const state={dirty:true,saving:scenario==='saving',identity:'fallback-draft'}
+  const h=setup({quit:()=>{quitCalls++;return coordinator.requestQuit()},exiting:()=>coordinator.isAuthorized()})
+  coordinator=createQuitCoordinator({waitMilliseconds:30,confirmationMilliseconds:30,waitForWrites:async()=>success(null),restoreMain(){value(h.windows.showMain())},commitQuit(){commits++;return success(null)}})
+  coordinator.registerDraft({read:async()=>success({...state}),async confirm(){confirmCalls++;if(scenario==='confirmationTimeout')await held;return success('save')},
+    async save(){saveCalls++;await held;return success(null)},async discard(){assert.fail('No discard was requested')}})
+  try{
+    h.fail=true
+    const first=h.controller.closeMain(),second=h.controller.closeMain()
+    assert.equal(first,second);rejected(await first,'IO_BUSY');assert.equal(quitCalls,1);assert.equal(commits,0)
+    assert.equal(h.window.visible,true);assert.equal(h.windows.state(),'mainVisible');assert.equal(state.dirty,true)
+    assert.equal(confirmCalls,scenario==='saving'?0:1);assert.equal(saveCalls,scenario==='saveTimeout'?1:0)
+    // A timed-out operation is still pending: another close must not duplicate it.
+    rejected(await h.controller.closeMain(),'IO_BUSY');assert.equal(commits,0);assert.equal(state.dirty,true)
+    assert.equal(confirmCalls,scenario==='saving'?0:1);assert.equal(saveCalls,scenario==='saveTimeout'?1:0)
+  }finally{finish();coordinator.dispose();h.controller.dispose()}
 })
 
 test('old exit menu callbacks cannot quit after disposal, destruction, replacement or external quit',async()=>{
