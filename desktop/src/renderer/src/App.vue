@@ -17,6 +17,19 @@ const validationAttempt=ref(0)
 const error=ref(''),confirmLeave=ref(false),quitAfterLeave=ref(false),dialogRef=ref<HTMLElement|null>(null),leaveOrigin=ref<HTMLElement|null>(null)
 const controller=createSettingsController(api,()=>{state.value=structuredClone(controller.state)})
 const state=shallowRef(structuredClone(controller.state))
+function positionToast(element:Element){
+  const toast=element as HTMLElement,box=toast.getBoundingClientRect(),inset=parseFloat(getComputedStyle(toast).top)
+  // A scrolled form can occupy the usual top corner. Place once in the first
+  // vertical gap that clears its visible controls; this adds no timers/listeners.
+  const controls=[...host.value!.querySelectorAll<HTMLElement>('.settings input,.settings button,.app-header button,.app-modal button')]
+    .map(control=>control.getBoundingClientRect()).filter(rect=>rect.right>box.left-8&&rect.left<box.right+8&&rect.bottom>0&&rect.top<innerHeight).sort((a,b)=>a.top-b.top)
+  let top=inset
+  for(const control of controls){
+    if(top+box.height+8<=control.top)break
+    if(top<control.bottom+8)top=control.bottom+8
+  }
+  if(top+box.height<=innerHeight-inset)toast.style.top=`${top}px`
+}
 const preferences=computed(()=>settingsOpen.value?state.value.editor.appearance:state.value.session?.saved?.appearance??state.value.editor.appearance)
 const reduceMotion=useTheme(host,preferences),windowVisible=useWindowVisibility(api.window)
 const syncing=computed(()=>state.value.pending>0||state.value.busy||dataBusy.value||loading.value||composing.value)
@@ -83,21 +96,26 @@ onBeforeUnmount(()=>{stopTraySettings?.();controller.dispose();void api.snapshot
   <div ref="host" class="workday-ui app-shell" data-workday-root :data-pending="String(pending)" @compositionstart="composing=true" @compositionend="composing=false">
     <div class="app-content" :class="{'app-content--dashboard':!settingsOpen&&!loading}" :inert="confirmLeave">
       <header class="app-header"><AppTitle /><div class="app-header-actions"><button type="button" class="we-button app-mini" :disabled="loading||syncing||defaultPending" @click="miniMode">迷你模式</button><button type="button" class="we-button app-menu" :aria-label="settingsOpen?'返回倒计时':'设置'" :title="settingsOpen?'返回倒计时':'设置'" :aria-expanded="settingsOpen" aria-controls="settings-panel" :disabled="loading||defaultPending" @click="settingsOpen?leave():openSettings()"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M4 5h12M4 10h12M4 15h12" /></svg></button></div></header>
-      <p v-if="errorText" role="alert" class="app-error">{{ errorText }}</p>
+      <p v-if="errorText && (error || state.error?.code!=='VALIDATION' || !state.issues.length)" role="alert" class="app-error">{{ errorText }}</p>
       <button v-if="!loading&&!state.session" type="button" class="we-button" @click="initialize">重新连接配置</button>
       <button v-if="state.unsynced && state.pending===0" type="button" class="we-button" @click="error='';controller.retry()">重试同步草稿</button>
-      <p v-if="state.notice" role="status" class="app-notice">{{ state.notice }}</p>
       <p v-if="loading" role="status">正在读取正式配置…</p>
       <p v-if="defaultPending" class="we-muted app-default-note" role="status">正在保存默认设置…</p>
       <p v-else-if="state.session?.defaultPersistence?.status==='failed'" class="app-error" role="alert">默认设置尚未保存，本次仍可查看倒计时。请在设置中重试保存。</p>
       <main v-if="!loading" :class="{'app-main--dashboard':!settingsOpen}">
         <section v-if="settingsOpen" id="settings-panel" class="we-surface app-settings">
-          <SettingsView :expected-end="state.expectedEnd" :expected-end-input="state.expectedEndInput" :quit-disabled="syncing||quitting||defaultPending" :model="state.editor" :issues="state.issues" :busy="state.busy||dataBusy||defaultPending" :dirty="state.dirty||state.pending>0" :initialized="!!state.session?.saved" :default-unpersisted="!!state.session?.defaultPersistence" :session-ready="!!state.session" :validation-attempt="validationAttempt" :can-save="canSave" :metadata="metadata" :api="api" @expected-end="value=>{error='';controller.editExpectedEnd(value)}" @change="edit" @save="saved" @cancel="leave" @quit="quit" @imported="imported" @data-busy="value=>dataBusy=value" />
+          <SettingsView :expected-end="state.expectedEnd" :expected-end-input="state.expectedEndInput" :quit-disabled="syncing||quitting||defaultPending" :model="state.editor" :issues="state.issues" :busy="state.busy||dataBusy||defaultPending" :dirty="state.dirty||state.pending>0" :initialized="!!state.session?.saved" :default-unpersisted="!!state.session?.defaultPersistence" :session-ready="!!state.session" :validation-attempt="validationAttempt" :can-save="canSave" :metadata="metadata" :api="api" @expected-end="value=>{error='';controller.editExpectedEnd(value)}" @change="edit" @save="saved" @invalid="issue=>controller.invalidInput(issue)" @cancel="leave" @quit="quit" @imported="imported" @data-busy="value=>dataBusy=value" />
           <p v-if="state.session?.configurationStatus==='recoverable'" class="app-error">当前只读使用有效备份，请在安全恢复区预览并确认恢复；损坏源文件已保留。</p>
         </section>
         <DashboardView v-else :snapshot="snapshot" :motion-allowed="windowVisible&&!reduceMotion" />
       </main>
     </div>
+    <Transition name="app-toast" @enter="positionToast">
+      <div v-if="state.notice && state.noticeKind" class="app-toast" :class="{'app-toast--error':state.noticeKind==='error'}" :role="state.noticeKind==='error'?'alert':'status'" aria-atomic="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9" /><path v-if="state.noticeKind==='success'" d="m8 12 2.5 2.5L16 9" /><path v-else d="m9 9 6 6m0-6-6 6" /></svg>
+        <span>{{ state.notice }}</span>
+      </div>
+    </Transition>
     <div v-if="confirmLeave" class="app-modal-backdrop"><section ref="dialogRef" class="we-surface app-modal" role="dialog" aria-modal="true" aria-labelledby="leave-title" @keydown="trap"><h2 id="leave-title">设置尚未保存</h2><p>{{ quitAfterLeave?'保存后退出，或明确放弃本次修改。':'保存后返回，或明确放弃本次修改。' }}</p><div class="app-actions"><button type="button" class="we-button we-button--primary" :disabled="state.busy" @click="chooseLeave('save')">保存</button><button type="button" class="we-button" :disabled="state.busy" @click="chooseLeave('discard')">放弃</button><button type="button" class="we-button" :disabled="state.busy" @click="chooseLeave('continue')">继续编辑</button></div><p v-if="errorText" role="alert">{{ errorText }}</p></section></div>
   </div>
 </template>

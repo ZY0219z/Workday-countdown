@@ -7,13 +7,20 @@ import { initialEditor, editorFrom, asDraft, type EditorSettings } from './setti
 // is queued to Main; failed/late saves cannot overwrite a newer local editor.
 export function createSettingsController(api: MainWindowApi, changed: () => void, timers={set:(callback:()=>void,delay:number):unknown=>setTimeout(callback,delay),clear:(handle:unknown)=>clearTimeout(handle as ReturnType<typeof setTimeout>)}) {
   const state = { session: null as SettingsDraftSession | null, editor: initialEditor(), pending: 0, busy: false,
-    error: null as ContractError | null, issues: [] as ValidationIssue[], notice: '', dirty: false, unsynced: false,
+    error: null as ContractError | null, issues: [] as ValidationIssue[], notice: '', noticeKind:null as 'success'|'error'|null, dirty: false, unsynced: false,
     expectedEnd:null as ExpectedEndContext|null,expectedEndInput:'' }
   let queue: Promise<unknown> = Promise.resolve(), disposed = false, lastSync: Result<unknown> = { ok: true, data: null }
   let noticeTimer:unknown=null,noticeGeneration=0
   let expectedEdit:ContractRequests['settingsDraft.setExpectedEnd']|null=null
   const emit = () => { if(!disposed) changed() }
-  function clearNotice(){noticeGeneration++;if(noticeTimer!==null)timers.clear(noticeTimer);noticeTimer=null;state.notice=''}
+  function clearNotice(){noticeGeneration++;if(noticeTimer!==null)timers.clear(noticeTimer);noticeTimer=null;state.notice='';state.noticeKind=null}
+  function saveNotice(saved:boolean){
+    clearNotice();if(disposed)return
+    state.notice=saved?'设置已保存':state.error?.code==='VALIDATION'?'保存失败，请检查标记的设置项':'保存失败，修改已保留'
+    state.noticeKind=saved?'success':'error'
+    const generation=noticeGeneration
+    noticeTimer=timers.set(()=>{if(generation===noticeGeneration){state.notice='';state.noticeKind=null;noticeTimer=null;emit()}},3000)
+  }
   function acceptEnd(session:SettingsDraftSession){state.expectedEnd=session.expectedEnd??null;const context=session.expectedEnd
     state.expectedEndInput=session.expectedEndEdit?(session.expectedEndEdit.input??(context?.available?context.normalEnd.time:'')):(context?.available?context.finalEnd.time:'')}
   function accept(session: SettingsDraftSession) { expectedEdit=null;state.session=session;state.editor=editorFrom(session);state.dirty=session.dirty;state.unsynced=false;state.issues=session.issues;acceptEnd(session);emit() }
@@ -33,6 +40,12 @@ export function createSettingsController(api: MainWindowApi, changed: () => void
   return {
     state,
     clearNotice(){clearNotice();emit()},
+    invalidInput(issue:ValidationIssue){
+      if(state.busy||disposed)return
+      state.issues=[...state.issues.filter(value=>value.field!==issue.field),issue]
+      state.error={code:'VALIDATION',message:'设置未保存，请检查标记的设置项。',issues:state.issues}
+      saveNotice(false);emit()
+    },
     async load():Promise<Result<SettingsDraftSession>> {
       clearNotice()
       try{const session=await api.settingsDraft.read();if(session.ok){state.error=null;accept(session.data)}else{state.error=session.error;emit()}return session}
@@ -54,9 +67,10 @@ export function createSettingsController(api: MainWindowApi, changed: () => void
     async flush(){await queue;return lastSync},
     async save():Promise<boolean>{
       if(state.busy)return false
-      if(!state.session){state.error={code:'UNAVAILABLE',message:'尚未读取 Main 草稿，无法保存。请重新连接配置。'};emit();return false}
+      if(!state.session){state.error={code:'UNAVAILABLE',message:'尚未读取 Main 草稿，无法保存。请重新连接配置。'};saveNotice(false);emit();return false}
       clearNotice()
-      state.busy=true;state.notice='正在校验并保存…';emit()
+      state.busy=true;emit()
+      let savedSuccessfully=false
       try {
         await queue;if(!lastSync.ok){state.error=lastSync.error;return false}
         const checked=validateStructure(asDraft(state.editor),editableConfigValidator)
@@ -64,20 +78,17 @@ export function createSettingsController(api: MainWindowApi, changed: () => void
         const saved=await api.config.save({settings:checked.data,expectedRevision:state.session.expectedRevision})
         if(!saved.ok){state.error=saved.error;if(saved.error.code==='VALIDATION')state.issues=saved.error.issues;return false}
         const current=await api.settingsDraft.read();if(!current.ok){state.error=current.error;return false}
-        accept(current.data);state.error=null;state.notice='设置已保存。'
-        const generation=noticeGeneration
-        if(!disposed)noticeTimer=timers.set(()=>{if(generation===noticeGeneration){state.notice='';noticeTimer=null;emit()}},2000)
-        else state.notice=''
+        accept(current.data);state.error=null;savedSuccessfully=true
         return true
       } catch {state.error={code:'INTERNAL',message:'保存调用失败，输入保留；请重新确认保存状态。'};return false}
-      finally{state.busy=false;if(state.error)state.notice='';emit()}
+      finally{state.busy=false;saveNotice(savedSuccessfully);emit()}
     },
     async discard():Promise<boolean>{
       if(state.busy)return false
       clearNotice()
       state.busy=true;emit()
       try{await queue;const result=await api.settingsDraft.discard();if(!result.ok){state.error=result.error;return false}
-        accept(result.data);lastSync={ok:true,data:null};state.error=null;state.notice='已放弃未保存修改。';return true
+        accept(result.data);lastSync={ok:true,data:null};state.error=null;return true
       }finally{state.busy=false;emit()}
     },
     dispose(){clearNotice();disposed=true}

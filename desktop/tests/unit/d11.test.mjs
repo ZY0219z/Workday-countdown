@@ -110,7 +110,7 @@ test('current-rule estimate does not invent a missing calendar year',()=>{const 
 
 test('rejected draft initialization cannot masquerade as a successful save',async()=>{const h=harness({missing:true});h.api.settingsDraft.read=async()=>fail('FORBIDDEN');assert.equal((await h.controller.load()).ok,false);assert.equal(h.controller.state.session,null);assert.equal(await h.controller.save(),false);assert.equal(h.controller.state.error.code,'UNAVAILABLE');assert.match(h.controller.state.error.message,/重新连接/);assert.equal(h.calls.length,0)})
 test('thrown initialization is a structured failure and retry reads the real session',async()=>{const h=harness(),read=h.api.settingsDraft.read;h.api.settingsDraft.read=async()=>{throw Error('private transport detail')};const failure=await h.controller.load();assert.equal(failure.ok,false);assert.equal(failure.error.code,'INTERNAL');assert.ok(!JSON.stringify(failure).includes('private'));h.api.settingsDraft.read=read;assert.equal((await h.controller.load()).ok,true);assert.equal(h.controller.state.session.saved.revision,1);assert.equal(h.controller.state.error,null)})
-test('unknown draft UI disables saving and does not claim clean',async()=>{const html=await renderSettings(initialEditor(),f.metadata,{sessionReady:false,canSave:false});assert.ok(html.includes('草稿状态未知'));assert.ok(!html.includes('没有未保存修改'));assert.match(html,/type="submit"[^>]*disabled/);assert.ok(html.includes('不能编辑或保存'))})
+test('unknown draft UI retains the blocking reason without a normal footer status',async()=>{const html=await renderSettings(initialEditor(),f.metadata,{sessionReady:false,canSave:false});assert.ok(html.includes('尚未读取 Main 草稿'));assert.ok(!html.includes('没有未保存修改'));assert.match(html,/type="submit"[^>]*disabled/);assert.ok(html.includes('不能编辑或保存'))})
 test('settings remove lunch edits while retaining the read-only historic break warning',async()=>{const model=initialEditor();model.schedule.breaks=[{startTime:'12:00',endTime:'13:00',startDayOffset:0,endDayOffset:0}];const html=await renderSettings(model,f.metadata);assert.equal((html.match(/placeholder="HH:MM"/g)||[]).length,3);assert.ok(html.includes('保留了历史午休配置'));assert.ok(!html.includes('添加午休'));assert.ok(!html.includes('休息开始'));assert.equal((html.match(/type="time"/g)||[]).length,0)})
 for(const time of ['0','08:','24:00','08:60','8:30'])test(`raw time ${time} stays in draft but cannot be saved`,async()=>{const h=harness();await h.controller.load();const editor=structuredClone(h.controller.state.editor);editor.schedule.startTime=time;h.controller.edit(editor);await h.controller.flush();assert.equal(h.session.draft.schedule.startTime,time);assert.equal(await h.controller.save(),false);assert.equal(h.controller.state.error.code,'VALIDATION');assert.equal(h.controller.state.editor.schedule.startTime,time);assert.equal(h.calls.filter(call=>call[0]==='save').length,0)})
 test('missing salary has a specific field error, and input time explains its range',async()=>{const h=harness({missing:true});await h.controller.load();const editor=structuredClone(h.controller.state.editor);editor.schedule.startTime='08:30';editor.schedule.endTime='18:00';h.controller.edit(editor);assert.equal(await h.controller.save(),false);const issue=h.controller.state.issues.find(issue=>issue.field==='$.salary.day');assert.ok(issue);assert.match(fieldMessage(issue),/每月发薪日.*1–31/);assert.match(fieldMessage({field:'$.schedule.breaks[0].endTime',reason:'FORMAT'}),/HH:MM.*23:59/)})
@@ -141,10 +141,11 @@ test('concise metrics still show dependent calculation errors and future/unset e
   const html=await renderDashboard(snapshot);assert.ok(html.includes('休息日无法计算'));assert.ok(html.includes('发薪日期无法计算'));assert.ok(html.includes('尚未入职'))
   snapshot.employment.status='unset';snapshot.employment.elapsedNaturalDays=null;assert.ok((await renderDashboard(snapshot)).includes('尚未设置入职日期'))
 })
-for(const policy of ['advance','none'])test(`hidden legacy settings ${policy} remain intact with concise read-only notices`,async()=>{
+for(const policy of ['advance','none'])test(`UI-18 hides salary explanations without changing legacy policy ${policy}`,async()=>{
   const model=editorFrom(createSettingsDraft(f.config).data);model.schedule.crossMidnight=true;model.schedule.workWeek=[1,6];model.salary.nonWorkingPolicy=policy
   const original=structuredClone(model),html=await renderSettings(model,f.metadata)
-  assert.ok(html.includes('保留历史跨夜班次'));assert.ok(html.includes('保留历史工作周：周一、周六'));assert.ok(html.includes(policy==='advance'?'提前至上一个工作日':'休息日不调整'))
+  assert.ok(html.includes('保留历史跨夜班次'));assert.ok(html.includes('保留历史工作周：周一、周六'));assert.ok(!html.includes('保留历史发薪策略'))
+  for(const text of ['可留空。不含今天','每月发上月工资','设置中的退出程序','settings-exit','settings-save-state','有未保存修改'])assert.ok(!html.includes(text),text)
   assert.ok(!html.includes('每周工作日'));assert.ok(!html.includes('value="advance"'));assert.ok(!html.includes('value="none"'));assert.deepEqual(model,original)
 })
 test('editor retains both work/rest date overrides without aliasing the Main saved config or draft',()=>{
@@ -159,15 +160,43 @@ test('dynamic date dictionary does not bypass unknown-field or dangerous-key che
 })
 
 function noticeClock(){let now=0,next=0;const jobs=new Map(),cleared=[];return {port:{set(fn,delay){const id=++next;jobs.set(id,{fn,at:now+delay});return id},clear(id){cleared.push(jobs.get(id)?.fn);jobs.delete(id)}},advance(delta){now+=delta;for(const [id,job]of [...jobs])if(job.at<=now){jobs.delete(id);job.fn()}},old(){for(const fn of cleared)fn?.()},size:()=>jobs.size}}
-test('successful save notice expires at 2 seconds and old callbacks cannot clear a newer notice',async()=>{
-  const clock=noticeClock(),h=harness({timers:clock.port});await h.controller.load();assert.equal(await h.controller.save(),true);assert.equal(h.controller.state.notice,'设置已保存。');clock.advance(1999);assert.equal(h.controller.state.notice,'设置已保存。');clock.advance(1);assert.equal(h.controller.state.notice,'')
-  await h.controller.save();clock.advance(1500);await h.controller.save();clock.old();assert.equal(h.controller.state.notice,'设置已保存。');clock.advance(500);assert.equal(h.controller.state.notice,'设置已保存。');clock.advance(1500);assert.equal(h.controller.state.notice,'');h.controller.dispose()
+test('UI-18 save Toast expires at 3 seconds and old callbacks cannot clear a newer result',async()=>{
+  const clock=noticeClock(),h=harness({timers:clock.port});await h.controller.load();assert.equal(await h.controller.save(),true);assert.equal(h.controller.state.notice,'设置已保存');assert.equal(h.controller.state.noticeKind,'success');clock.advance(2999);assert.equal(h.controller.state.notice,'设置已保存');clock.advance(1);assert.equal(h.controller.state.notice,'');assert.equal(h.controller.state.noticeKind,null)
+  await h.controller.save();clock.advance(1500);await h.controller.save();clock.old();assert.equal(h.controller.state.notice,'设置已保存');assert.equal(clock.size(),1);clock.advance(1500);assert.equal(h.controller.state.notice,'设置已保存');clock.advance(1500);assert.equal(h.controller.state.notice,'');h.controller.dispose()
 })
 test('new edit/load/dispose clears notice timers, expiry never clears persistent errors',async()=>{
   const clock=noticeClock(),h=harness({timers:clock.port});await h.controller.load();await h.controller.save();h.controller.edit(structuredClone(h.controller.state.editor));assert.equal(h.controller.state.notice,'');assert.equal(clock.size(),0);await h.controller.flush();await h.controller.save();await h.controller.load();assert.equal(clock.size(),0)
-  await h.controller.save();h.controller.state.error={code:'IO_DENIED',message:'persistent failure'};clock.advance(2000);assert.equal(h.controller.state.error.code,'IO_DENIED');await h.controller.save();h.controller.dispose();assert.equal(clock.size(),0);clock.old();assert.equal(h.controller.state.notice,'')
+  await h.controller.save();h.controller.state.error={code:'IO_DENIED',message:'persistent failure'};clock.advance(3000);assert.equal(h.controller.state.error.code,'IO_DENIED');await h.controller.save();h.controller.dispose();assert.equal(clock.size(),0);clock.old();assert.equal(h.controller.state.notice,'')
 })
 
 test('unmount during an in-flight save never starts a late success timer',async()=>{
   const clock=noticeClock(),h=harness({timers:clock.port});await h.controller.load();const save=h.api.config.save;let release;const gate=new Promise(resolve=>{release=resolve});h.api.config.save=async request=>{await gate;return save(request)};const pending=h.controller.save();await Promise.resolve();h.controller.dispose();release();assert.equal(await pending,true);assert.equal(clock.size(),0);assert.equal(h.controller.state.notice,'')
+})
+test('UI-18 failure Toast expires without dropping field errors, draft data or authoritative config',async()=>{
+  const clock=noticeClock(),h=harness({timers:clock.port});await h.controller.load()
+  const editor=structuredClone(h.controller.state.editor);editor.schedule.startTime='bad';h.controller.edit(editor)
+  assert.equal(await h.controller.save(),false);assert.equal(h.controller.state.noticeKind,'error');assert.equal(h.controller.state.notice,'保存失败，请检查标记的设置项')
+  const issues=structuredClone(h.controller.state.issues),saved=structuredClone(h.controller.state.session.saved)
+  clock.advance(3000);assert.equal(h.controller.state.notice,'');assert.equal(h.controller.state.noticeKind,null)
+  assert.equal(h.controller.state.error.code,'VALIDATION');assert.deepEqual(h.controller.state.issues,issues);assert.deepEqual(h.controller.state.editor,editor);assert.deepEqual(h.controller.state.session.saved,saved);h.controller.dispose()
+})
+for(const code of ['IO_DENIED','IO_BUSY','REVISION_CONFLICT','INTERNAL'])test(`UI-18 ${code} stays actionable after its Toast expires`,async()=>{
+  const clock=noticeClock(),h=harness({saveFail:code,timers:clock.port});await h.controller.load()
+  const editor=structuredClone(h.controller.state.editor);editor.salary.day=15;h.controller.edit(editor)
+  assert.equal(await h.controller.save(),false);assert.equal(h.controller.state.noticeKind,'error');assert.equal(h.controller.state.notice,'保存失败，修改已保留')
+  clock.advance(3000);assert.equal(h.controller.state.notice,'');assert.equal(h.controller.state.error.code,code);assert.equal(h.controller.state.dirty,true);assert.equal(h.controller.state.editor.salary.day,15);h.controller.dispose()
+})
+test('UI-18 retry replaces failure using the same timer and read failure never produces success',async()=>{
+  const clock=noticeClock(),h=harness({timers:clock.port});await h.controller.load();const save=h.api.config.save
+  h.api.config.save=async()=>fail('IO_DENIED');assert.equal(await h.controller.save(),false)
+  clock.advance(1000);h.api.config.save=save;assert.equal(await h.controller.save(),true);clock.old();assert.equal(h.controller.state.noticeKind,'success');assert.equal(clock.size(),1)
+  clock.advance(3000);assert.equal(h.controller.state.notice,'')
+  h.api.settingsDraft.read=async()=>fail('UNAVAILABLE');assert.equal(await h.controller.save(),false);assert.equal(h.controller.state.noticeKind,'error');h.controller.dispose();assert.equal(clock.size(),0)
+})
+test('UI-18 native invalid input reports a timed failure without attempting save or dropping other errors',async()=>{
+  const clock=noticeClock(),h=harness({timers:clock.port});await h.controller.load()
+  h.controller.invalidInput({field:'$.salary.day',reason:'RANGE',message:'native range'})
+  h.controller.invalidInput({field:'$.employee.startDate',reason:'FORMAT',message:'native date'})
+  assert.equal(h.calls.filter(call=>call[0]==='save').length,0);assert.equal(h.controller.state.noticeKind,'error');assert.equal(h.controller.state.notice,'保存失败，请检查标记的设置项');assert.equal(clock.size(),1)
+  clock.advance(3000);assert.equal(h.controller.state.issues.length,2);assert.equal(h.controller.state.error.code,'VALIDATION');h.controller.dispose();assert.equal(clock.size(),0)
 })

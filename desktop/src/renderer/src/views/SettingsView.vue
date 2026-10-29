@@ -9,7 +9,7 @@ import UiIcon from '../components/UiIcon.vue'
 import DataSettings from '../settings/DataSettings.vue'
 import type { MainWindowApi } from '../../../shared/contracts'
 const props=withDefaults(defineProps<{model:EditorSettings;expectedEnd?:ExpectedEndContext|null;expectedEndInput?:string;issues:ValidationIssue[];busy:boolean;dirty:boolean;initialized:boolean;canSave:boolean;sessionReady?:boolean;quitDisabled?:boolean;defaultUnpersisted?:boolean;validationAttempt?:number;metadata:CalendarDatasetMetadata[];api:MainWindowApi}>(),{sessionReady:true,defaultUnpersisted:false,validationAttempt:0})
-const emit=defineEmits<{change:[value:EditorSettings];save:[];cancel:[];quit:[];imported:[];dataBusy:[value:boolean];expectedEnd:[value:string|null]}>()
+const emit=defineEmits<{change:[value:EditorSettings];save:[];invalid:[issue:ValidationIssue];cancel:[];quit:[];imported:[];dataBusy:[value:boolean];expectedEnd:[value:string|null]}>()
 const form=ref<EditorSettings>(JSON.parse(JSON.stringify(props.model)))
 // Main acknowledgements must not replace equal local input on every keystroke.
 watch(()=>props.model,value=>{if(JSON.stringify(value)!==JSON.stringify(form.value))form.value=JSON.parse(JSON.stringify(value))})
@@ -30,12 +30,16 @@ const endComparison=computed(()=>{
 function endLabel(end:{date:string;time:string}){return props.expectedEnd?.available&&end.date===props.expectedEnd.shiftDate?end.time:`${end.date} ${end.time}`}
 function update(){emit('change',JSON.parse(JSON.stringify(form.value)))}
 function numeric(event:Event):number|null{const value=(event.target as HTMLInputElement).value;return value===''?null:Number(value)}
+function invalid(event:Event){
+  const input=event.target as HTMLInputElement
+  emit('invalid',{field:input.type==='date'?'$.employee.startDate':'$.salary.day',reason:input.validity.rangeUnderflow||input.validity.rangeOverflow||input.validity.stepMismatch?'RANGE':'FORMAT',message:input.validationMessage})
+}
 </script>
 <template>
   <section class="settings" aria-label="设置中心">
     <h2 v-if="!sessionReady||!canSave" class="settings-title"><UiIcon name="settings" tile />{{ !sessionReady?'设置暂不可用':'配置恢复' }}</h2>
     <p v-if="!sessionReady" role="alert">尚未读取 Main 草稿，请先重新连接配置；当前不能编辑或保存。</p>
-    <form @submit.prevent="emit('save')">
+    <form @submit.prevent="emit('save')" @invalid.capture="invalid">
       <fieldset :disabled="busy||!sessionReady||!canSave" class="settings-fields">
         <section class="settings-time-group" aria-label="时间与日程">
           <div class="settings-work-times settings-card">
@@ -71,13 +75,12 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
         <div class="settings-field settings-card">
           <label class="settings-row settings-personal-row"><span class="settings-label"><UiIcon name="calendar" tile />入职日期</span><input :value="form.employee.startDate||''" type="date" class="we-control" :aria-invalid="hasErrors('$.employee.startDate')||undefined" :aria-describedby="errorDescription('$.employee.startDate')" @input="form.employee.startDate=($event.target as HTMLInputElement).value||null;update()" /></label>
           <FieldErrors :id="errorId('$.employee.startDate')" :issues="issues" path="$.employee.startDate" />
-          <p class="we-muted settings-note">可留空。不含今天，入职当天为 0；计划工作日并非实际出勤。</p><FieldErrors :issues="issues" path="$.employee" :exclude-paths="['$.employee.startDate']" />
+          <FieldErrors :issues="issues" path="$.employee" :exclude-paths="['$.employee.startDate']" />
         </div>
         <div class="settings-field settings-card">
           <label class="settings-row settings-personal-row"><span class="settings-label"><UiIcon name="wallet" tile />每月发薪日</span><input :value="form.salary.day??''" type="number" min="1" max="31" step="1" class="we-control" :aria-invalid="hasErrors('$.salary.day')||undefined" :aria-describedby="errorDescription('$.salary.day')" @input="form.salary.day=numeric($event);update()" /></label>
           <FieldErrors :id="errorId('$.salary.day')" :issues="issues" path="$.salary.day" />
-          <p v-if="form.salary.nonWorkingPolicy!=='delay'" class="we-muted settings-note">保留历史发薪策略：{{ form.salary.nonWorkingPolicy==='advance'?'提前至上一个工作日':'休息日不调整' }}。</p>
-          <p v-else class="we-muted settings-note">每月发上月工资，遇休息日按工作日历顺延。</p><FieldErrors :issues="issues" path="$.salary" :exclude-paths="['$.salary.day']" />
+          <FieldErrors :issues="issues" path="$.salary" :exclude-paths="['$.salary.day']" />
         </div>
         </div>
         <div class="settings-field settings-mini settings-card">
@@ -90,8 +93,6 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
       <div class="settings-actions">
         <button type="button" class="we-button settings-cancel" aria-label="取消 / 返回仪表盘" :disabled="busy||!sessionReady" @click="emit('cancel')">取消</button>
         <button type="submit" class="we-button we-button--primary" :disabled="busy||!canSave">{{ busy?'正在保存…':'保存设置' }}</button>
-        <button type="button" class="we-button settings-exit" :disabled="busy||quitDisabled" @click="emit('quit')">退出程序</button>
-        <span class="we-muted settings-save-state">{{ !sessionReady?'草稿状态未知，尚未读取':dirty?'有未保存修改':defaultUnpersisted?'默认设置尚未保存':'没有未保存修改' }}</span>
       </div>
     </form>
     <section v-if="sessionReady&&!canSave" class="settings-recovery" aria-label="安全恢复">
@@ -130,9 +131,7 @@ function numeric(event:Event):number|null{const value=(event.target as HTMLInput
 .settings-switch:checked { background:var(--we-button);border-color:var(--we-button); }.settings-switch:checked::before { transform:translateX(18px);background:#fff; }
 .settings-switch:disabled { opacity:.6; }
 .settings-actions { display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px;align-items:center; }
-.settings-actions > .we-button:not(.settings-exit) { min-height:42px;font-weight:600; }
-.settings-exit { justify-self:start;font-size:12px;border-color:transparent;background:transparent; }
-.settings-save-state { text-align:right; }
+.settings-actions > .we-button { min-height:42px;font-weight:600; }
 @media(hover:hover) and (pointer:fine) { .settings-actions .we-button--primary:hover:not(:disabled) { background:color-mix(in srgb,var(--we-button) 90%,#16375f); }.settings-switch:hover:not(:disabled) { border-color:var(--we-accent); } }
 .settings-actions .we-button--primary:active:not(:disabled) { background:color-mix(in srgb,var(--we-button) 82%,#16375f); }
 .settings-recovery { display:grid;gap:12px;border-top:1px solid var(--we-border);padding-top:16px; }

@@ -7,8 +7,8 @@ import vue from '@vitejs/plugin-vue'
 import { chromium, expect } from '@playwright/test'
 import { fixtures, createSettingsDraft } from '../../test-results/d11-ssr/components.mjs'
 
-test('UI-17 concise settings preserve drafts, time explanations, validation and recovery', async () => {
-  const directory = resolve('test-results/v21-ui17/settings'), bundle = resolve(directory, 'bundle')
+test('UI-18 concise settings and timed Toasts preserve drafts, validation and recovery', async () => {
+  const directory = resolve('test-results/v21-ui18/settings'), bundle = resolve(directory, 'bundle')
   await mkdir(directory, { recursive: true })
   await build({ configFile: false, plugins: [vue()], logLevel: 'warn', define: { 'process.env.NODE_ENV': '"production"' }, build: {
     outDir: bundle, emptyOutDir: false,
@@ -24,7 +24,7 @@ test('UI-17 concise settings preserve drafts, time explanations, validation and 
   const browser = await chromium.launch({ channel: 'msedge', headless: true, chromiumSandbox: true })
   try {
     let page = await browser.newPage({ viewport: { width: 720, height: 580 } })
-    const errors = []
+    const errors = [],toastEvidence=[]
     page.setDefaultTimeout(5000)
     page.on('pageerror', error => errors.push(error.message))
     const serve = async route => {
@@ -45,6 +45,28 @@ test('UI-17 concise settings preserve drafts, time explanations, validation and 
       if(status==='ready')await expect(page.locator('.settings-title')).toHaveCount(0)
       else await expect(page.getByRole('heading',{name:'配置恢复',exact:true})).toBeVisible()
     }
+    const toastSafety=async()=>{
+      const toast=page.locator('.app-toast')
+      await expect(toast).toHaveCSS('opacity','1')
+      const geometry=await toast.evaluate(element=>{
+        const box=element.getBoundingClientRect().toJSON()
+        const controls=[...document.querySelectorAll('.settings input,.settings button,.app-header button')].map(control=>({name:control.getAttribute('aria-label')||control.textContent,box:control.getBoundingClientRect().toJSON()})).filter(control=>control.box.bottom>0&&control.box.top<innerHeight)
+        return {box,controls,position:getComputedStyle(element).position,pointerEvents:getComputedStyle(element).pointerEvents,focused:element.contains(document.activeElement),viewport:{width:innerWidth,height:innerHeight}}
+      })
+      assert.equal(geometry.position,'fixed');assert.equal(geometry.pointerEvents,'none');assert.equal(geometry.focused,false)
+      assert.ok(geometry.box.left>=0&&geometry.box.right<=geometry.viewport.width&&geometry.box.top>=0&&geometry.box.bottom<=geometry.viewport.height)
+      for(const control of geometry.controls)assert.ok(!(control.box.left<geometry.box.right&&control.box.right>geometry.box.left&&control.box.top<geometry.box.bottom&&control.box.bottom>geometry.box.top),JSON.stringify({toast:geometry.box,overlapping:control}))
+      return geometry
+    }
+    const layoutWithoutToast=()=>page.evaluate(()=>({height:document.documentElement.scrollHeight,main:document.querySelector('main').getBoundingClientRect().toJSON()}))
+    const waitForToastExpiry=async(started,kind)=>{
+      const during=await layoutWithoutToast()
+      await expect(page.locator('.app-toast')).toHaveCount(0,{timeout:4500})
+      const elapsed=Date.now()-started
+      assert.ok(elapsed>=2800&&elapsed<6500,'Toast uses an actual approximately 3-second lifetime')
+      assert.deepEqual(await layoutWithoutToast(),during,'Toast removal never changes content height or placement')
+      toastEvidence.push({kind,elapsed,layoutStable:true})
+    }
     await initialize()
     const workTimes = async paired => {
       const geometry = await page.locator('.settings-work-times input').evaluateAll(inputs => inputs.map(input => input.getBoundingClientRect().toJSON()))
@@ -62,7 +84,10 @@ test('UI-17 concise settings preserve drafts, time explanations, validation and 
       assert.equal(Math.abs(geometry[0].card.top-geometry[1].card.top)<1,paired,'employment and salary use the expected responsive columns')
       if(paired)assert.ok(Math.abs(geometry[0].card.height-geometry[1].card.height)<1,'paired cards stretch evenly to fit their own help')
       for(const field of geometry){assert.ok(field.input.width>=120&&field.input.height>=40);assert.ok(field.input.top>=field.label.bottom+7,'labels remain above their own controls')}
-      assert.ok(geometry[0].text.includes('可留空'));assert.ok(geometry[1].text.includes('发上月工资'))
+      assert.doesNotMatch(geometry.map(field=>field.text).join(''),/可留空|发上月工资|保留历史发薪策略/)
+      await expect(page.locator('.settings-personal-fields p')).toHaveCount(0)
+      await expect(page.locator('.settings-actions button')).toHaveText(['取消','保存设置'])
+      await expect(page.locator('.settings-exit,.settings-save-state,.settings-actions span')).toHaveCount(0)
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true)
       const top=await page.locator('.settings').evaluate(element=>({section:element.getBoundingClientRect().top,first:element.querySelector('.settings-work-times').getBoundingClientRect().top}))
       assert.ok(Math.abs(top.section-top.first)<1,'no removed heading row or blank space remains')
@@ -142,8 +167,7 @@ test('UI-17 concise settings preserve drafts, time explanations, validation and 
     assert.equal((await page.evaluate(() => window.__settingsState())).saves.length, 1)
     await page.getByLabel('上班时间', { exact: true }).fill('08:45')
     await page.getByLabel('每月发薪日', { exact: true }).fill('16')
-    await page.getByRole('button', { name: '退出程序', exact: true }).click()
-    await expect.poll(async () => (await page.evaluate(() => window.__settingsState())).calls.quit).toBe(1)
+    await expect(page.getByRole('button', { name: '退出程序', exact: true })).toHaveCount(0)
     await expect(page.getByRole('region', { name: '设置中心', exact: true })).toBeVisible()
     await page.getByRole('button', { name: '取消 / 返回仪表盘', exact: true }).click()
     await expect(page.getByRole('dialog')).toBeVisible()
@@ -221,7 +245,7 @@ test('UI-17 concise settings preserve drafts, time explanations, validation and 
     await expect(page.locator('.settings-expected')).toContainText('已设置加班 60 分钟')
     await expect(page.locator('.settings-end-comparison')).toHaveCount(0)
     await page.getByLabel('每月发薪日',{exact:true}).fill('11')
-    await expect(page.locator('.settings-save-state')).toHaveText('有未保存修改')
+    await expect.poll(async()=>(await page.evaluate(()=>window.__settingsState())).session.dirty).toBe(true)
     await expect(page.locator('.settings-end-comparison')).toHaveCount(0)
     await page.getByLabel('今天预计下班时间',{exact:true}).fill('12:00')
     await expect(page.locator('.settings-end-comparison')).toContainText('当前生效：13:00（已设置加班 60 分钟）')
@@ -269,6 +293,102 @@ test('UI-17 concise settings preserve drafts, time explanations, validation and 
       }),'each personal field points to its own card error')
     }
     await initialize('ready',config.appearance,visualSession)
+    await page.getByLabel('每月发薪日',{exact:true}).fill('15')
+    await page.evaluate(()=>window.__settingsHoldSave())
+    await page.getByRole('button',{name:'保存设置',exact:true}).click()
+    await expect(page.getByRole('button',{name:'正在保存…',exact:true})).toBeDisabled()
+    await expect(page.locator('.app-toast,.app-notice')).toHaveCount(0)
+    const successAt=Date.now();await page.evaluate(()=>window.__settingsReleaseSave())
+    await expect(page.locator('.app-toast[role="status"]')).toHaveText('设置已保存')
+    await expect(page.locator('.settings')).toHaveCount(0)
+    await toastSafety()
+    await page.screenshot({path:resolve(directory,'toast-success.png'),fullPage:true})
+    await waitForToastExpiry(successAt,'success-after-dashboard')
+    await page.screenshot({path:resolve(directory,'dashboard-after-toast.png'),fullPage:true})
+
+    await initialize('ready',config.appearance,visualSession)
+    await page.getByLabel('每月发薪日',{exact:true}).fill('0')
+    const validationAt=Date.now();await page.getByRole('button',{name:'保存设置',exact:true}).click()
+    await expect(page.locator('.app-toast[role="alert"]')).toHaveText('保存失败，请检查标记的设置项')
+    await expect(page.getByLabel('每月发薪日',{exact:true})).toHaveAttribute('aria-invalid','true')
+    await toastSafety();assert.equal((await page.evaluate(()=>window.__settingsState())).saves.length,0)
+    await page.screenshot({path:resolve(directory,'toast-validation.png'),fullPage:true})
+    await waitForToastExpiry(validationAt,'native-validation')
+    await expect(page.getByLabel('每月发薪日',{exact:true})).toHaveAttribute('aria-invalid','true')
+    await expect(page.locator('.settings-personal-fields [role="alert"]')).not.toBeEmpty()
+    await page.screenshot({path:resolve(directory,'field-errors-after-toast.png'),fullPage:true})
+
+    await initialize('ready',config.appearance,visualSession)
+    await page.getByLabel('每月发薪日',{exact:true}).fill('15')
+    const unchangedSaved=(await page.evaluate(()=>window.__settingsState())).session.saved
+    await page.evaluate(()=>window.__settingsSaveError({code:'IO_DENIED',message:'测试：磁盘不可写'}))
+    const failureAt=Date.now();await page.getByRole('button',{name:'保存设置',exact:true}).click()
+    await expect(page.locator('.app-toast[role="alert"]')).toHaveText('保存失败，修改已保留')
+    await expect(page.locator('.app-toast[role="status"]')).toHaveCount(0)
+    await expect(page.locator('.app-error')).toContainText('目录不可写')
+    await toastSafety()
+    await page.screenshot({path:resolve(directory,'toast-failure.png'),fullPage:true})
+    await waitForToastExpiry(failureAt,'io-error')
+    await expect(page.locator('.app-error')).toContainText('目录不可写')
+    await expect(page.getByLabel('每月发薪日',{exact:true})).toHaveValue('15')
+    assert.deepEqual((await page.evaluate(()=>window.__settingsState())).session.saved,unchangedSaved)
+    await page.screenshot({path:resolve(directory,'settings-after-toast.png'),fullPage:true})
+
+    await page.evaluate(()=>window.__settingsSaveError({code:'REVISION_CONFLICT',message:'测试：版本冲突',expectedRevision:1,actualRevision:2}))
+    await page.getByRole('button',{name:'保存设置',exact:true}).click()
+    await expect(page.locator('.app-error')).toContainText('修订冲突')
+    await expect(page.locator('.app-toast[role="alert"]')).toHaveCount(1)
+    await page.waitForTimeout(1000)
+    await page.evaluate(()=>window.__settingsSaveError(null))
+    const replacementAt=Date.now();await page.getByRole('button',{name:'保存设置',exact:true}).click()
+    await expect(page.locator('.app-toast[role="status"]')).toHaveText('设置已保存')
+    await page.waitForTimeout(2200)
+    await expect(page.locator('.app-toast[role="status"]')).toHaveText('设置已保存')
+    await waitForToastExpiry(replacementAt,'success-replaces-error')
+
+    await initialize('ready',config.appearance,visualSession)
+    await page.evaluate(()=>window.__settingsUpdateError({code:'INTERNAL',message:'测试：IPC 同步失败'}))
+    await page.getByLabel('每月发薪日',{exact:true}).fill('15')
+    await expect(page.getByRole('button',{name:'重试同步草稿',exact:true})).toBeVisible()
+    await page.getByRole('button',{name:'保存设置',exact:true}).click()
+    await expect(page.locator('.app-toast[role="alert"]')).toHaveText('保存失败，修改已保留')
+    await expect(page.locator('.app-error')).toContainText('IPC 同步失败')
+    await page.evaluate(()=>window.__settingsUpdateError(null))
+    await page.getByRole('button',{name:'重试同步草稿',exact:true}).click()
+    await expect(page.getByRole('button',{name:'重试同步草稿',exact:true})).toHaveCount(0)
+    await expect(page.getByLabel('每月发薪日',{exact:true})).toHaveValue('15')
+
+    await initialize('ready',config.appearance,visualSession)
+    await page.getByLabel('每月发薪日',{exact:true}).fill('15')
+    await page.getByRole('button',{name:'取消 / 返回仪表盘',exact:true}).click()
+    const leaveDialog=page.getByRole('dialog')
+    await expect(leaveDialog).toBeVisible()
+    await page.evaluate(()=>window.__settingsSaveError({code:'IO_DENIED',message:'测试：模态保存失败'}))
+    await leaveDialog.getByRole('button',{name:'保存',exact:true}).click()
+    await expect(leaveDialog).toBeVisible();await expect(leaveDialog.getByRole('alert')).toContainText('目录不可写')
+    await expect(page.locator('.app-toast[role="alert"]')).toHaveCount(1)
+    await page.evaluate(()=>window.__settingsSaveError(null))
+    await leaveDialog.getByRole('button',{name:'保存',exact:true}).click()
+    await expect(leaveDialog).toHaveCount(0);await expect(page.locator('.settings')).toHaveCount(0)
+    await expect(page.locator('.app-toast[role="status"]')).toHaveText('设置已保存')
+
+    for(const [width,appearance]of [[720,{mode:'dark',accent:'coral',reduceMotion:false}],[480,config.appearance],[360,config.appearance]]){
+      await page.setViewportSize({width,height:580});await initialize('ready',appearance,visualSession)
+      await page.evaluate(()=>window.__settingsSaveError({code:'IO_DENIED',message:'测试：磁盘不可写'}))
+      await page.getByRole('button',{name:'保存设置',exact:true}).click()
+      await expect(page.locator('.app-toast[role="alert"]')).toHaveCount(1)
+      toastEvidence.push({width,appearance,safety:await toastSafety()})
+      await page.screenshot({path:resolve(directory,`toast-${width}.png`),fullPage:true})
+    }
+    await page.emulateMedia({reducedMotion:'reduce',forcedColors:'active'})
+    await expect(page.locator('.app-toast')).toHaveCSS('transition-duration','0s')
+    await toastSafety();await page.screenshot({path:resolve(directory,'toast-forced-reduced.png'),fullPage:true})
+    await page.emulateMedia({reducedMotion:'no-preference',forcedColors:'none'})
+    const defaultsFailed=structuredClone(visualSession)
+    defaultsFailed.defaultPersistence={status:'failed',error:{code:'IO_DENIED',message:'测试：默认配置不可写'}}
+    await initialize('ready',config.appearance,defaultsFailed)
+    await expect(page.locator('.app-error')).toContainText('默认设置尚未保存')
+    await initialize('ready',config.appearance,visualSession)
     await page.setViewportSize({width:360,height:580})
     await page.emulateMedia({forcedColors:'active'})
     assert.equal(await page.locator('.app-title-art').evaluate(element=>getComputedStyle(element).display),'none')
@@ -287,6 +407,9 @@ test('UI-17 concise settings preserve drafts, time explanations, validation and 
     await personalFields(false)
     await page.screenshot({ path: resolve(directory, 'settings-dpr150.png'), fullPage: true })
     await page.locator('.settings-work-times').screenshot({path:resolve(directory,'icons-zoom-dpr150.png')})
+    await page.evaluate(()=>window.__settingsSaveError({code:'IO_DENIED',message:'测试：磁盘不可写'}))
+    await page.getByRole('button',{name:'保存设置',exact:true}).click()
+    await toastSafety();await page.screenshot({path:resolve(directory,'toast-dpr150.png'),fullPage:true})
     await page.close()
     page = await browser.newPage({viewport:{width:720,height:580},deviceScaleFactor:3})
     page.on('pageerror',error=>errors.push(error.message))
@@ -304,7 +427,7 @@ test('UI-17 concise settings preserve drafts, time explanations, validation and 
     await page.setContent(`<style>body{margin:0;padding:16px;background:#f0f7fd;color:#16375f;font:14px 'Microsoft YaHei',sans-serif}p{margin:0 0 12px}.icons{display:flex;gap:16px}figure{margin:0;text-align:center}img{display:block;width:102px;height:102px}figcaption{margin-top:8px}</style><p>真实 Vue 图标局部截图 · DPR 3 · 保持原始像素</p><div class="icons">${frames.join('')}</div>`)
     await page.screenshot({path:resolve(directory,'icons-strip.png'),fullPage:true})
     assert.deepEqual(errors, [])
-    await writeFile(resolve(directory,'checks.json'),JSON.stringify({headless:true,errors,layouts,checks:['responsive personal cards and unchanged work time inputs','no normal heading row; named settings region retained','native date and bounded number save/reload','independent field errors and no focus capture','13:00 current vs 12:00 unsaved; unchanged/no-preview suppressed','invalid preview, cancellation and explicit overnight date','hidden draft fields, IME, Mini, cancel/quit/discard and recovery','themes, forced colors, DPR 1.5, no horizontal overflow']},null,2))
+    await writeFile(resolve(directory,'checks.json'),JSON.stringify({headless:true,errors,layouts,toastEvidence,checks:['responsive personal cards without explanations; footer has only cancel/save','no normal heading row; named settings region retained','native date and bounded number save/reload','independent field errors and no focus capture','13:00 current vs 12:00 unsaved; unchanged/no-preview suppressed','invalid preview, cancellation and explicit overnight date','hidden drafts, IME, Mini, cancel/discard, modal save retry and recovery','themes, forced colors, DPR 1.5, no horizontal overflow','real 3-second success/failure expiry with stable layout','no premature or false success; success survives returning to Dashboard','validation/IO/conflict/IPC/default failures remain actionable','replacement cancels stale expiry; Toast clears inputs and actions; reduced motion']},null,2))
   } finally {
     await browser.close()
   }

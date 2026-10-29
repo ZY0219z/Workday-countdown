@@ -12,11 +12,18 @@ window.__settingsInit = fixture => {
   app?.unmount()
   let session = clone(fixture.session), snapshot = clone(fixture.snapshot)
   let savedSession = clone(session)
+  let saveError=fixture.saveError??null,updateError=null,releaseSave
+  let saveGate=null
+  window.__settingsSaveError=value=>{saveError=clone(value)}
+  window.__settingsUpdateError=value=>{updateError=clone(value)}
+  window.__settingsHoldSave=()=>{saveGate=new Promise(resolve=>{releaseSave=resolve})}
+  window.__settingsReleaseSave=()=>{releaseSave?.();saveGate=null}
   const saves = [], calls = { recovery: 0, imports: [], apply: 0, quit: 0, expectedEnd: [] }
   window.workdayV2 = {
     settingsDraft: {
       read: async () => ok(session),
       update: async request => {
+        if(updateError)return {ok:false,error:clone(updateError)}
         session = { ...session, draft: clone(request.draft), dirty: true }
         return ok(session)
       },
@@ -31,6 +38,8 @@ window.__settingsInit = fixture => {
     },
     config: { save: async request => {
       saves.push(clone(request))
+      if(saveGate)await saveGate
+      if(saveError)return {ok:false,error:clone(saveError)}
       session = { ...session, saved: { ...session.saved, ...clone(request.settings), revision: session.expectedRevision + 1 },
         draft: clone(request.settings), dirty: false, expectedRevision: session.expectedRevision + 1, issues: [] }
       snapshot.configRevision = session.expectedRevision

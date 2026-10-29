@@ -8,7 +8,17 @@ html,body,#app { margin:0;min-width:0;min-height:100%; }
 .app-actions { display:flex;flex-wrap:wrap;gap:var(--we-space-2); }
 .app-default-note { font-size:var(--we-text-small);margin-bottom:var(--we-space-2)!important; }
 .app-error { color:var(--we-danger-text);font-size:var(--we-text-body);overflow-wrap:anywhere;margin-bottom:var(--we-space-3)!important; }
-.app-notice { color:var(--we-text);padding:var(--we-space-2);background:var(--we-subtle);margin-bottom:var(--we-space-3)!important; }
+.app-toast { position:fixed;top:16px;left:16px;z-index:20;display:flex;align-items:center;gap:10px;width:max-content;max-width:min(336px,calc(100vw - 156px));padding:10px 12px;border:1px solid var(--we-card-border,var(--we-border));border-radius:12px;background:var(--we-surface);color:var(--we-text);box-shadow:0 4px 16px rgb(15 42 70 / 16%);font-size:14px;line-height:1.4;pointer-events:none; }
+.app-toast svg { flex:none;fill:none;stroke:var(--we-positive-text);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round; }
+.app-toast--error svg { stroke:var(--we-danger-text); }
+.app-toast span { min-width:0;overflow-wrap:anywhere; }
+@media(min-width:640px) { .app-toast { left:50%;max-width:min(336px,calc(50vw - 146px)); } }
+.app-toast-enter-active,.app-toast-leave-active { transition:opacity 160ms cubic-bezier(.23,1,.32,1); }
+.app-toast-enter-from,.app-toast-leave-to { opacity:0; }
+.workday-ui[data-reduced-motion="true"] .app-toast-enter-active,.workday-ui[data-reduced-motion="true"] .app-toast-leave-active { transition:none; }
+@media(max-width:520px) { .app-toast { top:12px;left:12px; } }
+@media(prefers-reduced-motion:reduce) { .app-toast-enter-active,.app-toast-leave-active { transition:none; } }
+@media(forced-colors:active) { .app-toast { border-color:CanvasText;background:Canvas;color:CanvasText;box-shadow:none; }.app-toast svg { stroke:CanvasText; } }
 .workday-ui .app-settings { max-width:560px;margin-inline:auto;padding:22px 24px;border-color:var(--we-card-border); }
 .app-modal-backdrop { position:fixed;inset:0;background:rgb(0 0 0 / 45%);z-index:10;display:grid;place-items:center;padding:var(--we-space-4);overflow:auto; }
 .app-modal { width:min(100%,480px);max-height:100%;overflow:auto;padding:var(--we-space-5);display:grid;gap:var(--we-space-4); }
