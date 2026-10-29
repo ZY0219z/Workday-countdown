@@ -84,7 +84,7 @@ function invalid(event:Event){
         </div>
         </div>
         <div class="settings-field settings-mini settings-card">
-          <label class="settings-row"><span class="settings-label"><UiIcon name="monitor" tile />启用迷你窗</span><input v-model="form.desktop.miniEnabled" class="settings-switch" type="checkbox" role="switch" :aria-invalid="hasErrors('$.desktop.miniEnabled')||undefined" :aria-describedby="errorDescription('$.desktop.miniEnabled')" @change="update" /></label>
+          <div class="settings-row"><span class="settings-label"><UiIcon name="monitor" tile />启用迷你窗</span><input v-model="form.desktop.miniEnabled" class="settings-switch" type="checkbox" role="switch" aria-label="启用迷你窗" :aria-invalid="hasErrors('$.desktop.miniEnabled')||undefined" :aria-describedby="errorDescription('$.desktop.miniEnabled')" @change="update" /></div>
           <FieldErrors :id="errorId('$.desktop.miniEnabled')" :issues="issues" path="$.desktop.miniEnabled" />
           <p class="we-muted settings-note">启用并保存后，可从主窗口或托盘进入；每次启动仍打开主窗口。</p>
         </div>

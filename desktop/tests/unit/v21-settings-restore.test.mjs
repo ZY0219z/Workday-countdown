@@ -7,8 +7,8 @@ import vue from '@vitejs/plugin-vue'
 import { chromium, expect } from '@playwright/test'
 import { fixtures, createSettingsDraft } from '../../test-results/d11-ssr/components.mjs'
 
-test('UI-18 concise settings and timed Toasts preserve drafts, validation and recovery', async () => {
-  const directory = resolve('test-results/v21-ui18/settings'), bundle = resolve(directory, 'bundle')
+test('UI-20 Mini switch click targets preserve settings, feedback and recovery', async () => {
+  const directory = resolve('test-results/v21-ui20/settings'), bundle = resolve(directory, 'bundle')
   await mkdir(directory, { recursive: true })
   await build({ configFile: false, plugins: [vue()], logLevel: 'warn', define: { 'process.env.NODE_ENV': '"production"' }, build: {
     outDir: bundle, emptyOutDir: false,
@@ -24,7 +24,7 @@ test('UI-18 concise settings and timed Toasts preserve drafts, validation and re
   const browser = await chromium.launch({ channel: 'msedge', headless: true, chromiumSandbox: true })
   try {
     let page = await browser.newPage({ viewport: { width: 720, height: 580 } })
-    const errors = [],toastEvidence=[]
+    const errors = [],toastEvidence=[],miniSwitchChecks=[]
     page.setDefaultTimeout(5000)
     page.on('pageerror', error => errors.push(error.message))
     const serve = async route => {
@@ -44,6 +44,43 @@ test('UI-18 concise settings and timed Toasts preserve drafts, validation and re
       await expect(page.getByRole('region',{name:'设置中心',exact:true})).toBeVisible()
       if(status==='ready')await expect(page.locator('.settings-title')).toHaveCount(0)
       else await expect(page.getByRole('heading',{name:'配置恢复',exact:true})).toBeVisible()
+    }
+    const miniClickArea=async()=>{
+      const card=page.locator('.settings-mini'),input=page.getByRole('switch',{name:'启用迷你窗',exact:true})
+      await card.scrollIntoViewIfNeeded()
+      const checked=await input.isChecked(),before=(await page.evaluate(()=>window.__settingsState())).session
+      const bounds=await input.boundingBox()
+      assert.equal(bounds.width,44);assert.equal(bounds.height,26)
+      for(const target of ['text','icon','row whitespace','card padding']){
+        if(target==='text'){
+          const point=await card.locator('.settings-label').evaluate(element=>{
+            const text=[...element.childNodes].find(node=>node.nodeType===Node.TEXT_NODE&&node.textContent.includes('启用迷你窗'))
+            const range=document.createRange();range.selectNodeContents(text)
+            const box=range.getBoundingClientRect();return {x:box.x+box.width/2,y:box.y+box.height/2}
+          })
+          await page.mouse.click(point.x,point.y)
+        }else if(target==='icon')await card.locator('svg').click()
+        else if(target==='row whitespace'){
+          const row=card.locator('.settings-row'),box=await row.boundingBox()
+          await row.click({position:{x:box.width-70,y:box.height/2}})
+        }else await card.click({position:{x:4,y:4}})
+        await expect(input).toBeChecked({checked})
+        assert.deepEqual((await page.evaluate(()=>window.__settingsState())).session,before,`${target} must not change the draft`)
+      }
+      await input.click({position:{x:checked?8:36,y:13}}) // The unoccupied part of the track.
+      await expect(input).toBeChecked({checked:!checked})
+      await expect.poll(async()=>(await page.evaluate(()=>window.__settingsState())).session.draft.desktop.miniEnabled).toBe(!checked)
+      await input.click({position:{x:checked?12:30,y:13}}) // The thumb after the preceding toggle.
+      await expect(input).toBeChecked({checked})
+      await page.getByLabel('每月发薪日',{exact:true}).focus()
+      await page.keyboard.press('Tab');await expect(input).toBeFocused()
+      assert.equal(await input.evaluate(element=>element.matches(':focus-visible')),true)
+      await expect(input).toHaveCSS('outline-style','solid');await expect(input).toHaveCSS('outline-width','3px')
+      await page.keyboard.press('Space');await expect(input).toBeChecked({checked:!checked})
+      await expect.poll(async()=>(await page.evaluate(()=>window.__settingsState())).session.draft.desktop.miniEnabled).toBe(!checked)
+      await page.keyboard.press('Space');await expect(input).toBeChecked({checked})
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true)
+      miniSwitchChecks.push({viewport:page.viewportSize(),dpr:await page.evaluate(()=>devicePixelRatio),forcedColors:await page.evaluate(()=>matchMedia('(forced-colors:active)').matches),size:{width:bounds.width,height:bounds.height},targets:['text','icon','row whitespace','card padding','track','thumb','Tab','Space']})
     }
     const toastSafety=async()=>{
       const toast=page.locator('.app-toast')
@@ -108,6 +145,7 @@ test('UI-18 concise settings and timed Toasts preserve drafts, validation and re
     const root = page.locator('[data-workday-root]')
     await expect(page.locator('details,summary,.settings-more')).toHaveCount(0)
     await expect(page.getByRole('switch', { name: '启用迷你窗', exact: true })).toBeVisible()
+    await miniClickArea()
     await expect(page.locator('.settings-fields input')).toHaveCount(6)
     assert.doesNotMatch(await page.locator('.settings').innerText(), /更多设置|设置分组|离线工作日历|外观主题|窗口与托盘|预览最近有效备份|导出已保存配置/)
     await expect(page.getByRole('region', { name: '安全恢复', exact: true })).toHaveCount(0)
@@ -374,6 +412,7 @@ test('UI-18 concise settings and timed Toasts preserve drafts, validation and re
 
     for(const [width,appearance]of [[720,{mode:'dark',accent:'coral',reduceMotion:false}],[480,config.appearance],[360,config.appearance]]){
       await page.setViewportSize({width,height:580});await initialize('ready',appearance,visualSession)
+      await miniClickArea()
       await page.evaluate(()=>window.__settingsSaveError({code:'IO_DENIED',message:'测试：磁盘不可写'}))
       await page.getByRole('button',{name:'保存设置',exact:true}).click()
       await expect(page.locator('.app-toast[role="alert"]')).toHaveCount(1)
@@ -393,6 +432,7 @@ test('UI-18 concise settings and timed Toasts preserve drafts, validation and re
     await page.emulateMedia({forcedColors:'active'})
     assert.equal(await page.locator('.app-title-art').evaluate(element=>getComputedStyle(element).display),'none')
     await workTimes(false)
+    await miniClickArea()
     await page.screenshot({path:resolve(directory,'settings-forced-colors-360.png'),fullPage:true})
     await page.close()
     page = await browser.newPage({ viewport: { width: 480, height: 387 }, deviceScaleFactor: 1.5 })
@@ -405,6 +445,7 @@ test('UI-18 concise settings and timed Toasts preserve drafts, validation and re
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
     await checkIcons()
     await personalFields(false)
+    await miniClickArea()
     await page.screenshot({ path: resolve(directory, 'settings-dpr150.png'), fullPage: true })
     await page.locator('.settings-work-times').screenshot({path:resolve(directory,'icons-zoom-dpr150.png')})
     await page.evaluate(()=>window.__settingsSaveError({code:'IO_DENIED',message:'测试：磁盘不可写'}))
@@ -427,7 +468,7 @@ test('UI-18 concise settings and timed Toasts preserve drafts, validation and re
     await page.setContent(`<style>body{margin:0;padding:16px;background:#f0f7fd;color:#16375f;font:14px 'Microsoft YaHei',sans-serif}p{margin:0 0 12px}.icons{display:flex;gap:16px}figure{margin:0;text-align:center}img{display:block;width:102px;height:102px}figcaption{margin-top:8px}</style><p>真实 Vue 图标局部截图 · DPR 3 · 保持原始像素</p><div class="icons">${frames.join('')}</div>`)
     await page.screenshot({path:resolve(directory,'icons-strip.png'),fullPage:true})
     assert.deepEqual(errors, [])
-    await writeFile(resolve(directory,'checks.json'),JSON.stringify({headless:true,errors,layouts,toastEvidence,checks:['responsive personal cards without explanations; footer has only cancel/save','no normal heading row; named settings region retained','native date and bounded number save/reload','independent field errors and no focus capture','13:00 current vs 12:00 unsaved; unchanged/no-preview suppressed','invalid preview, cancellation and explicit overnight date','hidden drafts, IME, Mini, cancel/discard, modal save retry and recovery','themes, forced colors, DPR 1.5, no horizontal overflow','real 3-second success/failure expiry with stable layout','no premature or false success; success survives returning to Dashboard','validation/IO/conflict/IPC/default failures remain actionable','replacement cancels stale expiry; Toast clears inputs and actions; reduced motion']},null,2))
+    await writeFile(resolve(directory,'checks.json'),JSON.stringify({headless:true,errors,layouts,toastEvidence,miniSwitchChecks,checks:['responsive personal cards without explanations; footer has only cancel/save','no normal heading row; named settings region retained','native date and bounded number save/reload','independent field errors and no focus capture','13:00 current vs 12:00 unsaved; unchanged/no-preview suppressed','invalid preview, cancellation and explicit overnight date','hidden drafts, IME, Mini, cancel/discard, modal save retry and recovery','themes, forced colors, DPR 1.5, no horizontal overflow','real 3-second success/failure expiry with stable layout','no premature or false success; success survives returning to Dashboard','validation/IO/conflict/IPC/default failures remain actionable','replacement cancels stale expiry; Toast clears inputs and actions; reduced motion']},null,2))
   } finally {
     await browser.close()
   }
