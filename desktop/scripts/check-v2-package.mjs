@@ -20,8 +20,14 @@ function files(directory, prefix = '') {
 }
 
 const sourcePackage = JSON.parse(readFileSync('package.json', 'utf8'))
-assert.equal(sourcePackage.version, '2.0.0')
+const expectedVersion = '2.1.0'
+assert.equal(sourcePackage.version, expectedVersion)
+const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'))
+assert.equal(lock.version, expectedVersion)
+assert.equal(lock.packages[''].version, expectedVersion)
+assert.deepEqual(lock.packages[''].devDependencies, sourcePackage.devDependencies)
 const exeName = `Workday-Escape-${sourcePackage.version}-win-x64.exe`
+assert.deepEqual(readdirSync(candidate).filter(name => /\.exe$/i.test(name)), [exeName], 'Only the expected Portable may be present at the candidate root')
 const exe = join(candidate, exeName), staged = join(candidate, 'win-unpacked')
 const exeBytes = statSync(exe).size
 assert.ok(exeBytes > 0 && exeBytes <= 120 * 1024 ** 2, 'Portable size exceeds 120 MiB')
@@ -40,6 +46,7 @@ for (const name of embeddedFiles.filter(name => name !== 'package.json')) {
   assert.ok(!/\.(?:map|ts|vue)$|(?:^|\/)(?:tests?|fixtures?|node_modules|test-results|\.env)(?:[./]|$)/i.test(name), `Non-production file: ${name}`)
 }
 const metadata = JSON.parse(extract('package.json'))
+assert.equal(metadata.name, sourcePackage.name)
 assert.equal(metadata.main, 'out/main/index.cjs')
 assert.equal(metadata.version, sourcePackage.version)
 assert.equal(metadata.description, sourcePackage.description)
@@ -62,11 +69,24 @@ for (const page of ['index', 'mini']) {
   assert.ok(!/unsafe-inline|unsafe-eval|@vite\/client|https?:\/\//.test(html), `${page}: development or remote content`)
   for (const match of html.matchAll(/(?:src|href)="([^"]+)"/g)) assert.ok(entries.has(posix.normalize(posix.join('out/renderer', match[1]))), `Missing HTML asset: ${match[1]}`)
 }
-for (const [pattern, original] of [[/moyu-tray-.+\.png$/, 'src/main/tray/moyu-tray.png'], [/moyu_original-.+\.gif$/, '../docs/version/V2.0.0/design-reference/moyu_original.gif'], [/wave-fin-.+\.png$/, '../assets/image/wave-fin.png']]) {
+for (const [pattern, original] of [[/moyu-tray-.+\.png$/, 'src/main/tray/moyu-tray.png'], [/moyu_original-.+\.gif$/, '../docs/version/V2.0.0/design-reference/moyu_original.gif']]) {
   const name = embeddedFiles.find(name => pattern.test(name))
   assert.ok(name, `Missing ${original}`)
   assert.equal(hash(extract(name)), hash(readFileSync(original)), `Changed original asset: ${original}`)
 }
+// UI-13 replaced the old PNG wave with inline SVG water. Verify the current
+// wave path and every illustration, including Vite's whitespace/quote encoding.
+const rendererCode = embeddedFiles.filter(name => /^out\/renderer\/assets\/.+\.js$/.test(name)).map(name => extract(name).toString()).join('\n')
+const rendererCss = embeddedFiles.filter(name => /^out\/renderer\/assets\/.+\.css$/.test(name)).map(name => extract(name).toString()).join('\n')
+const normalizeSvg = value => value.replace(/\s+/g, ' ').replaceAll('"', "'").replace(/>\s+</g, '><').replace(/\s*\/>/g, '/>').trim()
+const embeddedSvgs = [...rendererCode.matchAll(/data:image\/svg\+xml,([^"\s]+)/g)].map(match => normalizeSvg(decodeURIComponent(match[1])))
+for (const name of ['reef', 'rest', 'salary', 'employment']) {
+  const original = `src/renderer/src/assets/dashboard/${name}.svg`
+  assert.ok(embeddedSvgs.includes(normalizeSvg(readFileSync(original, 'utf8'))), `Missing or changed production SVG: ${original}`)
+}
+const wave = readFileSync('src/renderer/src/components/FishProgress.vue', 'utf8').match(/const wave='([^']+)'/)?.[1]
+assert.ok(wave && rendererCode.includes(wave), 'Missing exact production SVG wave path')
+assert.ok(/animation:[^;{}]*fish-water-flow[^;{}]*14s/.test(rendererCss) && rendererCss.includes('animation-duration:16s'), 'Missing dual-layer water animation styles')
 for (const name of embeddedFiles.filter(name => /\.(?:cjs|js|html|json)$/.test(name))) assert.ok(!/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|(?:sk-proj-|ghp_)[a-zA-Z0-9_-]{24,}/.test(extract(name).toString()), `Potential credential in ${name}`)
 
 const allowedRuntime = new Set(files('node_modules/electron/dist').filter(name => !['electron.exe', 'LICENSE', 'resources/default_app.asar', 'version'].includes(name)))
@@ -84,4 +104,4 @@ for (const [file, machine] of [[exe, 0x14c], [join(payload, 'Workday Escape.exe'
   const offset = binary.indexOf(Buffer.from('<requestedExecutionLevel'))
   assert.ok(offset >= 0 && /level=["']asInvoker["']/.test(binary.toString('utf8', offset, offset + 200)), 'Executable must not request administrator privileges')
 }
-console.log(JSON.stringify({ scope: 'D16 static package only; EXE NOT RUN', version: metadata.version, exe, exeBytes, exeMiB: exeBytes / 1024 ** 2, sha256: hash(readFileSync(exe)), asarSha256: hash(readFileSync(archive)), payloadFiles: stagedFiles.length, embeddedFiles, originalAssetsUnchanged: true, securityGuardsPresent: true, runtimeResourcesMatchInstalledElectron: true, architecture: 'Windows x64 payload / x86 Portable launcher', executionLevel: 'asInvoker', externalRuntimeDependencies: [] }, null, 2))
+console.log(JSON.stringify({ scope: 'QA-04 V2.1.0 static package only; EXE NOT RUN', version: metadata.version, exe, exeBytes, exeMiB: exeBytes / 1024 ** 2, sha256: hash(readFileSync(exe)), asarSha256: hash(readFileSync(archive)), payloadFiles: stagedFiles.length, embeddedFiles, originalAssetsUnchanged: true, dashboardSvgsAndWaveVerified: true, securityGuardsPresent: true, runtimeResourcesMatchInstalledElectron: true, architecture: 'Windows x64 payload / x86 Portable launcher', executionLevel: 'asInvoker', externalRuntimeDependencies: [] }, null, 2))

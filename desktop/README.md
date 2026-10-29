@@ -1,6 +1,6 @@
 # Workday Escape V2.1.0 开发与个人自用验收说明
 
-更新：2026-10-29。本文上半部描述 `codex/v2.1.0` 当前源码；V2.1.0 仍在开发中，尚未封版或发布。`package.json` 与锁文件目前仍为 2.0.0，本轮没有生成 V2.1.0 Portable；历史 `release/` 产物不能作为最新版源码的体验入口。
+更新：2026-10-29。本文上半部描述 `codex/v2.1.0` 当前源码；V2.1.0 仍在开发中，尚未封版或发布。QA-03 六项 Windows 开发预览版验收由用户反馈 PASS；QA-04 已将候选版本及锁文件统一为 2.1.0，生成独立 Portable 并通过静态核验，**候选 EXE 未运行，等待 QA-05**，不能将开发预览版验收当作 Portable 验收通过。
 
 主界面显示下班倒计时、业务状态、真实工作进度水槽及休息日 / 预计发薪 / 已工作摘要。原猫鱼 GIF、双层动态海水保留；隐藏、休息、下班和减少动画等状态按现有许可暂停。已工作仍为不含今天的自然日累计，入职当天为 0，不代表实际出勤天数。
 
@@ -24,6 +24,26 @@ npm run dev
 内置核验日历覆盖 **2024–2026**，离线可用。缺失年度沿用工作周 / 日期覆盖及估算提示，不代表已掌握该年度法定假期 / 调休。F11-B 外部年度 JSON 手动导入仍未开放，F11-C 自动更新仍为后续版本候选，均不作为本次个人自用封版前置。
 
 正式配置位于 `%APPDATA%\Workday Escape\settings.json`，备份为同目录 `settings.backup.json`；POC 数据与正式 V2 隔离。测试必须使用既有临时配置和忽略目录，不删除真实配置来模拟首用。实际范围、QA-01 环境受限结果、QA-02 定向验证及原生待验见 [V2.1.0 任务记录](../docs/version/V2.1.0/V2.1.0_TASKS.md)。旧原生 GUI / Portable 脚本仍有旧选择器和版本断言待适配，不将历史通过数量作为当前验收结论；涉及真实窗口 / 托盘的测试和打包均须单独授权。Edge 仅为 Headless 测试工具，应用运行不依赖它。
+
+## V2.1.0 候选构建与静态检查
+
+QA-04 候选为 `release/qa04-v210-candidate-b87ca71/Workday-Escape-2.1.0-win-x64.exe`，100,125,924 字节（95.487522 MiB），未签名。完整 SHA-256、构建环境和核验明细见 [TASKS 的 QA-04 记录](../docs/version/V2.1.0/V2.1.0_TASKS.md#2026-10-29qa-04-portable-候选构建与静态核验)。V2.0.0 的 D16 候选及 `v2.0.0` Tag 保留。
+
+本轮在 `desktop/` 执行了以下命令；**后续重建必须另选不存在的 release 子目录，不覆盖本候选或任何历史产物**：
+
+```powershell
+npm run package:win -- --config.directories.output=release/qa04-v210-candidate-b87ca71
+```
+
+既有命令包含 Typecheck、生产编译及 Builder 的 `--win portable --x64 --publish never`。应用身份、ASAR、asInvoker 和数据目录规则不变，未升级依赖。候选目录中的 `win-unpacked/` 和 `builder-debug.yml` 仅为构建核验材料，交付文件只有上述单个 EXE。
+
+使用已有 7-Zip 静态测试并解包至全新的隔离目录，再运行：
+
+```powershell
+node scripts/check-v2-package.mjs release/qa04-v210-candidate-b87ca71 test-results/qa04-v210-b87ca71/extracted-payload
+```
+
+检查器明确要求 2.1.0 源 / 锁文件 / ASAR 元数据及文件名一致，校验独立载荷与 staging 的全文件哈希、生产文件白名单、资源、CSP / 权限保护、架构、体积和非生产内容。UI-13 已替换旧浪花 PNG，当前严格检查真实 SVG 波面及四张内联 SVG 插画，原 GIF / 托盘图标继续逐字节核验。**本命令不启动 EXE**；PE 版本与签名另以只读元数据核对。旧 `verify-portable.mjs` / D08 专用测试包约束不作为此候选运行验收，真正 EXE 运行脚本和用户体验留待 QA-05 单独授权，不关闭系统保护来绕过未签名提示。
 
 ---
 

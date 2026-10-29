@@ -1,6 +1,6 @@
 {
   "name": "workday-escape-poc",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Workday Escape desktop countdown",
   "author": "Workday Escape",
   "private": true,

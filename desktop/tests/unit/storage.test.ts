@@ -61,6 +61,30 @@ test('initialize and normal save increment exactly once, backup is previous vali
   assert.equal(value(await value(createConfigStore(app.options)).load()).status, 'ready')
   assert.deepEqual((await readdir(app.root)).sort(), ['settings.backup.json','settings.json'])
 })
+
+test('QA-04 v2.1.0 reads v2.0.0 config without rewriting and preserves hidden fields on save/reload', async t => {
+  const app = await setup(t)
+  const legacy = value(await app.store.save(await request(app.store, settings => {
+    settings.calendar.overrides = { '2026-10-20': 'rest', '2026-10-21': 'work' }
+    settings.schedule.workWeek = [1, 2, 3, 4, 5, 6]
+    settings.schedule.breaks = [{ startTime: '12:00', endTime: '13:00', startDayOffset: 0, endDayOffset: 0 }]
+    settings.appearance = { mode: 'dark', accent: 'coral', reduceMotion: true }
+    settings.desktop.closeAction = 'quit'; settings.desktop.miniEnabled = true; settings.desktop.alwaysOnTop = true
+  }))).config
+  assert.equal(legacy.appVersion, '2.0.0')
+  const primary = await readFile(app.primary, 'utf8'), backup = await readFile(app.backup, 'utf8')
+  const options = { ...app.options, appVersion: '2.1.0' }, upgraded = value(createConfigStore(options))
+  assert.equal(value(await upgraded.load()).status, 'ready')
+  assert.deepEqual(value(await upgraded.read()).config, legacy)
+  assert.equal(await readFile(app.primary, 'utf8'), primary); assert.equal(await readFile(app.backup, 'utf8'), backup)
+  const expected = value(editableConfig(legacy)); expected.salary.day = 15
+  const saved = value(await upgraded.save({ settings: expected, expectedRevision: legacy.revision })).config
+  assert.equal(saved.appVersion, '2.1.0'); assert.equal(saved.schemaVersion, legacy.schemaVersion)
+  assert.equal(saved.revision, legacy.revision + 1); assert.deepEqual(value(editableConfig(saved)), expected)
+  assert.equal(await readFile(app.backup, 'utf8'), primary)
+  const reopened = value(createConfigStore(options)); assert.equal(value(await reopened.load()).status, 'ready')
+  assert.deepEqual(value(await reopened.read()).config, saved)
+})
 test('same revision concurrent saves serialize; only first succeeds T21', async t => {
   const app = await setup(t), first = await request(app.store), second = structuredClone(first)
   first.settings.appearance.accent = 'coral'; second.settings.appearance.mode = 'dark'
