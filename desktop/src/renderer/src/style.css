@@ -12,7 +12,7 @@ html,body,#app { margin:0;min-width:0;min-height:100%; }
 .app-toast svg { flex:none;fill:none;stroke:var(--we-positive-text);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round; }
 .app-toast--error svg { stroke:var(--we-danger-text); }
 .app-toast span { min-width:0;overflow-wrap:anywhere; }
-@media(min-width:640px) { .app-toast { left:50%;max-width:min(336px,calc(50vw - 146px)); } }
+@media(min-width:640px) { .app-toast { left:50%;transform:translateX(-50%);max-width:min(336px,calc(50vw - 146px)); } }
 .app-toast-enter-active,.app-toast-leave-active { transition:opacity 160ms cubic-bezier(.23,1,.32,1); }
 .app-toast-enter-from,.app-toast-leave-to { opacity:0; }
 .workday-ui[data-reduced-motion="true"] .app-toast-enter-active,.workday-ui[data-reduced-motion="true"] .app-toast-leave-active { transition:none; }

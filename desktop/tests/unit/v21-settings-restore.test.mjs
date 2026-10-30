@@ -7,8 +7,8 @@ import vue from '@vitejs/plugin-vue'
 import { chromium, expect } from '@playwright/test'
 import { fixtures, createSettingsDraft } from '../../test-results/d11-ssr/components.mjs'
 
-test('UI-20 Mini switch click targets preserve settings, feedback and recovery', async () => {
-  const directory = resolve('test-results/v21-ui20/settings'), bundle = resolve(directory, 'bundle')
+test('UI-21 Toast centers without obscuring content or regressing settings feedback', async () => {
+  const directory = resolve('test-results/v21-ui21/settings'), bundle = resolve(directory, 'bundle')
   await mkdir(directory, { recursive: true })
   await build({ configFile: false, plugins: [vue()], logLevel: 'warn', define: { 'process.env.NODE_ENV': '"production"' }, build: {
     outDir: bundle, emptyOutDir: false,
@@ -24,7 +24,7 @@ test('UI-20 Mini switch click targets preserve settings, feedback and recovery',
   const browser = await chromium.launch({ channel: 'msedge', headless: true, chromiumSandbox: true })
   try {
     let page = await browser.newPage({ viewport: { width: 720, height: 580 } })
-    const errors = [],toastEvidence=[],miniSwitchChecks=[]
+    const errors = [],toastEvidence=[],miniSwitchChecks=[],toastGeometryChecks=[]
     page.setDefaultTimeout(5000)
     page.on('pageerror', error => errors.push(error.message))
     const serve = async route => {
@@ -88,11 +88,14 @@ test('UI-20 Mini switch click targets preserve settings, feedback and recovery',
       const geometry=await toast.evaluate(element=>{
         const box=element.getBoundingClientRect().toJSON()
         const controls=[...document.querySelectorAll('.settings input,.settings button,.app-header button')].map(control=>({name:control.getAttribute('aria-label')||control.textContent,box:control.getBoundingClientRect().toJSON()})).filter(control=>control.box.bottom>0&&control.box.top<innerHeight)
-        return {box,controls,position:getComputedStyle(element).position,pointerEvents:getComputedStyle(element).pointerEvents,focused:element.contains(document.activeElement),viewport:{width:innerWidth,height:innerHeight}}
+        const content=[...document.querySelectorAll('.app-title,.app-error,.we-countdown-copy,.we-countdown-hint')].map(node=>({name:node.className,box:node.getBoundingClientRect().toJSON()})).filter(node=>node.box.bottom>0&&node.box.top<innerHeight)
+        return {box,controls,content,position:getComputedStyle(element).position,pointerEvents:getComputedStyle(element).pointerEvents,focused:element.contains(document.activeElement),viewport:{width:innerWidth,height:innerHeight},noOverflow:document.documentElement.scrollWidth<=innerWidth}
       })
       assert.equal(geometry.position,'fixed');assert.equal(geometry.pointerEvents,'none');assert.equal(geometry.focused,false)
       assert.ok(geometry.box.left>=0&&geometry.box.right<=geometry.viewport.width&&geometry.box.top>=0&&geometry.box.bottom<=geometry.viewport.height)
-      for(const control of geometry.controls)assert.ok(!(control.box.left<geometry.box.right&&control.box.right>geometry.box.left&&control.box.top<geometry.box.bottom&&control.box.bottom>geometry.box.top),JSON.stringify({toast:geometry.box,overlapping:control}))
+      assert.equal(geometry.noOverflow,true)
+      if(geometry.viewport.width>=640)assert.ok(Math.abs(geometry.box.x+geometry.box.width/2-geometry.viewport.width/2)<=2,JSON.stringify({message:'Toast center must match viewport center',geometry}))
+      for(const control of [...geometry.controls,...geometry.content])assert.ok(!(control.box.left<geometry.box.right&&control.box.right>geometry.box.left&&control.box.top<geometry.box.bottom&&control.box.bottom>geometry.box.top),JSON.stringify({toast:geometry.box,overlapping:control}))
       return geometry
     }
     const layoutWithoutToast=()=>page.evaluate(()=>({height:document.documentElement.scrollHeight,main:document.querySelector('main').getBoundingClientRect().toJSON()}))
@@ -344,6 +347,27 @@ test('UI-20 Mini switch click targets preserve settings, feedback and recovery',
     await waitForToastExpiry(successAt,'success-after-dashboard')
     await page.screenshot({path:resolve(directory,'dashboard-after-toast.png'),fullPage:true})
 
+    for(const [width,height]of [[1062,900],[960,760],[720,580],[480,580],[360,580]]){
+      await page.setViewportSize({width,height})
+      for(const kind of ['success','failure']){
+        await initialize('ready',config.appearance,visualSession)
+        await page.getByLabel('每月发薪日',{exact:true}).fill('15')
+        if(kind==='failure')await page.evaluate(()=>window.__settingsSaveError({code:'IO_DENIED',message:'测试：磁盘不可写'}))
+        await page.getByRole('button',{name:'保存设置',exact:true}).click()
+        await expect(page.locator(`.app-toast[role="${kind==='success'?'status':'alert'}"]`)).toBeVisible()
+        await expect(page.locator('.settings')).toHaveCount(kind==='success'?0:1)
+        const geometry=await toastSafety()
+        await page.screenshot({path:resolve(directory,`toast-${kind}-${width}.png`),fullPage:true})
+        toastGeometryChecks.push({kind,...geometry,centerX:geometry.box.x+geometry.box.width/2,viewportCenterX:width/2})
+      }
+    }
+    // Stress only the wrapping CSS; normal screenshots above use actual Vue messages.
+    await page.locator('.app-toast span').evaluate(span=>{span.textContent='保存失败，修改已保留。请检查当前设置项和磁盘访问权限，原草稿与错误原因仍然保留，可在修正后重新保存。'})
+    const wrapped=await page.locator('.app-toast span').evaluate(span=>({height:span.getBoundingClientRect().height,lineHeight:parseFloat(getComputedStyle(span).lineHeight)}))
+    assert.ok(wrapped.height>wrapped.lineHeight*2,'long error text wraps instead of escaping the Toast')
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true)
+    await page.setViewportSize({width:720,height:580})
+
     await initialize('ready',config.appearance,visualSession)
     await page.getByLabel('每月发薪日',{exact:true}).fill('0')
     const validationAt=Date.now();await page.getByRole('button',{name:'保存设置',exact:true}).click()
@@ -468,7 +492,7 @@ test('UI-20 Mini switch click targets preserve settings, feedback and recovery',
     await page.setContent(`<style>body{margin:0;padding:16px;background:#f0f7fd;color:#16375f;font:14px 'Microsoft YaHei',sans-serif}p{margin:0 0 12px}.icons{display:flex;gap:16px}figure{margin:0;text-align:center}img{display:block;width:102px;height:102px}figcaption{margin-top:8px}</style><p>真实 Vue 图标局部截图 · DPR 3 · 保持原始像素</p><div class="icons">${frames.join('')}</div>`)
     await page.screenshot({path:resolve(directory,'icons-strip.png'),fullPage:true})
     assert.deepEqual(errors, [])
-    await writeFile(resolve(directory,'checks.json'),JSON.stringify({headless:true,errors,layouts,toastEvidence,miniSwitchChecks,checks:['responsive personal cards without explanations; footer has only cancel/save','no normal heading row; named settings region retained','native date and bounded number save/reload','independent field errors and no focus capture','13:00 current vs 12:00 unsaved; unchanged/no-preview suppressed','invalid preview, cancellation and explicit overnight date','hidden drafts, IME, Mini, cancel/discard, modal save retry and recovery','themes, forced colors, DPR 1.5, no horizontal overflow','real 3-second success/failure expiry with stable layout','no premature or false success; success survives returning to Dashboard','validation/IO/conflict/IPC/default failures remain actionable','replacement cancels stale expiry; Toast clears inputs and actions; reduced motion']},null,2))
+    await writeFile(resolve(directory,'checks.json'),JSON.stringify({headless:true,errors,layouts,toastEvidence,toastGeometryChecks,miniSwitchChecks,checks:['responsive personal cards without explanations; footer has only cancel/save','no normal heading row; named settings region retained','native date and bounded number save/reload','independent field errors and no focus capture','13:00 current vs 12:00 unsaved; unchanged/no-preview suppressed','invalid preview, cancellation and explicit overnight date','hidden drafts, IME, Mini, cancel/discard, modal save retry and recovery','themes, forced colors, DPR 1.5, no horizontal overflow','real 3-second success/failure expiry with stable layout','no premature or false success; success survives returning to Dashboard','validation/IO/conflict/IPC/default failures remain actionable','replacement cancels stale expiry; Toast clears inputs and actions; reduced motion','success/failure centered at 1062/960/720; safe edges at 480/360; no title/control overlap; long text wraps']},null,2))
   } finally {
     await browser.close()
   }

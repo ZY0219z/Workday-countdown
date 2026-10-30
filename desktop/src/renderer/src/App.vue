@@ -18,18 +18,21 @@ const error=ref(''),confirmLeave=ref(false),quitAfterLeave=ref(false),dialogRef=
 const controller=createSettingsController(api,()=>{state.value=structuredClone(controller.state)})
 const state=shallowRef(structuredClone(controller.state))
 function positionToast(element:Element){
-  const toast=element as HTMLElement,box=toast.getBoundingClientRect(),inset=parseFloat(getComputedStyle(toast).top)
-  // A scrolled form can occupy the usual top corner. Place once in the first
-  // vertical gap that clears its visible controls; this adds no timers/listeners.
-  const controls=[...host.value!.querySelectorAll<HTMLElement>('.settings input,.settings button,.app-header button,.app-modal button')]
-    .map(control=>control.getBoundingClientRect()).filter(rect=>rect.right>box.left-8&&rect.left<box.right+8&&rect.bottom>0&&rect.top<innerHeight).sort((a,b)=>a.top-b.top)
+  const toast=element as HTMLElement
+  toast.style.removeProperty('top')
+  const box=toast.getBoundingClientRect(),inset=parseFloat(getComputedStyle(toast).top)
+  // Measure once after horizontal centering; keep the title, errors and visible
+  // controls clear without adding timers/listeners or moving page content.
+  const controls=[...host.value!.querySelectorAll<HTMLElement>('.app-title,.app-error,.settings input,.settings button,.app-header button,.app-modal button')]
+    .map(control=>({rect:control.getBoundingClientRect(),gap:control.matches('.app-title')?2:8})).filter(({rect})=>rect.right>box.left-8&&rect.left<box.right+8&&rect.bottom>0&&rect.top<innerHeight).sort((a,b)=>a.rect.top-b.rect.top)
   let top=inset
-  for(const control of controls){
-    if(top+box.height+8<=control.top)break
-    if(top<control.bottom+8)top=control.bottom+8
+  for(const {rect,gap} of controls){
+    if(top+box.height+gap<=rect.top)break
+    if(top<rect.bottom+gap)top=rect.bottom+gap
   }
   if(top+box.height<=innerHeight-inset)toast.style.top=`${top}px`
 }
+watch(settingsOpen,()=>{const toast=host.value?.querySelector('.app-toast');if(toast)positionToast(toast)},{flush:'post'})
 const preferences=computed(()=>settingsOpen.value?state.value.editor.appearance:state.value.session?.saved?.appearance??state.value.editor.appearance)
 const reduceMotion=useTheme(host,preferences),windowVisible=useWindowVisibility(api.window)
 const syncing=computed(()=>state.value.pending>0||state.value.busy||dataBusy.value||loading.value||composing.value)
