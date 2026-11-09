@@ -1,7 +1,8 @@
 import { _electron as electron, test, expect } from '@playwright/test'
+import { createPackage } from '@electron/asar'
 import type { ElectronApplication, Locator } from '@playwright/test'
 import type { App, WebPreferences } from 'electron'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, renameSync, readdirSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, renameSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { createServer, loadConfigFromFile, type ViteDevServer, type UserConfig } from 'vite'
 import { tmpdir, cpus } from 'node:os'
@@ -68,12 +69,12 @@ test.afterEach(async()=>{
   expect(profile.startsWith(join(tmpdir(),'workday-d08-background-'))).toBe(true)
   rmSync(profile,{recursive:true,force:true,maxRetries:10,retryDelay:200})
 })
-async function launch(seed=true,rendererUrl?:string,scaleOne=false){
+async function launch(seed=true,rendererUrl?:string,scaleOne=false,appPath?:string){
   if(seed&&!existsSync(formal())){mkdirSync(join(profile,'lifecycle'),{recursive:true});writeFileSync(formal(),JSON.stringify(fixture()))}
   const env=Object.fromEntries(Object.entries(process.env).filter((pair):pair is [string,string]=>pair[1]!==undefined));delete env.ELECTRON_RUN_AS_NODE;delete env.ELECTRON_RENDERER_URL;delete env.WORKDAY_ESCAPE_GUI_TESTS
   env.WORKDAY_ESCAPE_TEST_MODE='1';env.WORKDAY_ESCAPE_TEST_PROFILE=profile;env.WORKDAY_ESCAPE_TEST_BACKGROUND='1'
   if(rendererUrl)env.ELECTRON_RENDERER_URL=rendererUrl
-  application=await electron.launch({args:[...(scaleOne?['--force-device-scale-factor=1']:[]),'.'],env});applicationProcess=application.process();const page=await application.firstWindow()
+  application=await electron.launch({args:[...(scaleOne?['--force-device-scale-factor=1']:[]),appPath??'.'],env,chromiumSandbox:appPath!==undefined});applicationProcess=application.process();const page=await application.firstWindow()
   await expect(page.locator('[data-workday-root]')).toHaveAttribute('data-pending','false');await hidden();return page
 }
 async function settings(page:Awaited<ReturnType<typeof launch>>){const button=page.getByRole('button',{name:'设置',exact:true});if(await button.count())await activate(button)}
@@ -81,6 +82,67 @@ async function group(page:Awaited<ReturnType<typeof launch>>,name:string){await 
 async function settled(page:Awaited<ReturnType<typeof launch>>){await expect(page.locator('[data-workday-root]')).toHaveAttribute('data-pending','false')}
 async function choose(choice:ExitChoice|null){await application!.evaluate(({app},choice)=>(app as TestApp).__workdayD08Test.chooseExit(choice),choice)}
 async function file(kind:'import'|'export',name:string){await application!.evaluate(({app},data)=>(app as TestApp).__workdayD08Test.selectFile(data.kind,data.name),{kind,name})}
+
+async function archiveBuiltApp(directory:string){
+  const source=join(profile,'app-source')
+  const resources=join(profile,directory,'resources')
+  mkdirSync(source)
+  mkdirSync(resources,{recursive:true})
+  cpSync(resolve('out'),join(source,'out'),{recursive:true})
+  copyFileSync(resolve('package.json'),join(source,'package.json'))
+  const appPath=join(resources,'app.asar')
+  await createPackage(source,appPath)
+  return appPath
+}
+
+for(const [label,directory] of [['English','Portable'],['spaces','Portable folder'],['Chinese','便携目录']]){
+  test(`DEV-02 initializes Main from ${label} path`,async()=>{
+    const page=await launch(false,undefined,false,await archiveBuiltApp(directory))
+    value(await page.evaluate(()=>window.workdayV2.settingsDraft.read()))
+    await expect.poll(()=>page.evaluate(async()=>(await window.workdayV2.config.read()).ok)).toBe(true)
+    await expect(page.getByRole('region',{name:'工作日仪表盘'})).toBeVisible()
+  })
+}
+
+test('DEV-02 reserved path characters preserve Main and Mini IPC, reload, save and restart',async()=>{
+  const appPath=await archiveBuiltApp('便携 PROFILE~1 [test] # %20')
+  miniSeed()
+  let page=await launch(true,undefined,false,appPath)
+  value(await page.evaluate(()=>window.workdayV2.settingsDraft.read()))
+  const trustedUrl=page.url()
+  for(const suffix of ['?untrusted=1','#untrusted']){
+    const result=await application!.evaluate(async({BrowserWindow},url)=>{
+      const window=BrowserWindow.getAllWindows()[0]
+      await window.loadURL(url)
+      return window.webContents.executeJavaScript('window.workdayV2.settingsDraft.read()')
+    },trustedUrl+suffix)
+    expect(result).toMatchObject({ok:false,error:{code:'FORBIDDEN'}})
+  }
+  await application!.evaluate(({BrowserWindow},url)=>BrowserWindow.getAllWindows()[0].loadURL(url),trustedUrl)
+  await page.reload()
+  await settled(page)
+  await settings(page)
+  await page.getByLabel('下班时间',{exact:true}).fill('19:00')
+  await activate(page.getByRole('button',{name:'保存设置',exact:true}))
+  await expect(page.getByRole('region',{name:'工作日仪表盘'})).toBeVisible()
+  expect(value(await page.evaluate(()=>window.workdayV2.config.read())).config.schedule.endTime).toBe('19:00')
+
+  const mini=await prepareMini()
+  const snapshot=value(await mini.evaluate(()=>window.workdayV2.snapshot.read()))
+  const mainSnapshot=value(await page.evaluate(()=>window.workdayV2.snapshot.read()))
+  expect(snapshot.configRevision).toBe(mainSnapshot.configRevision)
+  expect(snapshot.countdown?.targetAt).toBe(mainSnapshot.countdown?.targetAt)
+  const child=application!.process(),closed=application!.waitForEvent('close')
+  await page.evaluate(()=>window.workdayV2.app.quit())
+  await closed
+  await expect.poll(()=>child.exitCode).toBe(0)
+  application=undefined
+
+  page=await launch(true,undefined,false,appPath)
+  await settings(page)
+  await expect(page.getByLabel('下班时间',{exact:true})).toHaveValue('19:00')
+})
+
 test('formal main stays hidden; real Preload and renderer sandbox deny legacy/Node/general IPC',async()=>{
   const page=await launch();await expect(page.getByRole('heading',{name:'今天你摸鱼了吗',exact:true})).toBeVisible()
   const prefs=await application!.evaluate(({BrowserWindow})=>(BrowserWindow.getAllWindows()[0].webContents as unknown as {getLastWebPreferences():WebPreferences}).getLastWebPreferences())

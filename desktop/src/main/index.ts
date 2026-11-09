@@ -31,7 +31,8 @@ import { createBackgroundTray } from './tray/background-tray'
 const rendererFile = join(__dirname, '../renderer/index.html')
 const devUrl = !app.isPackaged ? process.env.ELECTRON_RENDERER_URL : undefined
 // electron-vite supplies a slash-less HTTP origin; Chromium canonicalizes it.
-// Canonicalize only our trusted target, never an incoming sender URL/origin.
+// Register and load the same trusted URL. loadFile uses legacy URL formatting
+// and may leave path characters (e.g. ~ or brackets) encoded differently.
 const rendererUrl = devUrl ? new URL(devUrl).href : pathToFileURL(rendererFile).href
 const miniFile=join(__dirname,'../renderer/mini.html')
 const miniUrl=devUrl?new URL('mini.html',rendererUrl).href:pathToFileURL(miniFile).href
@@ -163,7 +164,7 @@ else if (instance.data.primary) {
       window.once('ready-to-show', () => { if (!quit.isAuthorized()) { if (!background) { windows!.showMain(); void repairBounds() }; instance.data.markReady() } })
       window.webContents.on('did-finish-load',()=>{if(settingsRequested){settingsRequested=false;router.openSettings()}})
       window.on('close', event => { if (!quit.isAuthorized()) { event.preventDefault(); if(tray)void tray.closeMain();else void requestQuit(true) } })
-      const loaded = devUrl ? window.loadURL(rendererUrl) : window.loadFile(rendererFile)
+      const loaded = window.loadURL(rendererUrl)
       void loaded.catch(() => { if (!quit.isAuthorized() && !window.isDestroyed()) { startupError('页面加载失败，应用将退出；配置未被更改。'); app.exit(1) } })
       return window
     })
@@ -191,7 +192,7 @@ else if (instance.data.primary) {
         // resized are end-of-user-interaction events on Windows. All four only
         // replace an in-memory rectangle, never write files while dragging.
         window.on('move',remember);window.on('resize',remember);window.on('moved',remember);window.on('resized',remember)
-        try{await (devUrl?window.loadURL(miniUrl):window.loadFile(miniFile));const applied=await applyRestoredBounds(window,restored.data);if(!applied.ok){window.destroy();return applied}return success(window)}
+        try{await window.loadURL(miniUrl);const applied=await applyRestoredBounds(window,restored.data);if(!applied.ok){window.destroy();return applied}return success(window)}
         catch{if(!window.isDestroyed())window.destroy();return {ok:false,error:{code:'UNAVAILABLE',message:'迷你页面加载失败，主窗口与设置保留。'}}}
       }
     })
