@@ -22,7 +22,7 @@ const value=result=>{if(!result.ok)throw Error(JSON.stringify(result));return re
 export function fixtures(){
   const calendars=value(loadBundledCalendarStore()),zones=createIntlTimeZoneAdapter()
   const config=value(createAppConfig({startDate:'2026-10-01',startTime:'09:00',endTime:'18:00',salaryDay:10,themeMode:'system',themeAccent:'ocean',updatedAt:'2026-10-15T00:00:00.000Z',appVersion:'2.0.0'}))
-  config.revision=1;config.calendar.enabledYears=[2024,2025,2026];config.calendar.datasets=calendars.listMetadata();config.schedule.breaks=[{startTime:'12:00',endTime:'13:00',startDayOffset:0,endDayOffset:0}]
+  config.revision=1;config.calendar.enabledYears=[2024,2025,2026];config.calendar.datasets=calendars.listMetadata().filter(item=>config.calendar.enabledYears.includes(item.year));config.schedule.breaks=[{startTime:'12:00',endTime:'13:00',startDayOffset:0,endDayOffset:0}]
   const read=(at,change=()=>{})=>{const c=structuredClone(config);change(c);const engine=value(createDashboardEngine(c,calendars,zones,100000));const clock=value(createFixedClock(Date.parse(at),'UTC',zones));return {...value(engine.calculate(value(clock.read()))),sequence:1,configRevision:c.revision,calendarRevision:1}}
   const defaultConfig=value(createDefaultAppConfig({updatedAt:'2026-10-15T00:00:00.000Z',appVersion:'2.0.0'},calendars.listMetadata()))
   const defaultEngine=value(createDashboardEngine(defaultConfig,calendars,zones,100000)),defaultClock=value(createFixedClock(Date.parse('2026-10-15T09:00:00Z'),'Asia/Shanghai',zones))

@@ -3,6 +3,7 @@ import manifestResource from '../../../resources/calendar/manifest.json' with { 
 import resource2024 from '../../../resources/calendar/2024.json' with { type: 'json' }
 import resource2025 from '../../../resources/calendar/2025.json' with { type: 'json' }
 import resource2026 from '../../../resources/calendar/2026.json' with { type: 'json' }
+import resource2027 from '../../../resources/calendar/2027.json' with { type: 'json' }
 import type { CalendarDatasetMetadata, Result } from '../../shared/contracts'
 import { issue, success, v, validateJsonDto, validateStructure, validationFailure } from '../../shared/validation'
 import { createCalendarYear, validateCalendarManifest, type CalendarYear } from '../../domain/annual-calendar'
@@ -51,4 +52,4 @@ export function createCalendarStore(manifest: unknown, packages: readonly unknow
   })
 }
 export const loadBundledCalendarStore = (): Result<CalendarStore> =>
-  createCalendarStore(manifestResource, [resource2024, resource2025, resource2026])
+  createCalendarStore(manifestResource, [resource2024, resource2025, resource2026, resource2027])

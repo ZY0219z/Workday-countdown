@@ -148,8 +148,9 @@ export async function validateConfigSettingsAsync(input:unknown,previous:AppConf
 // Only freshly semantically validated candidates may omit a redundant pass.
 export function validateConfigEnvelope(input: unknown, context: ConfigValidationContext): Result<AppConfig> {
   const parsed = validateAppConfig(input)
-  if (!parsed.ok) return parsed
-  const config = parsed.data
+  return parsed.ok ? validateConfigMetadata(parsed.data, context) : parsed
+}
+function validateConfigMetadata(config: AppConfig, context: ConfigValidationContext): Result<AppConfig> {
   for (const timestamp of [config.updatedAt, ...config.migration.completed.map(item => item.migratedAt)]) {
     const valid = normalizeLocalDate(timestamp.slice(0, 10))
     if (!valid.ok) return valid
@@ -163,9 +164,23 @@ export function validateConfigEnvelope(input: unknown, context: ConfigValidation
   return success(config)
 }
 export function validateStoredConfig(input: unknown, context: ConfigValidationContext): Result<AppConfig> {
-  const record=validateConfigEnvelope(input,context)
+  const parsed = validateAppConfig(input)
+  if (!parsed.ok) return parsed
+  const config = parsed.data
+  // Saved V2.1.1 and earlier configs predate the 2027 package. A revision-zero
+  // recovery base must keep its preview identity. Fill only missing metadata
+  // on the detached saved config, then apply the normal trust checks.
+  const calendar = config.calendar
+  if (config.revision > 0 && ['2.0.0', '2.1.0', '2.1.1'].includes(config.appVersion) && !calendar.datasets.some(item => item.year === 2027)) {
+    const year = context.calendars.listMetadata().find(item => item.year === 2027 && item.verification === 'verified')
+    if (year) {
+      if (!calendar.enabledYears.includes(year.year)) calendar.enabledYears.push(year.year)
+      calendar.datasets.push(year)
+    }
+  }
+  const record = validateConfigMetadata(config, context)
   if(!record.ok)return record
-  const config=record.data,editable=editableConfig(config)
+  const editable = editableConfig(config)
   if(!editable.ok)return editable
   // Untrusted disk loads always retain their semantic checks.
   const semantic = validateConfigSettings(editable.data, config, context, true)

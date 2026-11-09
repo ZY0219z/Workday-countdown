@@ -16,7 +16,7 @@ for(const mode of ['smoke','baseline'] as const)test(`D15 ${mode}: owned native-
   test.skip(process.platform!=='win32','Windows native counters are required')
   const profile=mkdtempSync(join(tmpdir(),'workday-d08-background-')),run=mkdtempSync(join(evidenceRoot,mode+'-'))
   const config=value(createAppConfig({startDate:'2026-10-01',startTime:'09:00',endTime:'18:00',salaryDay:10,themeMode:'system',themeAccent:'ocean',updatedAt:'2026-10-19T00:00:00.000Z',appVersion:'2.0.0'}))
-  config.revision=1;config.desktop.miniEnabled=true;config.calendar.enabledYears=[2024,2025,2026];config.calendar.datasets=value(loadBundledCalendarStore()).listMetadata()
+  config.revision=1;config.desktop.miniEnabled=true;config.calendar.enabledYears=[2024,2025,2026];config.calendar.datasets=value(loadBundledCalendarStore()).listMetadata().filter(item=>config.calendar.enabledYears.includes(item.year))
   mkdirSync(join(profile,'lifecycle'));writeFileSync(join(profile,'lifecycle/settings.json'),JSON.stringify(config))
   const env=Object.fromEntries(Object.entries(process.env).filter((pair):pair is [string,string]=>pair[1]!==undefined));delete env.ELECTRON_RUN_AS_NODE;delete env.ELECTRON_RENDERER_URL;delete env.WORKDAY_ESCAPE_GUI_TESTS
   env.WORKDAY_ESCAPE_TEST_MODE='1';env.WORKDAY_ESCAPE_TEST_PROFILE=profile;env.WORKDAY_ESCAPE_TEST_BACKGROUND='1'

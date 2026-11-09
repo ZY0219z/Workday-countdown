@@ -28,6 +28,7 @@ const readPackage = (year: number): AnnualCalendarPackage => JSON.parse(readFile
 const readManifest = (): unknown => JSON.parse(readFileSync('resources/calendar/manifest.json', 'utf8'))
 const store = value(loadBundledCalendarStore())
 const allYears = [2024, 2025, 2026].map(year => value(store.readYear(year))!)
+const bundledYears = [...allYears, value(store.readYear(2027))!]
 const rules = (): CalendarRules => ({ workWeek: [1, 2, 3, 4, 5], overrides: {} })
 const calendar = (input: CalendarRules = rules(), years: CalendarYear[] = allYears): Calendar => value(createCalendar(input, years))
 const baseline = calendar()
@@ -47,13 +48,34 @@ function fixture(year = 2027): AnnualCalendarPackage {
 }
 
 test('all bundled years pass structure, semantics, checksum and reviewed registry', () => {
-  for (const [index, year] of [2024, 2025, 2026].entries()) {
+  for (const [index, year] of [2024, 2025, 2026, 2027].entries()) {
     const data = value(validateAnnualPackage(readPackage(year)))
     assert.equal(data.integrity.sha256, hash(annualPackagePayload(data)))
-    assert.equal(allYears[index].verification, 'verified')
-    assert.equal(allYears[index].data.coverage, 'complete')
+    assert.equal(bundledYears[index].verification, 'verified')
+    assert.equal(bundledYears[index].data.coverage, 'complete')
   }
-  assert.deepEqual(allYears.map(year => [year.data.restDates.length, year.data.workDates.length]), [[28, 8], [28, 5], [33, 6]])
+  assert.deepEqual(bundledYears.map(year => [year.data.restDates.length, year.data.workDates.length]), [[28, 8], [28, 5], [33, 6], [29, 5]])
+})
+test('2027 official exceptions, ordinary days, cross-year search and custom overrides', () => {
+  const year = bundledYears[3]
+  const current = calendar(rules(), bundledYears)
+  for (const [dates, kind] of [[year.data.restDates, 'rest'], [year.data.workDates, 'work']] as const) {
+    for (const date of dates) {
+      const day = value(current.getDay(date))
+      assert.equal(day.kind, kind, date)
+      assert.equal(day.quality.source, 'annual', date)
+      assert.equal(day.quality.approximate, false, date)
+    }
+  }
+  assert.equal(value(current.getDay('2027-01-04')).kind, 'work')
+  assert.equal(value(current.getDay('2027-01-09')).kind, 'rest')
+  const next = value(findNextRestDay(current, '2026-12-31', { includeStart: false, maxDays: 366 }))
+  assert.equal(next.status, 'found')
+  if (next.status === 'found') assert.equal(next.date, '2027-01-01')
+  assert.equal(next.quality.approximate, false)
+  const overridden = calendar({ ...rules(), overrides: { '2027-01-01': 'work', '2027-01-31': 'rest' } }, bundledYears)
+  assert.equal(value(overridden.getDay('2027-01-01')).kind, 'work')
+  assert.equal(value(overridden.getDay('2027-01-31')).kind, 'rest')
 })
 test('2024 Sunday makeup and encouraged New Year eve exclusion', () => {
   const makeup = value(baseline.getDay('2024-02-04'))
@@ -220,16 +242,16 @@ test('manifest rejects duplicate, mismatched, traversal and unsupported entries'
 test('resource store rejects manifest/package mismatch and duplicates', () => {
   const manifest = readManifest()
   rejected(createCalendarStore(manifest, [readPackage(2024)]))
-  rejected(createCalendarStore(manifest, [readPackage(2024),readPackage(2024),readPackage(2026)]))
+  rejected(createCalendarStore(manifest, [readPackage(2024),readPackage(2024),readPackage(2026),readPackage(2027)]))
   const changed = readPackage(2026); changed.version='changed'; seal(changed)
-  rejected(createCalendarStore(manifest, [readPackage(2024),readPackage(2025),changed]))
+  rejected(createCalendarStore(manifest, [readPackage(2024),readPackage(2025),changed,readPackage(2027)]))
 })
 test('only checked calendar years can be consumed, not serialized self-assertions', () => {
   rejected(createCalendar(rules(), [JSON.parse(JSON.stringify(allYears[0]))]))
   rejected(createCalendar(rules(), [allYears[0],allYears[0]]))
 })
 test('read-only metadata is detached and missing years explicit', () => {
-  assert.equal(value(store.readYear(2027)), null)
+  assert.equal(value(store.readYear(2028)), null)
   rejected(store.readYear(0))
   const metadata = store.listMetadata(); metadata[0].verification='unverified'
   assert.equal(store.listMetadata()[0].verification, 'verified')
@@ -318,14 +340,16 @@ test('all notice date ranges match independently recorded official fixture', () 
   const ranges: Record<number, Array<[string,string]>> = {
     2024:[['2024-01-01','2024-01-01'],['2024-02-10','2024-02-17'],['2024-04-04','2024-04-06'],['2024-05-01','2024-05-05'],['2024-06-10','2024-06-10'],['2024-09-15','2024-09-17'],['2024-10-01','2024-10-07']],
     2025:[['2025-01-01','2025-01-01'],['2025-01-28','2025-02-04'],['2025-04-04','2025-04-06'],['2025-05-01','2025-05-05'],['2025-05-31','2025-06-02'],['2025-10-01','2025-10-08']],
-    2026:[['2026-01-01','2026-01-03'],['2026-02-15','2026-02-23'],['2026-04-04','2026-04-06'],['2026-05-01','2026-05-05'],['2026-06-19','2026-06-21'],['2026-09-25','2026-09-27'],['2026-10-01','2026-10-07']]
+    2026:[['2026-01-01','2026-01-03'],['2026-02-15','2026-02-23'],['2026-04-04','2026-04-06'],['2026-05-01','2026-05-05'],['2026-06-19','2026-06-21'],['2026-09-25','2026-09-27'],['2026-10-01','2026-10-07']],
+    2027:[['2027-01-01','2027-01-03'],['2027-02-05','2027-02-13'],['2027-04-03','2027-04-05'],['2027-05-01','2027-05-05'],['2027-06-09','2027-06-09'],['2027-09-15','2027-09-15'],['2027-10-01','2027-10-07']]
   }
   const makeup: Record<number,string[]> = {
     2024:['2024-02-04','2024-02-18','2024-04-07','2024-04-28','2024-05-11','2024-09-14','2024-09-29','2024-10-12'],
     2025:['2025-01-26','2025-02-08','2025-04-27','2025-09-28','2025-10-11'],
-    2026:['2026-01-04','2026-02-14','2026-02-28','2026-05-09','2026-09-20','2026-10-10']
+    2026:['2026-01-04','2026-02-14','2026-02-28','2026-05-09','2026-09-20','2026-10-10'],
+    2027:['2027-01-31','2027-02-14','2027-05-08','2027-09-26','2027-10-09']
   }
-  for(const year of [2024,2025,2026]) {
+  for(const year of [2024,2025,2026,2027]) {
     const expected: string[]=[]
     for(const [start,end] of ranges[year]) for(let next=start;;) { expected.push(next); if(next===end) break; next=value(addDays(next,1)) }
     assert.deepEqual(readPackage(year).restDates,expected)
@@ -355,10 +379,10 @@ test('search retains prior missing-year uncertainty even when target year is com
 })
 test('raw store input array is validated without invoking accessors or custom iterators', () => {
   let called = 0
-  const packages = [readPackage(2024),readPackage(2025),readPackage(2026)]
+  const packages = [2024,2025,2026,2027].map(readPackage)
   Object.defineProperty(packages,'0',{ enumerable:true, get() { called++; throw new Error('must not execute') } })
   rejected(createCalendarStore(readManifest(),packages)); assert.equal(called,0)
-  const iterator = [readPackage(2024),readPackage(2025),readPackage(2026)]
+  const iterator = [2024,2025,2026,2027].map(readPackage)
   Object.defineProperty(iterator,Symbol.iterator,{ value() { called++; throw new Error('must not execute') } })
   rejected(createCalendarStore(readManifest(),iterator)); assert.equal(called,0)
 })

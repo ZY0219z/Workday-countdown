@@ -50,7 +50,7 @@ test('real missing first session remains missing until explicit UI save, then re
   const snapshot=value(await a.api.snapshot.read());assert.equal(snapshot.configRevision,1);assert.equal(snapshot.employment.status,'unset')
 })
 test('real UI controller, fixed IPC and ConfigStore save; metadata comes from trusted registry',async()=>{
-  const a=await setup();const metadata=value(await a.api.calendar.readMetadata());assert.deepEqual(metadata.map(x=>x.year),[2024,2025,2026]);assert.ok(metadata.every(x=>x.verification==='verified'))
+  const a=await setup();const metadata=value(await a.api.calendar.readMetadata());assert.deepEqual(metadata.map(x=>x.year),[2024,2025,2026,2027]);assert.ok(metadata.every(x=>x.verification==='verified'))
   const edit=structuredClone(a.controller.state.editor);edit.calendar.enabledYears=[2024,2025,2026];edit.calendar.overrides['2026-10-14']='rest';a.controller.edit(edit)
   assert.equal(await a.controller.save(),true);const saved=JSON.parse(await readFile(join(a.directory,'settings.json'),'utf8'));assert.equal(saved.calendar.overrides['2026-10-14'],'rest');assert.equal(saved.calendar.datasets.length,3)
   const snapshot=value(await a.api.snapshot.read());assert.equal(snapshot.configRevision,saved.revision);assert.equal(snapshot.state,'rest')
@@ -126,7 +126,8 @@ test('approved defaults show a Snapshot before disk save, then persist once and 
   assert.equal(initial.draft.employee&&typeof initial.draft.employee==='object'&&(initial.draft.employee as {startDate:string}).startDate,'2025-07-17')
   const settled=await a.settled();assert.equal(settled.saved!.revision,1);assert.equal(settled.defaultPersistence,undefined)
   const text=await readFile(join(a.directory,'settings.json'),'utf8'),config=JSON.parse(text) as AppConfig
-  assert.deepEqual(config.schedule,{startTime:'08:30',endTime:'18:00',crossMidnight:false,workWeek:[1,2,3,4,5],breaks:[]});assert.equal(config.salary.day,10);assert.equal(config.salary.nonWorkingPolicy,'delay');assert.deepEqual(config.overtime.entries,[]);assert.deepEqual(config.calendar.enabledYears,[2024,2025,2026])
+  assert.deepEqual(config.schedule,{startTime:'08:30',endTime:'18:00',crossMidnight:false,workWeek:[1,2,3,4,5],breaks:[]});assert.equal(config.salary.day,10);assert.equal(config.salary.nonWorkingPolicy,'delay');assert.deepEqual(config.overtime.entries,[]);assert.deepEqual(config.calendar.enabledYears,[2024,2025,2026,2027])
+  assert.equal(config.calendar.datasets.find(item=>item.year===2027)?.verification,'verified')
   a.runtime.dispose();const restarted=value(createConfigStore({...a.ctx,directory:a.directory,appVersion:'2.0.0'}));assert.equal(value(await restarted.load()).status,'ready');assert.equal(await readFile(join(a.directory,'settings.json'),'utf8'),text)
 })
 test('failed automatic default save retains usable Snapshot and never calls defaults persisted',async()=>{

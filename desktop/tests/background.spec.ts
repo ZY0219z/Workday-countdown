@@ -50,7 +50,7 @@ function seed(config:AppConfig){mkdirSync(join(profile,'lifecycle'),{recursive:t
 function seedCloseQuit(){const config=fixture();config.desktop.closeAction='quit';seed(config)}
 function fixture():AppConfig {
   const config=value(createAppConfig({startDate:'2026-10-01',startTime:'09:00',endTime:'18:00',salaryDay:10,themeMode:'system',themeAccent:'ocean',updatedAt:'2026-10-15T00:00:00.000Z',appVersion:'2.0.0'}))
-  config.revision=1;config.calendar.enabledYears=[2024,2025,2026];config.calendar.datasets=value(loadBundledCalendarStore()).listMetadata();return config
+  config.revision=1;config.calendar.enabledYears=[2024,2025,2026];config.calendar.datasets=value(loadBundledCalendarStore()).listMetadata().filter(item=>config.calendar.enabledYears.includes(item.year));return config
 }
 test.beforeEach(()=>{profile=mkdtempSync(join(tmpdir(),'workday-d08-background-'))})
 async function hidden(){

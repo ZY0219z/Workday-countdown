@@ -32,7 +32,7 @@ for (const file of files) {
   const target = join(scratch, file.replace(/\.ts$/, '.mjs'))
   mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, output)
 }
-for (const name of ['manifest', '2024', '2025', '2026']) {
+for (const name of ['manifest', '2024', '2025', '2026', '2027']) {
   const target = join(scratch, `resources/calendar/${name}.json`)
   mkdirSync(dirname(target), { recursive: true }); copyFileSync(`resources/calendar/${name}.json`, target)
 }

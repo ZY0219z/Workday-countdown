@@ -15,6 +15,8 @@ import { createMigrationFiles, knownMigrationCandidates, type MigrationFiles } f
 import { createMigrationService } from '../../src/main/services/migration-service'
 import { createSettingsDraft, updateSettingsDraft, beginDraftSave, finishDraftSave } from '../../src/shared/settings-draft'
 import { validateContractRequest } from '../../src/shared/capabilities'
+import { createAppConfig } from '../../src/shared/config-schema'
+import { createCalendar } from '../../src/domain/calendar'
 import { context, initial, value, rejected, nativeZones } from './config-fixtures'
 
 async function setup(t: TestContext, files: ConfigFiles = nodeConfigFiles, initialized = true) {
@@ -73,7 +75,8 @@ test('QA-04 v2.1.0 reads v2.0.0 config without rewriting and preserves hidden fi
   }))).config
   assert.equal(legacy.appVersion, '2.0.0')
   const primary = await readFile(app.primary, 'utf8'), backup = await readFile(app.backup, 'utf8')
-  const options = { ...app.options, appVersion: '2.1.0' }, upgraded = value(createConfigStore(options))
+  const calendars = { ...app.ctx.calendars, listMetadata: () => app.ctx.calendars.listMetadata().filter(item => item.year < 2027) }
+  const options = { ...app.options, calendars, appVersion: '2.1.0' }, upgraded = value(createConfigStore(options))
   assert.equal(value(await upgraded.load()).status, 'ready')
   assert.deepEqual(value(await upgraded.read()).config, legacy)
   assert.equal(await readFile(app.primary, 'utf8'), primary); assert.equal(await readFile(app.backup, 'utf8'), backup)
@@ -91,6 +94,39 @@ test('same revision concurrent saves serialize; only first succeeds T21', async 
   const [a,b] = await Promise.all([app.store.save(first), app.store.save(second)])
   assert.equal(value(a).config.revision, 2); rejected(b, 'REVISION_CONFLICT')
   assert.equal(value(await app.store.read()).config.appearance.mode, 'system')
+})
+
+for (const alreadyEnabled of [false, true]) test(`V2.1.1 config loads the 2027 package (previously enabled: ${alreadyEnabled}) without a startup write`, async t => {
+  const app = await setup(t, nodeConfigFiles, false)
+  const legacy = value(createAppConfig({ ...initial, startTime: '09:30', salaryDay: 19, updatedAt: '2026-10-14T10:00:00.000Z', appVersion: '2.1.1' }))
+  legacy.revision = 7
+  const metadata = app.ctx.calendars.listMetadata()
+  legacy.calendar = { region: 'CN', enabledYears: alreadyEnabled ? [2024, 2026, 2027] : [2024, 2026],
+    datasets: metadata.filter(item => item.year === 2024 || item.year === 2026),
+    overrides: { '2027-01-01': 'work', '2027-01-31': 'rest' } }
+  const text = JSON.stringify(legacy)
+  await writeFile(app.primary, text)
+  await writeFile(app.backup, text)
+  const options = { ...app.options, appVersion: '2.1.2' }
+  const store = value(createConfigStore(options))
+  assert.equal(value(await store.load()).status, 'ready')
+  const effective = value(await store.read()).config
+  assert.deepEqual(effective, { ...legacy, calendar: { ...legacy.calendar, enabledYears: [2024, 2026, 2027], datasets: metadata.filter(item => item.year !== 2025) } })
+  assert.equal(await readFile(app.primary, 'utf8'), text)
+  assert.equal(await readFile(app.backup, 'utf8'), text)
+  const years = effective.calendar.enabledYears.map(year => value(app.ctx.calendars.readYear(year))!)
+  const calendar = value(createCalendar({ workWeek: effective.schedule.workWeek, overrides: effective.calendar.overrides }, years))
+  assert.equal(value(calendar.getDay('2027-02-05')).kind, 'rest')
+  assert.equal(value(calendar.getDay('2027-02-14')).kind, 'work')
+  assert.equal(value(calendar.getDay('2027-01-01')).kind, 'work')
+  assert.equal(value(calendar.getDay('2027-01-31')).kind, 'rest')
+  const saved = value(await store.save(await request(store, settings => { settings.salary.day = 20 }))).config
+  assert.equal(saved.appVersion, '2.1.2')
+  assert.equal(saved.revision, 8)
+  assert.deepEqual(saved.calendar, effective.calendar)
+  assert.equal(await readFile(app.backup, 'utf8'), text)
+  const reopened = value(createConfigStore(options))
+  assert.deepEqual(value(await reopened.read()).config, saved)
 })
 test('external same-revision byte change is a conflict; reload makes a new deliberate base', async t => {
   const app = await setup(t), pending = await request(app.store)
@@ -173,9 +209,9 @@ test('annual verification metadata is never writable from settings; forged store
   if(loaded.status==='invalid')assert.equal(loaded.primaryError.code,'FORBIDDEN')
 })
 test('calendar metadata is generated only from the host trusted registry', async t => {
-  const app=await setup(t);const saved=value(await app.store.save(await request(app.store,s=>{s.calendar.enabledYears=[2026,2027]})))
+  const app=await setup(t);const saved=value(await app.store.save(await request(app.store,s=>{s.calendar.enabledYears=[2026,2028]})))
   assert.deepEqual(saved.config.calendar.datasets,app.ctx.calendars.listMetadata().filter(x=>x.year===2026))
-  assert.ok(saved.warnings.some(x=>x.message.includes('2027')))
+  assert.ok(saved.warnings.some(x=>x.message.includes('2028')))
 })
 test('changed overtime requires valid shift even for zero and past dates', async t => {
   const app=await setup(t)
@@ -379,7 +415,7 @@ test('V2 future schema refuses downgrade and untrusted yearly identity cannot as
   const app=await sourceSetup(t,'v2','{"schemaVersion":3}');rejected(await app.service.preview({sourceKind:'v2'}),'UNSUPPORTED_SCHEMA')
   const config=value(await app.store.read()).config;config.calendar.enabledYears=[2027];config.calendar.datasets=[{year:2027,version:'fake',source:'fake',publishedOn:'2026-01-01',sha256:'0'.repeat(64),verification:'verified'}]
   await writeFile(app.sourcePath,JSON.stringify(config));const preview=value(await app.service.preview({sourceKind:'v2'}));const result=value(await app.service.apply(application(preview,['calendar.enabledYears'])))
-  assert.deepEqual(result.config.calendar.datasets,[]);assert.ok(result.warnings.some(x=>x.message.includes('2027')))
+  assert.deepEqual(result.config.calendar.datasets,app.ctx.calendars.listMetadata().filter(item=>item.year===2027))
 })
 test('recoverable damaged primary needs preview/confirmation, preserves damaged bytes and backup revision T33',async t=>{
   const app=await sourceSetup(t);value(await app.store.save(await request(app.store,s=>{s.appearance.mode='dark'})))

@@ -136,7 +136,7 @@ const initialValidator = v.object<InitialConfigInput>({
 export function createDefaultAppConfig(metadata:Pick<InitialConfigInput,'updatedAt'|'appVersion'>,datasets:AppConfig['calendar']['datasets']):Result<AppConfig>{
   const created=createAppConfig({startDate:'2025-07-17',startTime:'08:30',endTime:'18:00',salaryDay:10,themeMode:'system',themeAccent:'ocean',...metadata})
   if(!created.ok)return created
-  created.data.calendar.enabledYears=[2024,2025,2026]
+  created.data.calendar.enabledYears=[2024,2025,2026,2027]
   created.data.calendar.datasets=datasets.filter(item=>created.data.calendar.enabledYears.includes(item.year))
   return validateAppConfig(created.data)
 }

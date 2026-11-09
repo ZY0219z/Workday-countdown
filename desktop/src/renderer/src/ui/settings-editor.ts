@@ -9,7 +9,7 @@ export type EditorSettings = Omit<EditableConfig, 'salary' | 'overtime'> & {
 export function initialEditor(): EditorSettings {
   return { employee: { startDate: null }, schedule: { startTime: '', endTime: '', crossMidnight: false, workWeek: [1,2,3,4,5], breaks: [] },
     salary: { day: null, nonWorkingPolicy: 'delay', missingDayPolicy: 'monthEnd', showPaydayAsToday: true }, overtime: { entries: [] },
-    calendar: { region: 'CN', enabledYears: [2024,2025,2026], overrides: {} }, appearance: { mode: 'system', accent: 'ocean', reduceMotion: false },
+    calendar: { region: 'CN', enabledYears: [2024,2025,2026,2027], overrides: {} }, appearance: { mode: 'system', accent: 'ocean', reduceMotion: false },
     desktop: { closeAction: 'hideToTray', miniEnabled: false, alwaysOnTop: false, displayMode: 'exclusive', bounds: { main:null,mini:null }, tray: { firstHideNoticeAcknowledged:false } } }
 }
 export function asDraft(input: EditorSettings): JsonObject { return structuredClone(input) as unknown as JsonObject }

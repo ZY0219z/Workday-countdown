@@ -1,6 +1,6 @@
 # Workday Escape 开发者文档
 
-桌面版使用 **Vue 3、TypeScript 和 Electron**，当前正式版本为 **v2.1.1**。下载与使用请看 [项目首页](../README.md)，发布资产见 [GitHub Release](https://github.com/ZY0219z/Workday-countdown/releases/tag/v2.1.1)。
+桌面版使用 **Vue 3、TypeScript 和 Electron**。当前源码为 **v2.1.2 候选**，正式发布版本为 **v2.1.1**。下载与使用请看 [项目首页](../README.md)，已发布资产见 [GitHub Release](https://github.com/ZY0219z/Workday-countdown/releases/tag/v2.1.1)。
 
 ## 开发环境与启动
 
@@ -27,7 +27,7 @@ npm run build
 | [src/preload/](src/preload/) | 主窗口和 Mini 的受限接口 |
 | [src/renderer/](src/renderer/) | Vue 仪表盘、设置及 Mini 界面 |
 | [src/domain/](src/domain/) 和 [src/shared/](src/shared/) | 日历、班次等业务计算，以及类型、数据契约和校验 |
-| [resources/calendar/](resources/calendar/) | 已核验的 2024–2026 年离线工作日历 |
+| [resources/calendar/](resources/calendar/) | 已核验的 2024–2027 年离线工作日历 |
 | [tests/](tests/) 和 [scripts/](scripts/) | 测试、打包和静态检查脚本 |
 
 正式配置位于 `%APPDATA%\Workday Escape\settings.json`，备份为同目录下的 `settings.backup.json`。应用自动读取和保存设置，数据目录与 EXE 的位置无关。测试使用项目已有的临时配置机制，避免读写正式数据。
@@ -39,12 +39,13 @@ IPC 校验已登记窗口、当前主 Frame、精确页面 URL 和窗口角色�
 从 `desktop/` 运行构建命令，每次选择一个新的输出目录，保留历史候选。
 
 ```powershell
-npm run package:win -- --config.directories.output=release/local-v211-example
+npm run package:win -- --config.directories.output=release/local-v212-example
 ```
 
-该命令使用 electron-builder 生成 Windows x64 Portable `Workday Escape.exe`。`--publish never` 使构建与发布分开。正式 ZIP `Workday-Escape-v2.1.1-Portable.zip` 的根目录只有这个 EXE，`win-unpacked/` 等构建产物用于本地核验。
+该命令使用 electron-builder 生成 Windows x64 Portable `Workday Escape.exe`。`--publish never` 使构建与发布分开。候选 ZIP `Workday-Escape-v2.1.2-Portable.zip` 的根目录只有这个 EXE，`win-unpacked/` 等构建产物用于本地核验。
 
-- [V2.1.1 版本目标和边界](../docs/version/V2.1.1/V2.1.1_REQUIREMENTS.md)
+- [V2.1.2 年度维护及候选验收记录](../docs/version/V2.1.2/V2.1.2_TASKS.md)
+- [V2.1.2 2027 年日历核验](../docs/version/V2.1.2/D04_CALENDAR_VERIFICATION.md#year2027)
 - [V2.1.1 构建、产物身份及验收记录](../docs/version/V2.1.1/V2.1.1_TASKS.md)
 - [V2.1.0 历史任务记录](../docs/version/V2.1.0/V2.1.0_TASKS.md)
 

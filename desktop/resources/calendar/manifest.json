@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "region": "CN",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "years": [
     {
       "year": 2024,
@@ -20,6 +20,12 @@
       "file": "2026.json",
       "version": "2026.1.0",
       "sha256": "02be4a165f646abc36184ac433f07444820d5f02b811503b8ba6b6ef1726fce0"
+    },
+    {
+      "year": 2027,
+      "file": "2027.json",
+      "version": "2027.1.0",
+      "sha256": "f767b4daaa7b9fbfb60f77af1f79b5366f2c709218e2422e4047082361449bd9"
     }
   ]
 }

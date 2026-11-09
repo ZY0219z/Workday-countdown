@@ -20,7 +20,7 @@ function files(directory, prefix = '') {
 }
 
 const sourcePackage = JSON.parse(readFileSync('package.json', 'utf8'))
-const expectedVersion = '2.1.1'
+const expectedVersion = '2.1.2'
 assert.equal(sourcePackage.version, expectedVersion)
 const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'))
 assert.equal(lock.version, expectedVersion)
@@ -54,6 +54,10 @@ assert.ok(!metadata.d08TestArtifact && !metadata.scripts && !metadata.devDepende
 assert.equal(Object.keys(metadata.dependencies ?? {}).length, 0, 'Unexpected external runtime dependency')
 
 const main = extract(metadata.main).toString(), preload = extract('out/preload/index.cjs').toString()
+const calendar2027 = JSON.parse(readFileSync('resources/calendar/2027.json', 'utf8'))
+for (const token of [calendar2027.version, calendar2027.integrity.sha256, ...calendar2027.restDates, ...calendar2027.workDates]) {
+  assert.ok(main.includes(token), `Missing bundled 2027 calendar content: ${token}`)
+}
 for (const guard of ['const testMode = !electron.app.isPackaged &&', 'const devUrl = !electron.app.isPackaged ?', 'contextIsolation: true', 'sandbox: true', 'nodeIntegration: false', 'webSecurity: true', 'action: "deny"', 'setPermissionRequestHandler', 'setPermissionCheckHandler', 'com.workdayescape', 'app.setPath("userData", paths.data.userData)', 'renderer/mini.html']) assert.ok(main.includes(guard), `Missing production guard/identity: ${guard}`)
 assert.ok(preload.includes('process.isMainFrame') && preload.includes('--workday-window-role='))
 const builtins = new Set([...builtinModules, ...builtinModules.map(name => 'node:' + name), 'electron'])
@@ -104,4 +108,4 @@ for (const [file, machine] of [[exe, 0x14c], [join(payload, 'Workday Escape.exe'
   const offset = binary.indexOf(Buffer.from('<requestedExecutionLevel'))
   assert.ok(offset >= 0 && /level=["']asInvoker["']/.test(binary.toString('utf8', offset, offset + 200)), 'Executable must not request administrator privileges')
 }
-console.log(JSON.stringify({ scope: 'DEV-01 V2.1.1 static package only; EXE NOT RUN', version: metadata.version, exe, exeBytes, exeMiB: exeBytes / 1024 ** 2, sha256: hash(readFileSync(exe)), asarSha256: hash(readFileSync(archive)), payloadFiles: stagedFiles.length, embeddedFiles, originalAssetsUnchanged: true, dashboardSvgsAndWaveVerified: true, securityGuardsPresent: true, runtimeResourcesMatchInstalledElectron: true, architecture: 'Windows x64 payload / x86 Portable launcher', executionLevel: 'asInvoker', externalRuntimeDependencies: [] }, null, 2))
+console.log(JSON.stringify({ scope: 'V2.1.2 static package only; EXE NOT RUN', version: metadata.version, exe, exeBytes, exeMiB: exeBytes / 1024 ** 2, sha256: hash(readFileSync(exe)), asarSha256: hash(readFileSync(archive)), payloadFiles: stagedFiles.length, embeddedFiles, calendar2027Sha256: calendar2027.integrity.sha256, originalAssetsUnchanged: true, dashboardSvgsAndWaveVerified: true, securityGuardsPresent: true, runtimeResourcesMatchInstalledElectron: true, architecture: 'Windows x64 payload / x86 Portable launcher', executionLevel: 'asInvoker', externalRuntimeDependencies: [] }, null, 2))

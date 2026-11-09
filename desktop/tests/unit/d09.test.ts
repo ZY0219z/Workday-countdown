@@ -34,7 +34,7 @@ class Timers implements TimerPort {
   tick(){const next=this.jobs.entries().next().value!;this.jobs.delete(next[0]);next[1].callback()}
   delay(){assert.equal(this.jobs.size,1);return [...this.jobs.values()][0].delay}
 }
-function config():AppConfig{const c=value(createAppConfig({...initial,startDate:'2026-10-14',updatedAt:'2026-10-14T10:00:00.000Z',appVersion:'2.0.0'}));c.calendar.enabledYears=[2024,2025,2026];c.calendar.datasets=context().calendars.listMetadata();return c}
+function config():AppConfig{const c=value(createAppConfig({...initial,startDate:'2026-10-14',updatedAt:'2026-10-14T10:00:00.000Z',appVersion:'2.0.0'}));c.calendar.enabledYears=[2024,2025,2026];c.calendar.datasets=context().calendars.listMetadata().filter(item=>c.calendar.enabledYears.includes(item.year));return c}
 function dashboard(c=config(),at='2026-10-14T10:00:00Z',zone='UTC'){
   const ctx=context(),clock=value(createFixedClock(Date.parse(at),zone,zones)),engine=value(createDashboardEngine(c,ctx.calendars,zones,100000))
   return {engine,clock,read:()=>value(engine.calculate(value(clock.read())))}
