@@ -26,11 +26,11 @@
 
 ## 🚀 下载与使用
 
-1. 打开 **[Releases](https://github.com/ZY0219z/Workday-countdown/releases/latest)**，下载最新版本的 \`Workday-Escape-*-Portable.zip\`。
-2. 解压压缩包，获得 **\`Workday Escape.exe\`**。
+1. 打开 **[Releases](https://github.com/ZY0219z/Workday-countdown/releases/latest)**，下载最新版本的 `Workday-Escape-*-Portable.zip`。
+2. 解压压缩包，获得 **`Workday Escape.exe`**。
 3. **双击 EXE 即可使用**。首次打开也可以先直接看倒计时，再按需调整上下班时间。
 
-如果朋友直接把 \`Workday Escape.exe\` 发给你，也可以直接双击运行；**无需安装程序、Node.js、Python 或手动选择配置路径**。
+如果朋友直接把 `Workday Escape.exe` 发给你，也可以直接双击运行；**无需安装程序、Node.js、Python 或手动选择配置路径**。
 
 > [!NOTE]
 > 当前 Windows EXE **尚未进行数字签名**，第一次运行可能出现 Windows 安全提示。请从本项目官方 Release 页面获取文件，并根据 Release 页面公布的 SHA-256 校验完整性。
@@ -44,9 +44,9 @@
 
 设置文件通常位于：
 
-\`\`\`text
+```text
 %APPDATA%\Workday Escape\settings.json
-\`\`\`
+```
 
 同目录还会保留配置备份。请不要为了排查问题随意删除配置文件；**更换 EXE 所在文件夹不会主动清空已有设置**。
 
@@ -56,33 +56,33 @@
 
 ## 🛠️ 技术栈与本地开发
 
-正式桌面版使用 **Vue 3 + TypeScript + Electron**。项目仍保留早期 Python 原型代码；当前 Release 交付的是 \`desktop/\` 下的 Electron 版本，而不是根目录的 Python 程序。
+正式桌面版使用 **Vue 3 + TypeScript + Electron**。项目仍保留早期 Python 原型代码；当前 Release 交付的是 `desktop/` 下的 Electron 版本，而不是根目录的 Python 程序。
 
 开发环境：Windows x64、Node.js **22.12+**，首次安装依赖与打包需要联网。
 
-\`\`\`powershell
+```powershell
 cd desktop
 npm ci
 npm run dev
-\`\`\`
+```
 
 常用检查和构建命令：
 
-\`\`\`powershell
+```powershell
 npm run typecheck
 npm run package:win
-\`\`\`
+```
 
-\`package:win\` 负责构建 Windows x64 Portable EXE，**不会自动创建 GitHub Release**。开发与验收细节以对应版本记录为准。
+`package:win` 负责构建 Windows x64 Portable EXE，**不会自动创建 GitHub Release**。开发与验收细节以对应版本记录为准。
 
 ## 📁 仓库结构
 
-\`\`\`text
+```text
 desktop/                 # 当前 Vue + TypeScript + Electron 桌面程序
 docs/version/            # 各版本需求、任务及验收记录
 docs/ROADMAP.md          # 历史规划与候选需求
 workday_counter.py       # 早期 Python 原型（非当前正式版）
-\`\`\`
+```
 
 - [v2.1.1 版本目标](docs/version/V2.1.1/V2.1.1_REQUIREMENTS.md)
 - [v2.1.1 开发与验收记录](docs/version/V2.1.1/V2.1.1_TASKS.md)
