@@ -1,53 +1,59 @@
-# Workday Escape V2.1.0 开发与个人自用验收说明
+# Workday Escape 开发者文档
 
-更新：2026-10-29。本文上半部描述 `codex/v2.1.0` 当前源码；V2.1.0 仍在开发中，尚未封版或发布。QA-03 六项 Windows 开发预览版验收由用户反馈 PASS；QA-04 已将候选版本及锁文件统一为 2.1.0，生成独立 Portable 并通过静态核验，**候选 EXE 未运行，等待 QA-05**，不能将开发预览版验收当作 Portable 验收通过。
+桌面版使用 **Vue 3、TypeScript 和 Electron**，当前正式版本为 **v2.1.1**。下载与使用请看 [项目首页](../README.md)，发布资产见 [GitHub Release](https://github.com/ZY0219z/Workday-countdown/releases/tag/v2.1.1)。
 
-主界面显示下班倒计时、业务状态、真实工作进度水槽及休息日 / 预计发薪 / 已工作摘要。原猫鱼 GIF、双层动态海水保留；隐藏、休息、下班和减少动画等状态按现有许可暂停。已工作仍为不含今天的自然日累计，入职当天为 0，不代表实际出勤天数。
+## 开发环境与启动
 
-真正首用（正式配置和备份均不存在）显示默认倒计时，不要求先填表。默认 08:30–18:00、周一至周五、入职 2025-07-17、每月 10 日发上月工资 / 休息日顺延、无午休加班、海蓝跟随系统。默认值后台安全落盘，失败保留提示和设置重试入口。已有配置读取原值；损坏、备份恢复或未来版本配置不默认覆盖。
-
-手动体验（会显示真实窗口，仅由用户主动启动）：
+开发和 Windows 打包使用 Windows x64、Node.js 22.12 或更新的版本。首次安装依赖及下载构建工具需要联网。从仓库根目录运行以下命令。
 
 ```powershell
-cd D:\Workday-countdown\desktop
+cd desktop
+npm ci
 npm run dev
 ```
 
-先保存旧开发会话的输入再重启。右上三横线进入设置，上下班时间默认同行，入职日期 / 每月发薪日默认同行，窄窗口自动纵排。时间支持 HH:MM 键入和粘贴。Mini Switch 直接显示在设置页，保存启用后可从主界面或托盘进入；只有开关轨道或滑块点击切换，文字、图标及卡片空白不切换，Tab / Space 仍可操作。当前日常设置没有“更多设置”或设置底部退出按钮。
-
-“今天预计下班时间”仅对当前班次生效；较早时刻按次日解释，最多额外 600 分钟。有效待保存时间与当前结果不同时，显示“当前生效 / 保存后”对照，跨日保留日期。“取消今天加班”保存后生效，不影响其他日期。历史午休、工作周、日历覆盖、主题和窗口偏好保留在完整草稿中，修改常用字段不会清空它们；正常设置不再显示高级编辑或导入 / 导出入口，配置异常时保留必要安全恢复流程。Python / POC 不自动读取或合并，旧数据不改动。
-
-保存成功返回仪表盘，成功 / 失败 Toast 使用约 3 秒计时，不占正常布局。失败保留输入；字段错误、磁盘 / 冲突等关键原因和恢复路径不会随 Toast 消失。取消、离开或退出时，未保存内容仍通过保存 / 放弃 / 继续编辑保护。
-
-托盘正常时按已保存的关闭策略处理，默认关闭到托盘；完全退出可右键托盘图标选择“退出程序”。托盘不能恢复或提供退出路径时，主动关闭主窗口会尝试现有安全退出协调器；配置不可读但托盘可用时保留可见窗口，提示恢复配置或通过托盘退出。取消、保存失败、超时或草稿无法确认均拒绝退出并保留 / 恢复窗口，不强制结束进程。Mini 支持返回主窗、置顶及隐藏，原主题和系统外观适配继续读取既有配置。
-
-内置核验日历覆盖 **2024–2026**，离线可用。缺失年度沿用工作周 / 日期覆盖及估算提示，不代表已掌握该年度法定假期 / 调休。F11-B 外部年度 JSON 手动导入仍未开放，F11-C 自动更新仍为后续版本候选，均不作为本次个人自用封版前置。
-
-正式配置位于 `%APPDATA%\Workday Escape\settings.json`，备份为同目录 `settings.backup.json`；POC 数据与正式 V2 隔离。测试必须使用既有临时配置和忽略目录，不删除真实配置来模拟首用。实际范围、QA-01 环境受限结果、QA-02 定向验证及原生待验见 [V2.1.0 任务记录](../docs/version/V2.1.0/V2.1.0_TASKS.md)。旧原生 GUI / Portable 脚本仍有旧选择器和版本断言待适配，不将历史通过数量作为当前验收结论；涉及真实窗口 / 托盘的测试和打包均须单独授权。Edge 仅为 Headless 测试工具，应用运行不依赖它。
-
-## V2.1.0 候选构建与静态检查
-
-QA-04 候选为 `release/qa04-v210-candidate-b87ca71/Workday-Escape-2.1.0-win-x64.exe`，100,125,924 字节（95.487522 MiB），未签名。完整 SHA-256、构建环境和核验明细见 [TASKS 的 QA-04 记录](../docs/version/V2.1.0/V2.1.0_TASKS.md#2026-10-29qa-04-portable-候选构建与静态核验)。V2.0.0 的 D16 候选及 `v2.0.0` Tag 保留。
-
-本轮在 `desktop/` 执行了以下命令；**后续重建必须另选不存在的 release 子目录，不覆盖本候选或任何历史产物**：
+`npm run dev` 会打开开发窗口。以下命令在 `desktop/` 下执行，分别用于类型检查和生产构建。生产构建包含类型检查，输出到 `out/`。
 
 ```powershell
-npm run package:win -- --config.directories.output=release/qa04-v210-candidate-b87ca71
+npm run typecheck
+npm run build
 ```
 
-既有命令包含 Typecheck、生产编译及 Builder 的 `--win portable --x64 --publish never`。应用身份、ASAR、asInvoker 和数据目录规则不变，未升级依赖。候选目录中的 `win-unpacked/` 和 `builder-debug.yml` 仅为构建核验材料，交付文件只有上述单个 EXE。
+## 代码结构
 
-使用已有 7-Zip 静态测试并解包至全新的隔离目录，再运行：
+| 目录 | 内容 |
+| --- | --- |
+| [src/main/](src/main/) | Electron 主进程，负责窗口、托盘、配置存储和 IPC |
+| [src/preload/](src/preload/) | 主窗口和 Mini 的受限接口 |
+| [src/renderer/](src/renderer/) | Vue 仪表盘、设置及 Mini 界面 |
+| [src/domain/](src/domain/) 和 [src/shared/](src/shared/) | 日历、班次等业务计算，以及类型、数据契约和校验 |
+| [resources/calendar/](resources/calendar/) | 已核验的 2024–2026 年离线工作日历 |
+| [tests/](tests/) 和 [scripts/](scripts/) | 测试、打包和静态检查脚本 |
+
+正式配置位于 `%APPDATA%\Workday Escape\settings.json`，备份为同目录下的 `settings.backup.json`。应用自动读取和保存设置，数据目录与 EXE 的位置无关。测试使用项目已有的临时配置机制，避免读写正式数据。
+
+IPC 校验已登记窗口、当前主 Frame、精确页面 URL 和窗口角色。Main 和 Mini 使用各自登记的 URL 加载页面。渲染进程启用 `contextIsolation` 和 `sandbox`，并关闭 `nodeIntegration`。
+
+## Portable 构建
+
+从 `desktop/` 运行构建命令，每次选择一个新的输出目录，保留历史候选。
 
 ```powershell
-node scripts/check-v2-package.mjs release/qa04-v210-candidate-b87ca71 test-results/qa04-v210-b87ca71/extracted-payload
+npm run package:win -- --config.directories.output=release/local-v211-example
 ```
 
-检查器明确要求 2.1.0 源 / 锁文件 / ASAR 元数据及文件名一致，校验独立载荷与 staging 的全文件哈希、生产文件白名单、资源、CSP / 权限保护、架构、体积和非生产内容。UI-13 已替换旧浪花 PNG，当前严格检查真实 SVG 波面及四张内联 SVG 插画，原 GIF / 托盘图标继续逐字节核验。**本命令不启动 EXE**；PE 版本与签名另以只读元数据核对。旧 `verify-portable.mjs` / D08 专用测试包约束不作为此候选运行验收，真正 EXE 运行脚本和用户体验留待 QA-05 单独授权，不关闭系统保护来绕过未签名提示。
+该命令使用 electron-builder 生成 Windows x64 Portable `Workday Escape.exe`。`--publish never` 使构建与发布分开。正式 ZIP `Workday-Escape-v2.1.1-Portable.zip` 的根目录只有这个 EXE，`win-unpacked/` 等构建产物用于本地核验。
 
----
+- [V2.1.1 版本目标和边界](../docs/version/V2.1.1/V2.1.1_REQUIREMENTS.md)
+- [V2.1.1 构建、产物身份及验收记录](../docs/version/V2.1.1/V2.1.1_TASKS.md)
+- [V2.1.0 历史任务记录](../docs/version/V2.1.0/V2.1.0_TASKS.md)
 
-以下全部章节为阶段 1 POC 历史说明，包括其中的版本、配置路径、API、UI 和验证命令，**不可作为当前 V2.1.0 操作或验收指南**。POC 页面 / 样式保留于 `src/renderer/src/legacy/`，相关历史测试在 `tests/legacy/`，不加载进正式生产入口。
+## 历史 POC
+
+根目录的 Python 原型和桌面版阶段 1 POC 均为历史实现。下方的版本号、命令、配置路径和验证结果属于阶段 1。
+
+<details>
+<summary>查看阶段 1 POC 开发与验证记录</summary>
 
 # Workday Escape V2.0 阶段 1 POC
 
@@ -100,3 +106,5 @@ release/Workday-Escape-2.0.0-win-x64.exe
 默认 Electron 图标和未签名 EXE 均为本阶段 POC 的限制。未新增托盘、主题、自动更新、后端或数据库。
 
 阶段 1 本地提交前的文件检查、依赖告警分析和验证复核见 [POC_CLOSEOUT.md](../docs/version/V2.0.0/POC_CLOSEOUT.md)。
+
+</details>
