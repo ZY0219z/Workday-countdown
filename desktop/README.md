@@ -1,6 +1,6 @@
 # Workday Escape 开发者文档
 
-桌面版使用 **Vue 3、TypeScript 和 Electron**。本版源码为 **v2.1.2**。下载与使用请看 [项目首页](../README.md)，已发布资产见 [GitHub Release](https://github.com/ZY0219z/Workday-countdown/releases/latest)。
+桌面版使用 **Vue 3、TypeScript 和 Electron**。当前正式版本为 **v2.1.2**。下载与使用请看 [项目首页](../README.md)。[GitHub Release](https://github.com/ZY0219z/Workday-countdown/releases/tag/v2.1.2)
 
 ## 开发环境与启动
 

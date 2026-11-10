@@ -25,9 +25,11 @@ Workday Escape 是一个轻量、有趣的 Windows 桌面下班倒计时工具�
 
 ## 下载与使用
 
+当前正式版为 **v2.1.2**。
+
 **[下载最新 Windows x64 便携版](https://github.com/ZY0219z/Workday-countdown/releases/latest)**
 
-1. 在发布页下载对应版本的 Portable ZIP。v2.1.2 的文件名为 `Workday-Escape-v2.1.2-Portable.zip`。
+1. 在发布页下载 `Workday-Escape-v2.1.2-Portable.zip`。
 2. 解压后双击 `Workday Escape.exe`。
 
 无需安装软件、Node.js 或 Python。软件会自动保存设置，无需手动指定配置文件路径。
