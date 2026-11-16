@@ -83,6 +83,91 @@ async function settled(page:Awaited<ReturnType<typeof launch>>){await expect(pag
 async function choose(choice:ExitChoice|null){await application!.evaluate(({app},choice)=>(app as TestApp).__workdayD08Test.chooseExit(choice),choice)}
 async function file(kind:'import'|'export',name:string){await application!.evaluate(({app},data)=>(app as TestApp).__workdayD08Test.selectFile(data.kind,data.name),{kind,name})}
 
+test('DEV-01 round 3 captures the actual Electron time picker and success toast', async () => {
+  const config = fixture()
+  const workDate = new Date().toLocaleDateString('sv-SE')
+  config.calendar.overrides[workDate] = 'work'
+  config.appearance.reduceMotion = true
+  seed(config)
+  const page = await launch(true, undefined, true)
+  await application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setBackgroundThrottling(false))
+  const output = resolve('test-results/v213-overtime-round3-electron')
+  mkdirSync(output, { recursive: true })
+  const capture = async (name: string) => {
+    const png = await application!.evaluate(async ({ BrowserWindow }) => {
+      const contents = BrowserWindow.getAllWindows()[0].webContents
+      // Wait for the hidden compositor to paint the updated renderer state.
+      await contents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))')
+      const image = await contents.capturePage(undefined, { stayHidden: true, stayAwake: true })
+      return image.isEmpty() ? '' : image.toPNG().toString('base64')
+    })
+    expect(png).not.toBe('')
+    writeFileSync(join(output, `${name}.png`), Buffer.from(png, 'base64'))
+  }
+  const assertPickerFits = async () => {
+    const layout = await page.locator('.overtime-dialog').evaluate(dialog => {
+      const root = document.documentElement
+      return {
+        frame: dialog.getBoundingClientRect().toJSON(),
+        picker: dialog.querySelector('.overtime-time-picker')!.getBoundingClientRect().toJSON(),
+        actions: dialog.querySelector('.overtime-actions')!.getBoundingClientRect().toJSON(),
+        width: root.clientWidth,
+        height: root.clientHeight
+      }
+    })
+    const { frame, picker, actions, width, height } = layout
+    expect(Math.abs((frame.left + frame.right) / 2 - width / 2), JSON.stringify(layout)).toBeLessThanOrEqual(1)
+    expect(Math.abs((frame.top + frame.bottom) / 2 - height / 2), JSON.stringify(layout)).toBeLessThanOrEqual(1)
+    expect(picker.left >= frame.left && picker.right <= frame.right && picker.bottom < actions.top &&
+      actions.bottom <= frame.bottom && frame.bottom <= height, JSON.stringify(layout)).toBe(true)
+  }
+  const toggle = page.getByRole('switch', { name: '今日加班' })
+  const dialog = page.getByRole('dialog')
+  const time = dialog.getByRole('button', { name: /^加班到/ })
+  const hours = dialog.getByRole('listbox', { name: '小时' })
+  const minutes = dialog.getByRole('listbox', { name: '分钟' })
+  await page.emulateMedia({ colorScheme: 'light' })
+  await activate(toggle)
+  await expect(time).toHaveAccessibleName('加班到 18:00')
+  await expect(time).toHaveCSS('width', '152px')
+  await capture('time-compact')
+  await activate(time)
+  await expect(hours.getByRole('option', { selected: true })).toBeInViewport()
+  await assertPickerFits()
+  await capture('time-picker')
+  await activate(hours.getByRole('option', { name: '19', exact: true }))
+  await activate(minutes.getByRole('option', { name: '30', exact: true }))
+  await expect(time).toHaveAccessibleName('加班到 19:30')
+  await activate(dialog.getByRole('heading'))
+  await expect(hours).toHaveCount(0)
+  await capture('time-selected')
+
+  await application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1.5))
+  await expect.poll(() => page.evaluate(() => devicePixelRatio)).toBeCloseTo(1.5, 1)
+  await activate(time)
+  await expect(minutes.getByRole('option', { selected: true })).toBeInViewport()
+  await assertPickerFits()
+  await capture('time-picker-150')
+  await application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1))
+
+  await activate(dialog.getByRole('button', { name: '确认加班' }))
+  await expect(toggle).toHaveAttribute('aria-checked', 'true')
+  const saved = value(await page.evaluate(() => window.workdayV2.config.read())).config
+  expect(saved.overtime.entries).toEqual([{ shiftDate: workDate, minutes: 90 }])
+  await activate(toggle)
+  await expect(dialog).toHaveAccessibleName('恢复正常下班时间')
+  await activate(dialog.getByRole('button', { name: '确认恢复' }))
+  await expect(toggle).toHaveAttribute('aria-checked', 'false')
+  const toast = page.getByRole('status').filter({ hasText: '今天不加班，回去好好休息～' })
+  await expect(toast).toHaveCSS('background-color', 'rgb(230, 246, 236)')
+  await capture('cancel-success')
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await expect(toast).toHaveCSS('background-color', 'rgb(206, 232, 214)')
+  await capture('cancel-success-dark')
+  expect(value(await page.evaluate(() => window.workdayV2.config.read())).config.overtime.entries).toEqual([])
+  await hidden()
+})
+
 async function archiveBuiltApp(directory:string){
   const source=join(profile,'app-source')
   const resources=join(profile,directory,'resources')

@@ -148,7 +148,18 @@ onBeforeUnmount(()=>{stopTraySettings?.();controller.dispose();void api.snapshot
   </div>
 </template>
 <style scoped>
-.app-toast--overtime { max-width: min(310px, calc(100vw - 32px)); }
+.app-toast--overtime {
+  max-width: min(310px, calc(100vw - 32px));
+  background: #e6f6ec;
+  border-color: #b3d9be;
+  color: #14532d;
+}
+.app-toast--overtime svg { stroke: #187341; }
+.app-toast--overtime:where([data-theme="dark"] *) { background: #cee8d6; border-color: #a4cfb3; }
+@media (forced-colors: active) {
+  .app-toast--overtime { background: Canvas; border-color: CanvasText; color: CanvasText; }
+  .app-toast--overtime svg { stroke: CanvasText; }
+}
 @media (max-width: 639px) {
   .app-toast--overtime {
     top: auto !important; /* Override the measured top when a wide window is resized. */

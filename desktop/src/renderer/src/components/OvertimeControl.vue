@@ -2,6 +2,12 @@
 import { computed, nextTick, ref, useId } from 'vue'
 import type { ContractError, DashboardSnapshot, Result } from '../../../shared/contracts'
 import type { OvertimeEdit, OvertimeTarget } from '../ui/settings-controller'
+import UiIcon from './UiIcon.vue'
+
+const timeColumns = [
+  { part: 'hour', label: '小时', values: Array.from({ length: 24 }, (_, index) => String(index).padStart(2, '0')) },
+  { part: 'minute', label: '分钟', values: Array.from({ length: 60 }, (_, index) => String(index).padStart(2, '0')) }
+] as const
 
 const props = defineProps<{
   snapshot: DashboardSnapshot | null
@@ -15,7 +21,9 @@ const emit = defineEmits<{ 'dialog-change': [open: boolean] }>()
 const id = useId()
 const dialog = ref<HTMLDialogElement | null>(null)
 const toggle = ref<HTMLButtonElement | null>(null)
-const timeInput = ref<HTMLInputElement | null>(null)
+const timeTrigger = ref<HTMLButtonElement | null>(null)
+const timePicker = ref<HTMLElement | null>(null)
+const pickerOpen = ref(false)
 const dismiss = ref<HTMLButtonElement | null>(null)
 const confirm = ref<HTMLButtonElement | null>(null)
 const mode = ref<'edit' | 'cancel' | 'check'>('edit')
@@ -38,6 +46,9 @@ const shiftIdentity = computed(() => shift.value && props.snapshot
 const checked = computed(() => (shift.value?.overtimeMinutes ?? 0) > 0)
 const available = computed(() => props.ready && !loading.value && !saving.value && (props.recovering || !!shift.value))
 const stale = computed(() => target.value !== null && shiftIdentity.value !== openedFor)
+const pickerDisabled = computed(() => saving.value || stale.value || props.recovering)
+const pickerVisible = computed(() => pickerOpen.value && !pickerDisabled.value)
+const selectedTime = computed(() => ({ hour: time.value.slice(0, 2), minute: time.value.slice(3) }))
 const title = computed(() => mode.value === 'cancel' ? '恢复正常下班时间' : mode.value === 'check' ? '核对加班保存状态' : '加班设置')
 const cancelTimes = computed(() => {
   const context = target.value?.context
@@ -59,6 +70,7 @@ function showError(value: ContractError) {
 
 function close() {
   if (saving.value || !dialog.value?.open) return
+  pickerOpen.value = false
   dialog.value.close()
   emit('dialog-change', false)
   void nextTick(restoreFocus)
@@ -69,9 +81,67 @@ function restoreFocus() {
   control?.focus()
 }
 
-function openTimePicker() {
-  const input = timeInput.value
-  if (input && !input.disabled) input.showPicker()
+function closePicker() {
+  pickerOpen.value = false
+  timeTrigger.value?.focus()
+}
+
+function handleEscape() {
+  if (pickerVisible.value) closePicker()
+  else close()
+}
+
+function dismissPickerOutside(event: MouseEvent) {
+  const clicked = event.target as Node
+  if (pickerOpen.value && !timeTrigger.value?.contains(clicked) && !timePicker.value?.contains(clicked)) pickerOpen.value = false
+}
+
+function revealTimeOption(list: HTMLElement, center = false) {
+  const selected = list.querySelector<HTMLElement>('[aria-selected="true"]')
+  if (!selected) return
+  const top = selected.offsetTop
+  const bottom = top + selected.offsetHeight
+  if (center) list.scrollTop = top - (list.clientHeight - selected.offsetHeight) / 2
+  else if (top < list.scrollTop) list.scrollTop = top
+  else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight
+}
+
+async function togglePicker() {
+  if (pickerDisabled.value) return
+  if (pickerVisible.value) { closePicker(); return }
+  pickerOpen.value = true
+  await nextTick()
+  const lists = timePicker.value?.querySelectorAll<HTMLElement>('[role="listbox"]')
+  lists?.forEach(list => revealTimeOption(list, true))
+  lists?.[0]?.focus({ preventScroll: true })
+}
+
+function selectTime(part: 'hour' | 'minute', value: string) {
+  if (pickerDisabled.value) return
+  const { hour, minute } = selectedTime.value
+  time.value = part === 'hour' ? `${value}:${minute}` : `${hour}:${value}`
+  error.value = ''
+  validationError.value = false
+}
+
+async function navigateTime(event: KeyboardEvent, column: typeof timeColumns[number]) {
+  const current = Number(selectedTime.value[column.part])
+  const last = column.values.length - 1
+  let next: number
+  switch (event.key) {
+    case 'ArrowDown': next = Math.min(last, current + 1); break
+    case 'ArrowUp': next = Math.max(0, current - 1); break
+    case 'Home': next = 0; break
+    case 'End': next = last; break
+    case 'Enter':
+    case ' ': event.preventDefault(); closePicker(); return
+    default: return
+  }
+  event.preventDefault()
+  const list = event.currentTarget as HTMLElement
+  selectTime(column.part, column.values[next])
+  await nextTick()
+  revealTimeOption(list)
 }
 
 async function loadTarget() {
@@ -92,7 +162,7 @@ async function loadTarget() {
   } finally {
     loading.value = false
     await nextTick()
-    if (dialog.value?.open && mode.value === 'edit' && target.value) timeInput.value?.focus()
+    if (dialog.value?.open && mode.value === 'edit' && target.value) timeTrigger.value?.focus()
     if (!dialog.value?.open) restoreFocus()
   }
 }
@@ -118,12 +188,13 @@ async function submit() {
   if (!target.value || stale.value || props.recovering || loading.value || saving.value) return
   const context = target.value.context
   const input = mode.value === 'cancel' ? null : time.value
+  pickerOpen.value = false
   error.value = ''
   validationError.value = false
   if (input === context.normalEnd.time) {
     error.value = '当前选择的是正常下班时间。请选择加班结束时间。'
     validationError.value = true
-    timeInput.value?.focus()
+    timeTrigger.value?.focus()
     return
   }
   saving.value = true
@@ -132,7 +203,7 @@ async function submit() {
   if (result.ok) { close(); return }
   showError(result.error)
   await nextTick()
-  if (validationError.value) timeInput.value?.focus()
+  if (validationError.value) timeTrigger.value?.focus()
   else confirm.value?.focus()
 }
 
@@ -158,7 +229,7 @@ async function checkAgain() {
   </div>
 
   <dialog ref="dialog" class="overtime-dialog" :aria-labelledby="`${id}-title`" :aria-describedby="mode === 'cancel' && cancelTimes ? `${id}-prompt` : undefined"
-    @cancel.prevent="close">
+    @cancel.prevent="handleEscape" @click.capture="dismissPickerOutside">
     <form class="overtime-form" @submit.prevent="submit">
       <header class="overtime-header">
         <h2 :id="`${id}-title`">{{ title }}</h2>
@@ -171,12 +242,23 @@ async function checkAgain() {
         确认后，今天的下班时间将恢复为 {{ cancelTimes.normal }}。
       </p>
       <div v-if="mode === 'edit' && target" class="overtime-time">
-        <label :for="`${id}-time`">加班到</label>
-        <input :id="`${id}-time`" ref="timeInput" v-model="time" type="time" lang="zh-CN" class="we-control" step="60" required
-          :disabled="saving || stale || recovering" :aria-invalid="validationError || undefined"
-          :aria-describedby="`${id}-hint${validationError ? ` ${id}-error` : ''}`"
-          @click.prevent="openTimePicker" @keydown.enter.prevent="openTimePicker" @keydown.space.prevent="openTimePicker"
-          @input="error = ''; validationError = false" />
+        <span :id="`${id}-time-label`" class="overtime-time-label">加班到</span>
+        <button ref="timeTrigger" type="button" class="we-control overtime-time-trigger" :disabled="pickerDisabled"
+          :aria-labelledby="`${id}-time-label ${id}-time-value`" :aria-expanded="pickerVisible"
+          :aria-controls="pickerVisible ? `${id}-picker` : undefined" :aria-invalid="validationError || undefined"
+          :aria-describedby="`${id}-hint${validationError ? ` ${id}-error` : ''}`" @click="togglePicker">
+          <span :id="`${id}-time-value`">{{ time }}</span><UiIcon name="clock" />
+        </button>
+        <div v-if="pickerVisible" :id="`${id}-picker`" ref="timePicker" class="overtime-time-picker">
+          <div v-for="column in timeColumns" :key="column.part">
+            <div :id="`${id}-${column.part}-label`" class="overtime-column-label">{{ column.label }}</div>
+            <div role="listbox" tabindex="0" class="overtime-time-options" :aria-labelledby="`${id}-${column.part}-label`"
+              :aria-activedescendant="`${id}-${column.part}-${selectedTime[column.part]}`" @keydown="navigateTime($event, column)">
+              <div v-for="value in column.values" :id="`${id}-${column.part}-${value}`" :key="value" role="option"
+                :aria-selected="value === selectedTime[column.part]" @click="selectTime(column.part, value)">{{ value }}</div>
+            </div>
+          </div>
+        </div>
         <p :id="`${id}-hint`" class="we-muted">正常下班 {{ target.context.normalEnd.time }}，较早时刻按次日解释。</p>
       </div>
       <p v-if="loading" class="we-muted" role="status">正在读取当前班次…</p>
@@ -270,6 +352,8 @@ async function checkAgain() {
 .overtime-close svg { width: 18px; height: 18px; }
 .overtime-close path { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 .overtime-time {
+  --overtime-picker-blue: #1e55a2;
+  --overtime-picker-selected: #dceafd;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 4px 12px;
@@ -278,9 +362,68 @@ async function checkAgain() {
   background: var(--we-accent-soft);
   padding: 7px 10px;
 }
-.overtime-time label { font-weight: 600; }
-.overtime-time input { width: 100%; min-width: 0; font-variant-numeric: tabular-nums; }
-.overtime-time input:not(:disabled) { cursor: pointer; }
+.overtime-time:where([data-theme="dark"] *) {
+  --overtime-picker-blue: #9dc8ff;
+  --overtime-picker-selected: #25436b;
+}
+.overtime-time-label { font-weight: 600; }
+.overtime-time-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  justify-self: start;
+  inline-size: 152px;
+  max-inline-size: 100%;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+}
+.overtime-time-trigger:not(:disabled) { cursor: pointer; }
+.overtime-time-trigger svg { flex: none; width: 17px; height: 17px; color: var(--overtime-picker-blue); }
+.overtime-time-trigger:hover:not(:disabled), .overtime-time-trigger[aria-expanded="true"] { border-color: var(--overtime-picker-blue); }
+.overtime-time .overtime-time-trigger:focus-visible {
+  outline: 2px solid var(--overtime-picker-blue);
+  outline-offset: -2px;
+}
+.overtime-time-options:focus-visible {
+  outline: 1px solid var(--overtime-picker-blue);
+  outline-offset: 2px;
+}
+.overtime-time-picker {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-block: 5px 3px;
+  padding: 6px;
+  border: 1px solid var(--we-border);
+  border-radius: 10px;
+  background: var(--we-surface);
+}
+.overtime-column-label { padding-bottom: 3px; text-align: center; color: var(--we-muted); font-size: var(--we-text-small); }
+.overtime-time-options {
+  position: relative;
+  block-size: clamp(56px, calc(100dvh - 260px), 140px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--we-border) transparent;
+  border-radius: 6px;
+}
+.overtime-time-options [role="option"] {
+  min-block-size: 28px;
+  padding: 3px 6px;
+  border-radius: 5px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.overtime-time-options [role="option"]:hover { background: var(--we-subtle); }
+.overtime-time-options [role="option"][aria-selected="true"] {
+  color: var(--overtime-picker-blue);
+  background: var(--overtime-picker-selected);
+  font-weight: 600;
+}
 .overtime-time p { grid-column: 1 / -1; }
 .overtime-error { color: var(--we-danger-text); overflow-wrap: anywhere; }
 .overtime-actions { display: grid; grid-template-columns: 1fr 1.3fr; gap: 10px; }
@@ -290,5 +433,6 @@ async function checkAgain() {
   .overtime-home, .overtime-moon { color: ButtonText; }
   .overtime-switch { border: 1px solid ButtonText; }
   .overtime-switch span { background: ButtonText; }
+  .overtime-time-options [role="option"][aria-selected="true"] { forced-color-adjust: none; color: HighlightText; background: Highlight; }
 }
 </style>
