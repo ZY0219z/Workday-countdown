@@ -38,6 +38,19 @@ export function restoreWindowBounds(saved: unknown, displays: readonly DisplayAr
     y: Math.max(Math.ceil(area.y), Math.min(Math.round(value.y), Math.floor(area.y + area.height - height))), width, height },
     minimum: { width: Math.min(min.data.width, width), height: Math.min(min.data.height, height) }, displayId: display.id })
 }
+
+export function initialMainWindowBounds(saved: WindowBounds | null, primary: DisplayArea) {
+  const area = primary.workArea
+  const defaults = { x: area.x, y: area.y, ...MAIN_WINDOW_DEFAULT_SIZE }
+  const restored = restoreWindowBounds(saved, [primary], primary.id, defaults, MAIN_WINDOW_MINIMUM_SIZE)
+  if (!restored.ok) return restored
+  const { width, height } = restored.data.bounds
+  return success({ ...restored.data, bounds: {
+    x: Math.round(area.x + (area.width - width) / 2),
+    y: Math.round(area.y + (area.height - height) / 2),
+    width, height
+  } })
+}
 // Windows native frames can report 1–2 extra DIP after a setBounds at fractional
 // scaling. Correct from observed bounds rather than guessing a fixed DPI factor
 // or allowing an offscreen tolerance. Odd DIP sizes can be unrepresentable at

@@ -9,7 +9,7 @@ import { success } from '../../src/shared/validation'
 import { createSettingsDraft, updateSettingsDraft, beginDraftSave, finishDraftSave, prepareDraftSave } from '../../src/shared/settings-draft'
 import { APPLICATION_ID, resolveApplicationPaths } from '../../src/main/app-identity'
 import { acquireSingleInstance } from '../../src/main/single-instance'
-import { restoreWindowBounds, applyRestoredBounds } from '../../src/main/windows/window-bounds'
+import { restoreWindowBounds, applyRestoredBounds, initialMainWindowBounds } from '../../src/main/windows/window-bounds'
 import type { DisplayArea } from '../../src/main/windows/window-bounds'
 import { createWindowManager } from '../../src/main/windows/window-manager'
 import { createQuitCoordinator } from '../../src/main/lifecycle/quit-coordinator'
@@ -155,6 +155,25 @@ test('factory failure/reentrant creation is bounded and cannot create two window
 })
 for(const scaleFactor of [1,1.25,1.5,2])test(`DIP restoration at simulated ${scaleFactor*100}% scale does not double scale coordinates`,()=>{
   const result=value(restoreWindowBounds(defaults,[{...primary,scaleFactor}],1,defaults,minimum));assert.deepEqual(result.bounds,defaults);assert.deepEqual(result.minimum,minimum)
+})
+for (const scaleFactor of [1, 1.25, 1.5, 2]) test(`DEV-03 starts centered on an offset primary work area at ${scaleFactor * 100}%`, () => {
+  const display = { ...primary, workArea: { x: -1600, y: 28, width: 1365, height: 860 }, scaleFactor }
+  const startup = value(initialMainWindowBounds(null, display))
+  assert.deepEqual(startup.bounds, { x: -1277, y: 138, width: 720, height: 640 })
+  assert.equal(startup.displayId, display.id)
+})
+test('DEV-03 initial placement centers a saved size on primary while normal repair retains the secondary position', () => {
+  const display = { ...primary, workArea: { x: 52, y: -45, width: 1560, height: 975 }, scaleFactor: 1.25 }
+  const saved = { x: -1110, y: 90, width: 601, height: 561 }
+  const startup = value(initialMainWindowBounds(saved, display))
+  assert.deepEqual(startup.bounds, { x: 532, y: 162, width: 601, height: 561 })
+  assert.deepEqual(value(restoreWindowBounds(saved, [display, second], display.id, defaults, minimum)).bounds, saved)
+})
+test('DEV-03 startup clamps an oversized window and its minimum to a small primary work area', () => {
+  const display = { ...primary, workArea: { x: -320, y: 75, width: 320, height: 280 }, scaleFactor: 1.5 }
+  const startup = value(initialMainWindowBounds({ x: 20, y: 50, width: 910, height: 700 }, display))
+  assert.deepEqual(startup.bounds, display.workArea)
+  assert.deepEqual(startup.minimum, { width: 320, height: 280 })
 })
 test('removed secondary/offscreen coordinates recover entirely inside primary workArea',()=>{
   const saved={x:-1200,y:100,width:600,height:560}

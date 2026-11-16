@@ -257,6 +257,115 @@ test('D12 compact default native window fits the dashboard at 100 percent withou
   expect(layout.dpr).toBe(1);expect(layout.width).toBe(native.content.width);expect(layout.height).toBe(native.content.height);expect(layout.scrollWidth).toBeLessThanOrEqual(layout.width);expect(layout.scrollHeight).toBeLessThanOrEqual(layout.height);expect(layout.gap).toBeGreaterThanOrEqual(16);expect(layout.gap).toBeLessThan(80)
   writeFileSync('test-results/d12-r2-native-layout.json',JSON.stringify({native,layout,hidden:true},null,2));await hidden()
 })
+test('V2.1.3 DEV-03 centers cold startup and settings layout in the hidden Electron window', async () => {
+  const config = fixture()
+  config.appearance.reduceMotion = true
+  seed(config)
+  const original = readFileSync(formal(), 'utf8')
+  const output = resolve('test-results/v213-dev03-electron')
+  mkdirSync(output, { recursive: true })
+  const measureStartup = async (size: { width: number; height: number }) => {
+    const measured = await application!.evaluate(({ BrowserWindow, screen }) => {
+      const window = BrowserWindow.getAllWindows()[0]
+      const primary = screen.getPrimaryDisplay()
+      const bounds = window.getBounds()
+      return { bounds, content: window.getContentBounds(), workArea: primary.workArea, scaleFactor: primary.scaleFactor,
+        primaryId: primary.id, actualDisplayId: screen.getDisplayMatching(bounds).id, displays: screen.getAllDisplays().length }
+    })
+    const { bounds, workArea } = measured
+    const centerOffset = {
+      x: bounds.x + bounds.width / 2 - workArea.x - workArea.width / 2,
+      y: bounds.y + bounds.height / 2 - workArea.y - workArea.height / 2
+    }
+    expect(measured.actualDisplayId).toBe(measured.primaryId)
+    expect(Math.abs(centerOffset.x), JSON.stringify(measured)).toBeLessThanOrEqual(1)
+    expect(Math.abs(centerOffset.y), JSON.stringify(measured)).toBeLessThanOrEqual(1)
+    expect({ width: bounds.width, height: bounds.height }).toEqual(size)
+    expect(bounds.x >= workArea.x && bounds.y >= workArea.y && bounds.x + bounds.width <= workArea.x + workArea.width &&
+      bounds.y + bounds.height <= workArea.y + workArea.height).toBe(true)
+    return { ...measured, centerOffset }
+  }
+  const prepareCapture = async () => {
+    await application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setBackgroundThrottling(false))
+  }
+  let page = await launch(true, undefined, true)
+  await prepareCapture()
+  await page.emulateMedia({ colorScheme: 'light' })
+  await expect(page.getByRole('region', { name: '工作日仪表盘' })).toBeVisible()
+  const startup = await measureStartup(MAIN_WINDOW_DEFAULT_SIZE)
+  const dashboardGeometry = () => page.locator('.app-header, .dashboard-primary, .we-countdown, .dashboard-progress, .dashboard-metrics')
+    .evaluateAll(elements => elements.map(element => element.getBoundingClientRect().toJSON()))
+  const before = await dashboardGeometry()
+  await captureHiddenPage(output, 'startup-dashboard')
+
+  await settings(page)
+  const settingsPanel = page.locator('.app-settings')
+  await expect(settingsPanel).toBeVisible()
+  const layout = await settingsPanel.evaluate(panel => {
+    const main = panel.parentElement!
+    const header = document.querySelector('.app-header')!
+    const measure = () => {
+      const box = panel.getBoundingClientRect()
+      const area = main.getBoundingClientRect()
+      const fields = [...panel.querySelectorAll('input, .settings-card, .settings-actions')].map(element => {
+        const rect = element.getBoundingClientRect()
+        return { x: rect.x - box.x, y: rect.y - box.y, width: rect.width, height: rect.height }
+      })
+      return { header: header.getBoundingClientRect().toJSON(), width: box.width, fields,
+        gapTop: box.top - area.top, gapBottom: area.bottom - box.bottom }
+    }
+    const centered = measure()
+    main.classList.remove('app-main--settings')
+    const original = measure()
+    main.classList.add('app-main--settings')
+    return { centered, original }
+  })
+  expect(layout.centered.gapTop).toBeGreaterThan(0)
+  expect(Math.abs(layout.centered.gapTop - layout.centered.gapBottom)).toBeLessThanOrEqual(1)
+  expect(layout.centered.header).toEqual(layout.original.header)
+  expect(layout.centered.width).toBe(layout.original.width)
+  expect(layout.centered.fields).toEqual(layout.original.fields)
+  await captureHiddenPage(output, 'settings-centered')
+  await activate(page.getByRole('button', { name: '取消 / 返回仪表盘' }))
+  await expect(page.getByRole('region', { name: '工作日仪表盘' })).toBeVisible()
+  expect(await dashboardGeometry()).toEqual(before)
+  expect(readFileSync(formal(), 'utf8')).toBe(original)
+  await hidden()
+
+  const closed = application!.waitForEvent('close')
+  await application!.evaluate(({ app, BrowserWindow }) => {
+    (app as TestApp).__workdayD08Test.windows.beginQuit()
+    for (const window of BrowserWindow.getAllWindows()) window.destroy()
+    setImmediate(() => app.exit(0))
+  })
+  await closed
+  application = undefined
+  config.desktop.bounds.main = { x: startup.workArea.x, y: startup.workArea.y, ...MAIN_WINDOW_MINIMUM_SIZE }
+  seed(config)
+  const saved = readFileSync(formal(), 'utf8')
+  page = await launch(false)
+  await prepareCapture()
+  await page.emulateMedia({ colorScheme: 'light' })
+  const restart = await measureStartup(MAIN_WINDOW_MINIMUM_SIZE)
+  await settings(page)
+  await expect(page.locator('.app-settings')).toBeVisible()
+  const shortLayout = await page.locator('.app-settings').evaluate(panel => ({
+    offset: panel.getBoundingClientRect().top - panel.parentElement!.getBoundingClientRect().top,
+    width: document.documentElement.clientWidth, height: document.documentElement.clientHeight,
+    scrollWidth: document.documentElement.scrollWidth, scrollHeight: document.documentElement.scrollHeight
+  }))
+  expect(shortLayout.offset).toBe(0)
+  expect(shortLayout.scrollHeight).toBeGreaterThan(shortLayout.height)
+  expect(shortLayout.scrollWidth).toBeLessThanOrEqual(shortLayout.width)
+  await captureHiddenPage(output, 'settings-short')
+  const save = page.getByRole('button', { name: '保存设置' })
+  await save.scrollIntoViewIfNeeded()
+  await expect(save).toBeInViewport({ ratio: 1 })
+  await captureHiddenPage(output, 'settings-short-buttons')
+  expect(readFileSync(formal(), 'utf8')).toBe(saved)
+  writeFileSync(join(output, 'geometry.json'), JSON.stringify({ hidden: true, startup, restart, layout, shortLayout }, null, 2))
+  await hidden()
+})
 test('first launch shows default dashboard, persists safely, restarts and preserves POC sentinel',async()=>{
   const sentinel='{"workStartTime":"08:30","workEndTime":"18:00"}';writeFileSync(join(profile,'settings.json'),sentinel)
   const started=performance.now(),page=await launch(false)

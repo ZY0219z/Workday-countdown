@@ -128,7 +128,7 @@ onBeforeUnmount(()=>{stopTraySettings?.();controller.dispose();void api.snapshot
       <p v-if="loading" role="status">正在读取正式配置…</p>
       <p v-if="defaultPending" class="we-muted app-default-note" role="status">正在保存默认设置…</p>
       <p v-else-if="state.session?.defaultPersistence?.status==='failed'" class="app-error" role="alert">默认设置尚未保存，本次仍可查看倒计时。请在设置中重试保存。</p>
-      <main v-if="!loading" :class="{'app-main--dashboard':!settingsOpen}">
+      <main v-if="!loading" :class="settingsOpen ? 'app-main--settings' : 'app-main--dashboard'">
         <section v-if="settingsOpen" id="settings-panel" class="we-surface app-settings">
           <SettingsView :quit-disabled="syncing||quitting||defaultPending" :model="state.editor" :issues="state.issues" :busy="state.busy||dataBusy||defaultPending" :dirty="state.dirty||state.pending>0" :initialized="!!state.session?.saved" :default-unpersisted="!!state.session?.defaultPersistence" :session-ready="!!state.session" :validation-attempt="validationAttempt" :can-save="canSave" :metadata="metadata" :api="api" @change="edit" @save="saved" @invalid="issue=>controller.invalidInput(issue)" @cancel="leave" @quit="quit" @imported="imported" @data-busy="value=>dataBusy=value" />
           <p v-if="state.session?.configurationStatus==='recoverable'" class="app-error">当前只读使用有效备份，请在安全恢复区预览并确认恢复；损坏源文件已保留。</p>
@@ -148,6 +148,8 @@ onBeforeUnmount(()=>{stopTraySettings?.();controller.dispose();void api.snapshot
   </div>
 </template>
 <style scoped>
+.app-main--settings { display:flex; flex:1; flex-direction:column; }
+.app-main--settings > .app-settings { width:100%; margin-block:auto; }
 .app-toast--overtime {
   max-width: min(310px, calc(100vw - 32px));
   background: #e6f6ec;

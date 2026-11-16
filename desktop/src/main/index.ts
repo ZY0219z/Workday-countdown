@@ -9,7 +9,7 @@ import { createWindowManager, windowPresentationVisible } from './windows/window
 import type { WindowManager } from './windows/window-manager'
 import type { WindowBounds, WindowRole } from '../shared/contracts'
 import { createMiniController, type MiniController } from './windows/mini-controller'
-import { restoreWindowBounds, applyRestoredBounds, MAIN_WINDOW_DEFAULT_SIZE, MAIN_WINDOW_MINIMUM_SIZE, MINI_WINDOW_DEFAULT_SIZE, MINI_WINDOW_MINIMUM_SIZE } from './windows/window-bounds'
+import { restoreWindowBounds, applyRestoredBounds, initialMainWindowBounds, MAIN_WINDOW_DEFAULT_SIZE, MAIN_WINDOW_MINIMUM_SIZE, MINI_WINDOW_DEFAULT_SIZE, MINI_WINDOW_MINIMUM_SIZE } from './windows/window-bounds'
 import { createOperationBarrier } from './lifecycle/operation-barrier'
 import { createQuitCoordinator } from './lifecycle/quit-coordinator'
 import type { ExitChoice } from './lifecycle/quit-coordinator'
@@ -154,8 +154,10 @@ else if (instance.data.primary) {
     }
     windows = createWindowManager(() => {
       const savedConfig = runtime.readConfig()
-      const initial = bounds(savedConfig.ok ? savedConfig.data.config.desktop.bounds.main : null)
-      const window = new BrowserWindow({ ...initial.bounds, minWidth: initial.minimum.width, minHeight: initial.minimum.height,
+      const { id, workArea, scaleFactor } = screen.getPrimaryDisplay()
+      const initial = initialMainWindowBounds(savedConfig.ok ? savedConfig.data.config.desktop.bounds.main : null, { id, workArea, scaleFactor })
+      if (!initial.ok) throw new Error(initial.error.message)
+      const window = new BrowserWindow({ ...initial.data.bounds, minWidth: initial.data.minimum.width, minHeight: initial.data.minimum.height,
         title: 'Workday Escape', show: false, focusable: !background, autoHideMenuBar: true,
         webPreferences: { preload: join(__dirname, '../preload/index.cjs'), additionalArguments:['--workday-window-role=main'], contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true }
       })
@@ -164,7 +166,12 @@ else if (instance.data.primary) {
       window.once('ready-to-show', () => { if (!quit.isAuthorized()) { if (!background) { windows!.showMain(); void repairBounds() }; instance.data.markReady() } })
       window.webContents.on('did-finish-load',()=>{if(settingsRequested){settingsRequested=false;router.openSettings()}})
       window.on('close', event => { if (!quit.isAuthorized()) { event.preventDefault(); if(tray)void tray.closeMain();else void requestQuit(true) } })
-      const loaded = window.loadURL(rendererUrl)
+      // Settle the native frame before the first paint can show the window.
+      const loaded = applyRestoredBounds(window, initial.data).then(result => {
+        if (window.isDestroyed()) return
+        if (!result.ok) console.warn(result.error.message)
+        return window.loadURL(rendererUrl)
+      })
       void loaded.catch(() => { if (!quit.isAuthorized() && !window.isDestroyed()) { startupError('页面加载失败，应用将退出；配置未被更改。'); app.exit(1) } })
       return window
     })
