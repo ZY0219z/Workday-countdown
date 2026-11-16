@@ -97,7 +97,7 @@ try{
   })
   await check('common settings hide cross-night, work-week and payroll-policy editors',async()=>{
     await goto();await group('schedule');await expect(page.getByLabel('跨夜班次（下班在次日）',{exact:true})).toHaveCount(0);await expect(page.getByRole('group',{name:'每周工作日',exact:true})).toHaveCount(0);await expect(page.getByLabel('遇休息日',{exact:true})).toHaveCount(0)
-    for(const name of ['上班时间','下班时间','今天预计下班时间','入职日期','每月发薪日'])await expect(page.getByLabel(name,{exact:true})).toBeVisible()
+    for(const name of ['上班时间','下班时间','入职日期','每月发薪日'])await expect(page.getByLabel(name,{exact:true})).toBeVisible()
     const before=await page.evaluate(()=>window.__d11.session().saved);await page.getByLabel('每月发薪日',{exact:true}).fill('11');await page.getByRole('button',{name:'保存设置',exact:true}).click();await expect(page.getByRole('region',{name:'工作日仪表盘'})).toBeVisible();const after=await page.evaluate(()=>window.__d11.session().saved);assert.deepEqual(after.schedule,before.schedule);assert.equal(after.salary.nonWorkingPolicy,before.salary.nonWorkingPolicy)
   })
   await check('failed default persistence retains countdown and defaults, explicit retry saves then returns',async()=>{
@@ -134,19 +134,12 @@ try{
     await goto();await group('schedule');await page.getByLabel('下班时间',{exact:true}).fill('19:00');await page.getByRole('button',{name:'保存设置',exact:true}).click();await expect(page.locator('.app-notice[role=status]')).toHaveText('设置已保存。');const start=performance.now();await expect(page.locator('.app-notice[role=status]')).toHaveCount(0,{timeout:3500});assert.ok(performance.now()-start>=1700)
     await group('schedule');await page.getByLabel('下班时间',{exact:true}).fill('20:00');await page.evaluate(()=>window.__d11.fail('IO_DENIED'));await page.getByRole('button',{name:'保存设置',exact:true}).click();await expect(page.locator('.app-error')).toBeVisible();await page.waitForTimeout(2100);await expect(page.locator('.app-error')).toBeVisible();await expect(page.locator('.app-notice[role=status]')).toHaveCount(0)
   })
-  await check('common expected-end entry replaces overtime management; historical lunch is read-only',async()=>{
-    await goto();await group('schedule');const input=page.getByLabel('今天预计下班时间',{exact:true});await expect(input).toHaveAttribute('type','text');await expect(input).toHaveValue('18:00');await expect(page.getByText('保留了历史午休配置',{exact:false})).toBeVisible();await expect(page.getByRole('button',{name:'添加午休 / 休息区间',exact:true})).toHaveCount(0);await expect(page.getByLabel('休息开始',{exact:true})).toHaveCount(0)
-    await input.fill('00:30');await expect(page.getByText('本次预计结束：',{exact:false})).toContainText('2026-10-16 00:30');await expect(input).toHaveValue('00:30');await group('calendar');assert.ok(!(await page.getByLabel('设置分组').innerText()).includes('加班记录'));await screenshot('d11-r3-settings.png')
-    await input.fill('19:');await page.getByRole('button',{name:'保存设置',exact:true}).click();await expect(page.locator('.field-error')).toContainText('HH:MM');await expect(input).toHaveValue('19:');await page.getByRole('button',{name:'取消 / 返回仪表盘',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'放弃',exact:true}).click();await group('schedule');await expect(input).toHaveValue('18:00')
-  })
-  await check('unsynchronized expected time can be explicitly discarded; it does not trap navigation',async()=>{
-    await goto();await group('schedule');await page.evaluate(()=>window.__d11.failSync());await page.getByLabel('今天预计下班时间',{exact:true}).fill('20:00');await expect(page.getByRole('button',{name:'重试同步草稿',exact:true})).toBeVisible();await page.getByRole('button',{name:'重试同步草稿',exact:true}).click();await expect(page.getByLabel('今天预计下班时间',{exact:true})).toHaveValue('20:00');await page.getByLabel('每月发薪日',{exact:true}).fill('11');await expect(page.getByRole('button',{name:'重试同步草稿',exact:true})).toBeVisible();await expect(page.getByLabel('今天预计下班时间',{exact:true})).toHaveValue('20:00');await page.getByRole('button',{name:'取消 / 返回仪表盘',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'放弃',exact:true}).click();await expect(page.getByRole('region',{name:'工作日仪表盘'})).toBeVisible()
-  })
-  await check('reopening settings reads Main current shift instead of retaining yesterday estimated end',async()=>{
-    await goto();await page.evaluate(()=>window.__d11.contextEnd('2026-10-15','20:00',120));await group('schedule');await expect(page.getByLabel('今天预计下班时间',{exact:true})).toHaveValue('20:00');await page.getByRole('button',{name:'取消 / 返回仪表盘',exact:true}).click();await page.evaluate(()=>window.__d11.contextEnd('2026-10-16','18:00',0));await group('schedule');await expect(page.getByLabel('今天预计下班时间',{exact:true})).toHaveValue('18:00');await expect(page.getByText('本班次 2026-10-16',{exact:false})).toBeVisible()
-  })
-  await check('failed scratch sync quit offers continue/discard without silently dropping local input',async()=>{
-    await goto();await group('schedule');await page.evaluate(()=>window.__d11.failSync());await page.getByLabel('今天预计下班时间',{exact:true}).fill('20:00');await expect(page.getByRole('button',{name:'重试同步草稿',exact:true})).toBeVisible();await page.getByRole('button',{name:'退出程序',exact:true}).click();await expect(page.getByRole('dialog')).toContainText('保存后退出');await page.getByRole('dialog').getByRole('button',{name:'继续编辑',exact:true}).click();await expect(page.getByLabel('今天预计下班时间',{exact:true})).toHaveValue('20:00');await page.getByRole('button',{name:'退出程序',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'放弃',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);assert.equal(await page.evaluate(()=>window.__d11.session().dirty),false)
+  await check('settings omit the old overtime editor and keep historical lunch read-only',async()=>{
+    await goto();await group('schedule')
+    await expect(page.getByLabel('今天预计下班时间',{exact:true})).toHaveCount(0)
+    await expect(page.getByText('保留了历史午休配置',{exact:false})).toBeVisible()
+    await expect(page.getByRole('button',{name:'添加午休 / 休息区间',exact:true})).toHaveCount(0)
+    await expect(page.getByLabel('休息开始',{exact:true})).toHaveCount(0)
   })
   await check('actual renderer has no page errors/outgoing requests/Node/legacy API or animation loops',async()=>{assert.deepEqual(errors,[]);assert.deepEqual(requests,[]);assert.equal(await page.evaluate(()=>typeof window.workday+':'+typeof window.require),'undefined:undefined');assert.equal(await page.evaluate(()=>window.__d11.intervals()),0);assert.equal(await page.evaluate(()=>document.getAnimations().length),0)})
   }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, useId, watch } from 'vue'
-import type { CalendarDatasetMetadata, ValidationIssue, ExpectedEndContext } from '../../../shared/contracts'
+import type { CalendarDatasetMetadata, ValidationIssue } from '../../../shared/contracts'
 import type { EditorSettings } from '../ui/settings-editor'
 import { fieldIssues } from '../ui/settings-editor'
 import FieldErrors from '../components/FieldErrors.vue'
@@ -8,8 +8,8 @@ import TimeInput from '../components/TimeInput.vue'
 import UiIcon from '../components/UiIcon.vue'
 import DataSettings from '../settings/DataSettings.vue'
 import type { MainWindowApi } from '../../../shared/contracts'
-const props=withDefaults(defineProps<{model:EditorSettings;expectedEnd?:ExpectedEndContext|null;expectedEndInput?:string;issues:ValidationIssue[];busy:boolean;dirty:boolean;initialized:boolean;canSave:boolean;sessionReady?:boolean;quitDisabled?:boolean;defaultUnpersisted?:boolean;validationAttempt?:number;metadata:CalendarDatasetMetadata[];api:MainWindowApi}>(),{sessionReady:true,defaultUnpersisted:false,validationAttempt:0})
-const emit=defineEmits<{change:[value:EditorSettings];save:[];invalid:[issue:ValidationIssue];cancel:[];quit:[];imported:[];dataBusy:[value:boolean];expectedEnd:[value:string|null]}>()
+const props=withDefaults(defineProps<{model:EditorSettings;issues:ValidationIssue[];busy:boolean;dirty:boolean;initialized:boolean;canSave:boolean;sessionReady?:boolean;quitDisabled?:boolean;defaultUnpersisted?:boolean;validationAttempt?:number;metadata:CalendarDatasetMetadata[];api:MainWindowApi}>(),{sessionReady:true,defaultUnpersisted:false,validationAttempt:0})
+const emit=defineEmits<{change:[value:EditorSettings];save:[];invalid:[issue:ValidationIssue];cancel:[];quit:[];imported:[];dataBusy:[value:boolean]}>()
 const form=ref<EditorSettings>(JSON.parse(JSON.stringify(props.model)))
 // Main acknowledgements must not replace equal local input on every keystroke.
 watch(()=>props.model,value=>{if(JSON.stringify(value)!==JSON.stringify(form.value))form.value=JSON.parse(JSON.stringify(value))})
@@ -21,15 +21,9 @@ const days=['周一','周二','周三','周四','周五','周六','周日']
 // Hidden legacy fields remain in the full draft; these labels never normalize it.
 const customWorkWeek=computed(()=>form.value.schedule.workWeek.length!==5||([1,2,3,4,5] as const).some(day=>!form.value.schedule.workWeek.includes(day)))
 const workWeekLabel=computed(()=>form.value.schedule.workWeek.map(day=>days[day-1]).join('、')||'无固定工作日')
-const endComparison=computed(()=>{
-  const end=props.expectedEnd
-  if(!end?.available||!end.previewEnd||hasErrors('$.expectedEndTime')||props.expectedEndInput!==end.previewEnd.time)return null
-  return end.previewEnd.date!==end.finalEnd.date||end.previewEnd.time!==end.finalEnd.time?end.previewEnd:null
-})
-// Dates come from Main; only abbreviate an end that belongs to the same shift date.
-function endLabel(end:{date:string;time:string}){return props.expectedEnd?.available&&end.date===props.expectedEnd.shiftDate?end.time:`${end.date} ${end.time}`}
 function update(){emit('change',JSON.parse(JSON.stringify(form.value)))}
 function numeric(event:Event):number|null{const value=(event.target as HTMLInputElement).value;return value===''?null:Number(value)}
+function openDatePicker(event:MouseEvent){(event.currentTarget as HTMLInputElement).showPicker()}
 function invalid(event:Event){
   const input=event.target as HTMLInputElement
   emit('invalid',{field:input.type==='date'?'$.employee.startDate':'$.salary.day',reason:input.validity.rangeUnderflow||input.validity.rangeOverflow||input.validity.stepMismatch?'RANGE':'FORMAT',message:input.validationMessage})
@@ -48,22 +42,6 @@ function invalid(event:Event){
           <div class="settings-field"><TimeInput row icon-tile v-model="form.schedule.endTime" label="下班时间" :invalid="hasErrors('$.schedule.endTime')" :described-by="errorDescription('$.schedule.endTime')" @update:model-value="update" />
             <FieldErrors :id="errorId('$.schedule.endTime')" :issues="issues" path="$.schedule.endTime" /></div>
           </div>
-          <div class="settings-field settings-expected settings-card">
-            <fieldset :disabled="!expectedEnd?.available" class="settings-expected-fields">
-              <TimeInput row icon-tile icon="coffee" :model-value="expectedEndInput||''" label="今天预计下班时间" :invalid="hasErrors('$.expectedEndTime')" :described-by="errorDescription('$.expectedEndTime')" @update:model-value="value=>emit('expectedEnd',value)" />
-              <div class="settings-expected-context"><p class="we-muted">仅本班次有效；较早时刻按次日解释，下个工作日恢复正常下班时间。</p><button type="button" class="we-button" @click="emit('expectedEnd',null)">取消今天加班</button></div>
-            </fieldset>
-            <template v-if="expectedEnd?.available">
-              <div v-if="endComparison" class="settings-end-comparison">
-                <p class="we-muted settings-note">当前生效：{{ endLabel(expectedEnd.finalEnd) }}<template v-if="expectedEnd.minutes>0">（已设置加班 {{ expectedEnd.minutes }} 分钟）</template></p>
-                <p class="settings-note">保存后：{{ endLabel(endComparison) }}</p>
-              </div>
-              <p v-else-if="expectedEnd.finalEnd.date!==expectedEnd.shiftDate" class="we-muted settings-note">当前生效：{{ endLabel(expectedEnd.finalEnd) }}<template v-if="expectedEnd.minutes>0">（已设置加班 {{ expectedEnd.minutes }} 分钟）</template></p>
-              <p v-else-if="expectedEnd.minutes>0" class="we-muted settings-note">已设置加班 {{ expectedEnd.minutes }} 分钟</p>
-            </template>
-            <p v-else class="we-muted settings-note">{{ expectedEnd&&!expectedEnd.available?expectedEnd.message:'正在确认当前班次…' }}</p>
-            <FieldErrors :id="errorId('$.expectedEndTime')" :issues="issues" path="$.expectedEndTime" />
-          </div>
           <div v-if="form.schedule.crossMidnight||customWorkWeek||form.schedule.breaks.length" class="settings-history">
             <p v-if="form.schedule.crossMidnight" class="we-muted">保留历史跨夜班次，下班在次日。</p>
             <p v-if="customWorkWeek" class="we-muted">保留历史工作周：{{ workWeekLabel }}；仍按原规则计算。</p>
@@ -73,7 +51,7 @@ function invalid(event:Event){
         </section>
         <div class="settings-personal-fields">
         <div class="settings-field settings-card">
-          <label class="settings-row settings-personal-row"><span class="settings-label"><UiIcon name="calendar" tile />入职日期</span><input :value="form.employee.startDate||''" type="date" class="we-control" :aria-invalid="hasErrors('$.employee.startDate')||undefined" :aria-describedby="errorDescription('$.employee.startDate')" @input="form.employee.startDate=($event.target as HTMLInputElement).value||null;update()" /></label>
+          <label class="settings-row settings-personal-row"><span class="settings-label"><UiIcon name="calendar" tile />入职日期</span><input :value="form.employee.startDate||''" type="date" class="we-control" :aria-invalid="hasErrors('$.employee.startDate')||undefined" :aria-describedby="errorDescription('$.employee.startDate')" @click.prevent="openDatePicker" @input="form.employee.startDate=($event.target as HTMLInputElement).value||null;update()" /></label>
           <FieldErrors :id="errorId('$.employee.startDate')" :issues="issues" path="$.employee.startDate" />
           <FieldErrors :issues="issues" path="$.employee" :exclude-paths="['$.employee.startDate']" />
         </div>
@@ -105,7 +83,7 @@ function invalid(event:Event){
 .settings { display:grid;gap:14px;--we-settings-icon:var(--we-accent); }
 .settings-title { display:flex;align-items:center;gap:12px;font-size:22px; }
 
-.settings-fields,.settings-expected-fields { border:0;padding:0;margin:0;min-width:0; }
+.settings-fields { border:0;padding:0;margin:0;min-width:0; }
 .settings-fields,.settings-time-group { display:grid;gap:10px; }
 .settings :deep(.time-input-label) { color:var(--we-text);font-weight:600; }
 .settings-card { padding:10px;border:1px solid color-mix(in srgb,var(--we-accent) 9%,var(--we-surface));border-radius:12px;background:color-mix(in srgb,var(--we-accent) 3%,var(--we-surface)); }
@@ -121,9 +99,6 @@ function invalid(event:Event){
 .settings-row .we-control { width:100%;min-width:0;min-height:40px;font-size:15px;font-variant-numeric:tabular-nums; }
 .settings .settings-personal-row { grid-template-columns:minmax(0,1fr);gap:8px; }
 .settings-note { margin-top:4px; }
-.settings-end-comparison { margin-top:6px; }
-.settings-expected-context { display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:6px; }
-.settings-expected-context .we-button { flex:none;font-size:12px;min-height:28px;padding:2px 8px; }
 .settings-history { display:grid;gap:3px; }
 
 .settings-switch { appearance:none;position:relative;justify-self:end;cursor:pointer;width:44px;height:26px;margin:0;border:1px solid var(--we-control-border);border-radius:20px;background:var(--we-track); }
@@ -136,6 +111,6 @@ function invalid(event:Event){
 .settings-actions .we-button--primary:active:not(:disabled) { background:color-mix(in srgb,var(--we-button) 82%,#16375f); }
 .settings-recovery { display:grid;gap:12px;border-top:1px solid var(--we-border);padding-top:16px; }
 .settings-deferred { color:var(--we-warning-text);font-size:var(--we-text-small); }
-@media(max-width:400px) { .settings-row { grid-template-columns:minmax(0,1fr) 132px;gap:8px; }.settings-label { gap:8px;font-size:13px; }.settings-expected-context { flex-wrap:wrap; } }
+@media(max-width:400px) { .settings-row { grid-template-columns:minmax(0,1fr) 132px;gap:8px; }.settings-label { gap:8px;font-size:13px; } }
 @media(forced-colors:active) { .settings-card { background:Canvas;border-color:CanvasText; }.settings-switch { background:Canvas;border-color:ButtonText; }.settings-switch::before { background:ButtonText; }.settings-switch:checked { background:Highlight; }.settings-switch:checked::before { background:HighlightText; } }
 </style>

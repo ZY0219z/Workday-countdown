@@ -10,15 +10,14 @@ test('UI-02 excludes only field-owned errors and preserves group, legacy and ind
   assert.deepEqual(issues.map(issue=>issue.field),fields)
 })
 test('UI-02 renders field errors once while retaining genuine schedule and calendar errors',async()=>{
-  const issues=[['$.schedule.startTime','FORMAT'],['$.schedule.endTime','FORMAT'],['$.expectedEndTime','RANGE'],['$.employee.startDate','FORMAT'],['$.salary.day','RANGE'],['$.schedule','RANGE'],['$.schedule.breaks[0].endTime','DUPLICATE'],['$.calendar.enabledYears[0]','ENUM'],['$.calendar.overrides.2026-10-22','ENUM']].map(([field,reason])=>({field,reason,message:'本班次预计结束时间无效。'}))
+  const issues=[['$.schedule.startTime','FORMAT'],['$.schedule.endTime','FORMAT'],['$.employee.startDate','FORMAT'],['$.salary.day','RANGE'],['$.schedule','RANGE'],['$.schedule.breaks[0].endTime','DUPLICATE'],['$.calendar.enabledYears[0]','ENUM'],['$.calendar.overrides.2026-10-22','ENUM']].map(([field,reason])=>({field,reason,message:'本班次预计结束时间无效。'}))
   const html=await renderSettings(initialEditor(),f.metadata,{issues})
   assert.equal((html.match(/class="field-error"/g)||[]).length,issues.length)
   assert.equal((html.match(/请输入 24 小时制 HH:MM（00:00–23:59），例如 08:30。/g)||[]).length,2)
   assert.ok(html.includes('数值或时间区间超出允许范围。'))
   assert.ok(html.includes('存在重复或冲突记录。'))
-  assert.ok(html.includes('本班次预计结束时间无效。'))
   const controls=[...html.matchAll(/<(?:input|select)\b[^>]*aria-invalid="true"[^>]*>/g)].map(match=>match[0])
-  assert.ok(controls.length>=5)
+  assert.equal(controls.length,4)
   for(const control of controls){
     const describedBy=control.match(/aria-describedby="([^"]+)"/)?.[1]
     assert.ok(describedBy,control)
@@ -37,42 +36,19 @@ test('UI-02 keeps stable error IDs and drops invalid state and stale references 
   assert.ok(!valid.includes('class="field-error"'))
   for(const match of valid.matchAll(/aria-describedby="([^"]+)"/g))for(const id of match[1].split(' '))assert.equal(valid.split(`id="${id}"`).length-1,1,id)
 })
-test('UI-17 compares only valid changed Main projections and keeps current overtime clear',async()=>{
-  const model=initialEditor(),expectedEnd={available:true,targetKey:'ui17',shiftDate:'2026-10-29',normalEnd:{date:'2026-10-29',time:'12:00'},finalEnd:{date:'2026-10-29',time:'13:00'},minutes:60}
-  const preview={date:'2026-10-29',time:'12:00'},context={...expectedEnd,previewEnd:preview},original=structuredClone(context)
-  const changed=await renderSettings(model,f.metadata,{expectedEnd:context,expectedEndInput:'12:00',dirty:true})
-  assert.ok(changed.includes('当前生效：13:00'));assert.ok(changed.includes('已设置加班 60 分钟'));assert.ok(changed.includes('保存后：12:00'))
-  assert.doesNotMatch(changed,/本次预计结束|现有预计结束|正常结束|本班次 2026-/)
-  for(const options of [
-    {expectedEnd},
-    {expectedEnd:{...expectedEnd,previewEnd:expectedEnd.finalEnd},expectedEndInput:'13:00'},
-    {expectedEnd:context,expectedEndInput:'12:'},
-    {expectedEnd:context,expectedEndInput:'12:00',issues:[{field:'$.expectedEndTime',reason:'RANGE',message:'预计时间无效'}]}
-  ]){
-    const html=await renderSettings(model,f.metadata,options)
-    assert.ok(!html.includes('保存后：'));assert.ok(html.includes('已设置加班 60 分钟'))
-    assert.ok(!html.includes('当前生效：13:00'),'same-day unchanged time is already in its input')
-  }
-  assert.deepEqual(context,original)
-})
-test('UI-17 preserves full dates across shifts, unavailable reasons, recovery and page semantics',async()=>{
-  const model=initialEditor(),context={available:true,targetKey:'overnight',shiftDate:'2026-10-29',normalEnd:{date:'2026-10-30',time:'00:00'},finalEnd:{date:'2026-10-30',time:'01:00'},minutes:60}
-  for(const previewEnd of [undefined,{date:'2026-10-30',time:'02:00'},{date:'2026-10-31',time:'01:00'}]){
-    const html=await renderSettings(model,f.metadata,{expectedEnd:{...context,previewEnd},expectedEndInput:previewEnd?.time??'01:00'})
-    assert.ok(html.includes('当前生效：2026-10-30 01:00'))
-    if(previewEnd)assert.ok(html.includes(`保存后：${previewEnd.date} ${previewEnd.time}`))
-    else assert.ok(!html.includes('保存后：'))
-  }
-  for(const expectedEnd of [null,{available:false,message:'当前没有可用班次'}]){
-    const html=await renderSettings(model,f.metadata,{expectedEnd})
-    assert.ok(html.includes(expectedEnd?'当前没有可用班次':'正在确认当前班次'))
-    assert.ok(!html.includes('保存后：'))
-  }
+test('V2.1.3 DEV-02 settings keep the form and recovery with the old overtime UI removed',async()=>{
+  const config=structuredClone(f.config)
+  config.overtime.entries=[{shiftDate:'2026-10-15',minutes:60}]
+  const model=editorFrom(createSettingsDraft(config).data)
   const html=await renderSettings(model,f.metadata)
-  assert.ok(html.includes('aria-label="设置中心"'));assert.ok(!html.includes('class="settings-title"'))
+  assert.ok(html.includes('aria-label="设置中心"'))
+  assert.ok(!html.includes('class="settings-title"'))
+  assert.doesNotMatch(html,/今天预计下班时间|取消今天加班|已设置加班/)
+  assert.equal((html.match(/popover="auto"/g)||[]).length,2)
   assert.ok(html.includes('settings-personal-fields'));assert.match(html,/type="date"/);assert.match(html,/type="number" min="1" max="31" step="1"/)
   assert.ok((await renderSettings(model,f.metadata,{canSave:false})).includes('配置恢复'))
   assert.ok((await renderSettings(model,f.metadata,{sessionReady:false,canSave:false})).includes('设置暂不可用'))
+  assert.deepEqual(model.overtime.entries,config.overtime.entries)
 })
 function harness({missing=false,saveFail=null,timers}={}){
   let session=missing?{saved:null,draft:{},dirty:false,issues:[],expectedRevision:0,save:{status:'idle'},configurationStatus:'missing'}:{...createSettingsDraft(f.config).data,configurationStatus:'ready'}
@@ -111,12 +87,12 @@ test('current-rule estimate does not invent a missing calendar year',()=>{const 
 test('rejected draft initialization cannot masquerade as a successful save',async()=>{const h=harness({missing:true});h.api.settingsDraft.read=async()=>fail('FORBIDDEN');assert.equal((await h.controller.load()).ok,false);assert.equal(h.controller.state.session,null);assert.equal(await h.controller.save(),false);assert.equal(h.controller.state.error.code,'UNAVAILABLE');assert.match(h.controller.state.error.message,/重新连接/);assert.equal(h.calls.length,0)})
 test('thrown initialization is a structured failure and retry reads the real session',async()=>{const h=harness(),read=h.api.settingsDraft.read;h.api.settingsDraft.read=async()=>{throw Error('private transport detail')};const failure=await h.controller.load();assert.equal(failure.ok,false);assert.equal(failure.error.code,'INTERNAL');assert.ok(!JSON.stringify(failure).includes('private'));h.api.settingsDraft.read=read;assert.equal((await h.controller.load()).ok,true);assert.equal(h.controller.state.session.saved.revision,1);assert.equal(h.controller.state.error,null)})
 test('unknown draft UI retains the blocking reason without a normal footer status',async()=>{const html=await renderSettings(initialEditor(),f.metadata,{sessionReady:false,canSave:false});assert.ok(html.includes('尚未读取 Main 草稿'));assert.ok(!html.includes('没有未保存修改'));assert.match(html,/type="submit"[^>]*disabled/);assert.ok(html.includes('不能编辑或保存'))})
-test('settings remove lunch edits while retaining the read-only historic break warning',async()=>{const model=initialEditor();model.schedule.breaks=[{startTime:'12:00',endTime:'13:00',startDayOffset:0,endDayOffset:0}];const html=await renderSettings(model,f.metadata);assert.equal((html.match(/placeholder="HH:MM"/g)||[]).length,3);assert.ok(html.includes('保留了历史午休配置'));assert.ok(!html.includes('添加午休'));assert.ok(!html.includes('休息开始'));assert.equal((html.match(/type="time"/g)||[]).length,0)})
+test('settings remove lunch edits while retaining the read-only historic break warning',async()=>{const model=initialEditor();model.schedule.breaks=[{startTime:'12:00',endTime:'13:00',startDayOffset:0,endDayOffset:0}];const html=await renderSettings(model,f.metadata);assert.equal((html.match(/placeholder="HH:MM"/g)||[]).length,2);assert.ok(html.includes('保留了历史午休配置'));assert.ok(!html.includes('添加午休'));assert.ok(!html.includes('休息开始'));assert.equal((html.match(/type="time"/g)||[]).length,0)})
 for(const time of ['0','08:','24:00','08:60','8:30'])test(`raw time ${time} stays in draft but cannot be saved`,async()=>{const h=harness();await h.controller.load();const editor=structuredClone(h.controller.state.editor);editor.schedule.startTime=time;h.controller.edit(editor);await h.controller.flush();assert.equal(h.session.draft.schedule.startTime,time);assert.equal(await h.controller.save(),false);assert.equal(h.controller.state.error.code,'VALIDATION');assert.equal(h.controller.state.editor.schedule.startTime,time);assert.equal(h.calls.filter(call=>call[0]==='save').length,0)})
 test('missing salary has a specific field error, and input time explains its range',async()=>{const h=harness({missing:true});await h.controller.load();const editor=structuredClone(h.controller.state.editor);editor.schedule.startTime='08:30';editor.schedule.endTime='18:00';h.controller.edit(editor);assert.equal(await h.controller.save(),false);const issue=h.controller.state.issues.find(issue=>issue.field==='$.salary.day');assert.ok(issue);assert.match(fieldMessage(issue),/每月发薪日.*1–31/);assert.match(fieldMessage({field:'$.schedule.breaks[0].endTime',reason:'FORMAT'}),/HH:MM.*23:59/)})
 
 test('approved factory produces isolated defaults; presentation attributes prior nominal month',()=>{const input={updatedAt:'2026-10-15T00:00:00.000Z',appVersion:'2.0.0'},a=createDefaultAppConfig(input,f.metadata).data,b=createDefaultAppConfig(input,f.metadata).data;assert.equal(a.employee.startDate,'2025-07-17');assert.equal(a.schedule.startTime,'08:30');assert.equal(a.schedule.endTime,'18:00');assert.equal(a.salary.day,10);assert.equal(a.appearance.accent,'ocean');a.schedule.workWeek.pop();assert.equal(b.schedule.workWeek.length,5);assert.equal(salaryMonthLabel('2026-10-10'),'2026年9月工资');assert.equal(salaryMonthLabel('2027-01-10'),'2026年12月工资');assert.equal(salaryMonthLabel('0001-01-10'),'');assert.equal(salaryMonthLabel('bad'),'')})
-test('UI-11 exposes daily settings and Mini switch without advanced menus',async()=>{const html=await renderSettings(editorFrom(createSettingsDraft(f.config).data),f.metadata);for(const text of ['上班时间','下班时间','入职日期','每月发薪日','今天预计下班时间','启用迷你窗'])assert.ok(html.includes(text));assert.ok(!html.includes('更多设置'));assert.ok(html.includes('role="switch"'));for(const text of ['设置分组','离线工作日历','外观主题','窗口与托盘偏好','导出已保存配置','预览最近有效备份','每周工作日','跨夜班次（下班在次日）','遇休息日<select','value="advance"','value="none"'])assert.ok(!html.includes(text),text);assert.ok(!html.includes('请先填写发薪日'))})
+test('UI-11 exposes daily settings and Mini switch without advanced menus',async()=>{const html=await renderSettings(editorFrom(createSettingsDraft(f.config).data),f.metadata);for(const text of ['上班时间','下班时间','入职日期','每月发薪日','启用迷你窗'])assert.ok(html.includes(text));assert.ok(!html.includes('更多设置'));assert.ok(html.includes('role="switch"'));for(const text of ['设置分组','离线工作日历','外观主题','窗口与托盘偏好','导出已保存配置','预览最近有效备份','每周工作日','跨夜班次（下班在次日）','遇休息日<select','value="advance"','value="none"'])assert.ok(!html.includes(text),text);assert.ok(!html.includes('请先填写发薪日'))})
 
 test('UI-09 exposes safe recovery only for a loaded read-only configuration',async()=>{
   const model=editorFrom(createSettingsDraft(f.config).data)

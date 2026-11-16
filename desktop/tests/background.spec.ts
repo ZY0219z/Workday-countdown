@@ -83,6 +83,18 @@ async function settled(page:Awaited<ReturnType<typeof launch>>){await expect(pag
 async function choose(choice:ExitChoice|null){await application!.evaluate(({app},choice)=>(app as TestApp).__workdayD08Test.chooseExit(choice),choice)}
 async function file(kind:'import'|'export',name:string){await application!.evaluate(({app},data)=>(app as TestApp).__workdayD08Test.selectFile(data.kind,data.name),{kind,name})}
 
+async function captureHiddenPage(output: string, name: string) {
+  const png = await application!.evaluate(async ({ BrowserWindow }) => {
+    const contents = BrowserWindow.getAllWindows()[0].webContents
+    // Wait for the compositor to paint the updated renderer state.
+    await contents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))')
+    const image = await contents.capturePage(undefined, { stayHidden: true, stayAwake: true })
+    return image.isEmpty() ? '' : image.toPNG().toString('base64')
+  })
+  expect(png).not.toBe('')
+  writeFileSync(join(output, `${name}.png`), Buffer.from(png, 'base64'))
+}
+
 test('DEV-01 round 3 captures the actual Electron time picker and success toast', async () => {
   const config = fixture()
   const workDate = new Date().toLocaleDateString('sv-SE')
@@ -93,17 +105,7 @@ test('DEV-01 round 3 captures the actual Electron time picker and success toast'
   await application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setBackgroundThrottling(false))
   const output = resolve('test-results/v213-overtime-round3-electron')
   mkdirSync(output, { recursive: true })
-  const capture = async (name: string) => {
-    const png = await application!.evaluate(async ({ BrowserWindow }) => {
-      const contents = BrowserWindow.getAllWindows()[0].webContents
-      // Wait for the hidden compositor to paint the updated renderer state.
-      await contents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))')
-      const image = await contents.capturePage(undefined, { stayHidden: true, stayAwake: true })
-      return image.isEmpty() ? '' : image.toPNG().toString('base64')
-    })
-    expect(png).not.toBe('')
-    writeFileSync(join(output, `${name}.png`), Buffer.from(png, 'base64'))
-  }
+  const capture = (name: string) => captureHiddenPage(output, name)
   const assertPickerFits = async () => {
     const layout = await page.locator('.overtime-dialog').evaluate(dialog => {
       const root = document.documentElement
@@ -478,41 +480,86 @@ function seedHistoric(){
   config.overtime.entries=[{shiftDate:'2024-01-02',minutes:80},{shiftDate:date,minutes:120}]
   mkdirSync(join(profile,'lifecycle'),{recursive:true});writeFileSync(formal(),JSON.stringify(config));return {date,config}
 }
-test('expected end previews midnight via Main, saves only this shift; notice expires and cancel preserves history/lunch',async()=>{
-  const {date,config}=seedHistoric(),page=await launch();await settings(page)
-  await expect(page.getByLabel('今天预计下班时间',{exact:true})).toHaveValue('20:00');await expect(page.getByText('保留了历史午休配置',{exact:false})).toBeVisible()
-  await expect(page.getByRole('button',{name:'添加午休 / 休息区间',exact:true})).toHaveCount(0);await expect(page.getByLabel('休息开始',{exact:true})).toHaveCount(0)
-  await page.getByLabel('今天预计下班时间',{exact:true}).fill('00:30');await settled(page)
-  const draft=value(await page.evaluate(()=>window.workdayV2.settingsDraft.read()));expect(draft.expectedEnd?.available).toBe(true);if(!draft.expectedEnd?.available)throw Error('No target');expect(draft.expectedEnd.previewEnd?.time).toBe('00:30')
-  await expect(page.getByText('本次预计结束：',{exact:false})).toContainText(draft.expectedEnd.previewEnd!.date)
-  expect(JSON.parse(readFileSync(formal(),'utf8')).overtime.entries).toEqual(config.overtime.entries)
-  await activate(page.getByRole('button',{name:'保存设置',exact:true}));await expect(page.locator('.app-notice[role=status]')).toHaveText('设置已保存。')
-  const noticeAt=performance.now();await expect(page.locator('.app-notice[role=status]')).toHaveCount(0,{timeout:3500});const noticeDurationMs=performance.now()-noticeAt;expect(noticeDurationMs).toBeGreaterThan(1700)
-  const saved=JSON.parse(readFileSync(formal(),'utf8'));expect(saved.overtime.entries).toEqual([{shiftDate:'2024-01-02',minutes:80},{shiftDate:date,minutes:390}]);expect(saved.schedule.breaks).toEqual(config.schedule.breaks)
-  expect(value(await page.evaluate(()=>window.workdayV2.snapshot.read())).configRevision).toBe(saved.revision)
-  await settings(page);await expect(page.getByLabel('今天预计下班时间',{exact:true})).toHaveValue('00:30');await activate(page.getByRole('button',{name:'取消今天加班',exact:true}));await settled(page);await expect(page.getByLabel('今天预计下班时间',{exact:true})).toHaveValue('18:00')
-  expect(JSON.parse(readFileSync(formal(),'utf8')).overtime.entries).toEqual(saved.overtime.entries)
-  await activate(page.getByRole('button',{name:'保存设置',exact:true}));await expect(page.getByRole('region',{name:'工作日仪表盘'})).toBeVisible()
-  expect(JSON.parse(readFileSync(formal(),'utf8')).overtime.entries).toEqual([{shiftDate:'2024-01-02',minutes:80}]);expect(JSON.parse(readFileSync(formal(),'utf8')).schedule.breaks).toEqual(config.schedule.breaks)
-  console.log('D11 transient notice:',JSON.stringify({noticeDurationMs,hidden:true}));await hidden()
-})
-test('expected partial text survives reload, dirty native close/save fail safely, discard restores and valid exit saves',async()=>{
-  const {date:seedDate,config}=seedHistoric();config.desktop.closeAction='quit';seed(config);const page=await launch(),before=readFileSync(formal(),'utf8');await settings(page);const input=page.getByLabel('今天预计下班时间',{exact:true});await input.fill('19:');await settled(page)
-  await page.reload();await settled(page);await expect(input).toHaveValue('19:');await choose('continueEditing');await application!.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].close());await expect(input).toHaveValue('19:');expect(application!.process().exitCode).toBe(null)
-  await choose('save');await activate(page.getByRole('button',{name:'退出程序',exact:true}));await expect(page.locator('.app-error')).toBeVisible();expect(application!.process().exitCode).toBe(null);expect(readFileSync(formal(),'utf8')).toBe(before)
-  await activate(page.getByRole('button',{name:'取消 / 返回仪表盘',exact:true}));await activate(page.getByRole('dialog').getByRole('button',{name:'继续编辑',exact:true}));await expect(input).toHaveValue('19:')
-  await activate(page.getByRole('button',{name:'取消 / 返回仪表盘',exact:true}));await activate(page.getByRole('dialog').getByRole('button',{name:'放弃',exact:true}));await settings(page);await expect(input).toHaveValue('20:00');expect(readFileSync(formal(),'utf8')).toBe(before)
-  await input.fill('21:00');await settled(page);await choose('save');const child=application!.process(),closed=application!.waitForEvent('close');await activate(page.getByRole('button',{name:'退出程序',exact:true}));await closed;await expect.poll(()=>child.exitCode).toBe(0);application=undefined;expect(JSON.parse(readFileSync(formal(),'utf8')).overtime.entries).toEqual([{shiftDate:'2024-01-02',minutes:80},{shiftDate:seedDate,minutes:180}])
-})
-test('rejected expected-time scratch sync can be explicitly discarded without trapping settings',async()=>{
-  seedHistoric();const page=await launch(),before=readFileSync(formal(),'utf8');await settings(page);await page.getByLabel('今天预计下班时间',{exact:true}).fill('x'.repeat(33))
-  await expect(page.getByRole('button',{name:'重试同步草稿',exact:true})).toBeVisible();await activate(page.getByRole('button',{name:'重试同步草稿',exact:true}));await expect(page.getByLabel('今天预计下班时间',{exact:true})).toHaveValue('x'.repeat(33));await page.getByLabel('每月发薪日',{exact:true}).fill('11');await expect(page.getByRole('button',{name:'重试同步草稿',exact:true})).toBeVisible();await expect(page.getByLabel('今天预计下班时间',{exact:true})).toHaveValue('x'.repeat(33));await activate(page.getByRole('button',{name:'取消 / 返回仪表盘',exact:true}));await activate(page.getByRole('dialog').getByRole('button',{name:'放弃',exact:true}));await settings(page);await expect(page.getByLabel('今天预计下班时间',{exact:true})).toHaveValue('20:00');expect(readFileSync(formal(),'utf8')).toBe(before)
-})
+test('V2.1.3 DEV-02 settings choose, save and restart with overtime history intact', async () => {
+  const { config } = seedHistoric()
+  config.appearance.reduceMotion = true
+  seed(config)
+  let page = await launch(true, undefined, true)
+  await application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setBackgroundThrottling(false))
+  await page.emulateMedia({ colorScheme: 'light' })
+  await settings(page)
+  const output = resolve('test-results/v213-dev02-electron')
+  mkdirSync(output, { recursive: true })
+  await expect(page.getByLabel('今天预计下班时间', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('保留了历史午休配置', { exact: false })).toBeVisible()
+  await expect(page.getByRole('button', { name: '取消今天加班' })).toHaveCount(0)
+  await captureHiddenPage(output, 'settings')
 
-test('failed scratch synchronization still offers explicit quit continue/discard and ends the owned process',async()=>{
-  seedHistoric();const page=await launch(),before=readFileSync(formal(),'utf8');await settings(page);const input=page.getByLabel('今天预计下班时间',{exact:true});await input.fill('x'.repeat(33));await expect(page.getByRole('button',{name:'重试同步草稿',exact:true})).toBeVisible()
-  await activate(page.getByRole('button',{name:'退出程序',exact:true}));await expect(page.getByRole('dialog')).toContainText('保存后退出');await activate(page.getByRole('dialog').getByRole('button',{name:'继续编辑',exact:true}));await expect(input).toHaveValue('x'.repeat(33));expect(application!.process().exitCode).toBe(null)
-  await activate(page.getByRole('button',{name:'退出程序',exact:true}));const child=application!.process(),closed=application!.waitForEvent('close');await activate(page.getByRole('dialog').getByRole('button',{name:'放弃',exact:true}));await closed;await expect.poll(()=>child.exitCode).toBe(0);application=undefined;expect(readFileSync(formal(),'utf8')).toBe(before)
+  const start = page.getByLabel('上班时间', { exact: true })
+  const end = page.getByLabel('下班时间', { exact: true })
+  const startPicker = page.getByRole('group', { name: '上班时间选择器' })
+  const endPicker = page.getByRole('group', { name: '下班时间选择器' })
+  await start.dispatchEvent('click')
+  await expect(startPicker).toBeVisible()
+  await captureHiddenPage(output, 'time-picker')
+  await startPicker.getByRole('listbox', { name: '小时' }).selectOption('08')
+  await startPicker.getByRole('listbox', { name: '分钟' }).selectOption('25')
+  await expect(start).toHaveValue('08:25')
+  await end.dispatchEvent('click')
+  await expect(startPicker).toHaveCount(0)
+  await expect(endPicker).toBeVisible()
+  await endPicker.getByRole('listbox', { name: '分钟' }).selectOption('15')
+  await expect(end).toHaveValue('18:15')
+  await endPicker.evaluate(element => (element as HTMLElement).hidePopover())
+  const date = page.getByLabel('入职日期', { exact: true })
+  const opened = await application!.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0].webContents.executeJavaScript(
+      `(() => {
+        const field = document.querySelector('input[type="date"]')
+        field.click()
+        return field.matches(':open')
+      })()`,
+      true
+    )
+  )
+  expect(opened).toBe(true)
+  await date.blur()
+  await date.fill('2025-07-20')
+
+  await start.fill('24:00')
+  await activate(page.getByRole('button', { name: '保存设置', exact: true }))
+  await expect(start).toHaveAttribute('aria-invalid', 'true')
+  expect(value(await page.evaluate(() => window.workdayV2.config.read())).config.revision).toBe(config.revision)
+  await start.fill('08:45')
+  await settled(page)
+  await activate(page.getByRole('button', { name: '保存设置', exact: true }))
+  const quickToggle = page.getByRole('switch', { name: '今日加班' })
+  await expect(quickToggle).toHaveAttribute('aria-checked', 'true')
+  const saved = value(await page.evaluate(() => window.workdayV2.config.read())).config
+  expect(saved.schedule).toEqual({ ...config.schedule, startTime: '08:45', endTime: '18:15' })
+  expect(saved.employee.startDate).toBe('2025-07-20')
+  expect(saved.overtime).toEqual(config.overtime)
+  await activate(page.getByRole('button', { name: '修改加班时间' }))
+  await expect(page.getByRole('dialog').getByRole('button', { name: '加班到 20:15' })).toBeVisible()
+  await activate(page.getByRole('dialog').getByRole('button', { name: '关闭' }))
+  await hidden()
+
+  const closed = application!.waitForEvent('close')
+  await application!.evaluate(({ app, BrowserWindow }) => {
+    (app as TestApp).__workdayD08Test.windows.beginQuit()
+    for (const window of BrowserWindow.getAllWindows()) window.destroy()
+    setImmediate(() => app.exit(0))
+  })
+  await closed
+  application = undefined
+  page = await launch(false)
+  await expect(page.getByRole('switch', { name: '今日加班' })).toHaveAttribute('aria-checked', 'true')
+  await settings(page)
+  await expect(page.getByLabel('上班时间', { exact: true })).toHaveValue('08:45')
+  await expect(page.getByLabel('下班时间', { exact: true })).toHaveValue('18:15')
+  await expect(page.getByLabel('入职日期', { exact: true })).toHaveValue('2025-07-20')
+  expect(value(await page.evaluate(() => window.workdayV2.config.read())).config).toEqual(saved)
+  await hidden()
 })
 
 test('D13 bundled icon decodes and menu uses real Snapshot without showing native UI',async()=>{
