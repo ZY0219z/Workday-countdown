@@ -38,7 +38,17 @@ const shiftIdentity = computed(() => shift.value && props.snapshot
 const checked = computed(() => (shift.value?.overtimeMinutes ?? 0) > 0)
 const available = computed(() => props.ready && !loading.value && !saving.value && (props.recovering || !!shift.value))
 const stale = computed(() => target.value !== null && shiftIdentity.value !== openedFor)
-const title = computed(() => mode.value === 'cancel' ? '取消加班？' : mode.value === 'check' ? '核对加班保存状态' : '加班设置')
+const title = computed(() => mode.value === 'cancel' ? '恢复正常下班时间' : mode.value === 'check' ? '核对加班保存状态' : '加班设置')
+const cancelTimes = computed(() => {
+  const context = target.value?.context
+  if (!context) return null
+  const { shiftDate, normalEnd, finalEnd } = context
+  const crossesDate = normalEnd.date !== shiftDate || finalEnd.date !== shiftDate
+  return {
+    normal: crossesDate ? `${normalEnd.date} ${normalEnd.time}` : normalEnd.time,
+    final: crossesDate ? `${finalEnd.date} ${finalEnd.time}` : finalEnd.time
+  }
+})
 
 function showError(value: ContractError) {
   validationError.value = value.code === 'VALIDATION'
@@ -59,6 +69,11 @@ function restoreFocus() {
   control?.focus()
 }
 
+function openTimePicker() {
+  const input = timeInput.value
+  if (input && !input.disabled) input.showPicker()
+}
+
 async function loadTarget() {
   if (loading.value) return
   error.value = ''
@@ -73,7 +88,7 @@ async function loadTarget() {
       return
     }
     target.value = result.data
-    time.value = checked.value ? result.data.context.finalEnd.time : ''
+    time.value = checked.value ? result.data.context.finalEnd.time : result.data.context.normalEnd.time
   } finally {
     loading.value = false
     await nextTick()
@@ -106,7 +121,7 @@ async function submit() {
   error.value = ''
   validationError.value = false
   if (input === context.normalEnd.time) {
-    error.value = '该时间与正常下班时间相同。请选择加班结束时间。'
+    error.value = '当前选择的是正常下班时间。请选择加班结束时间。'
     validationError.value = true
     timeInput.value?.focus()
     return
@@ -142,7 +157,7 @@ async function checkAgain() {
       @click="open(checked ? 'cancel' : 'edit', $event)"><span aria-hidden="true" /></button>
   </div>
 
-  <dialog ref="dialog" class="overtime-dialog" :aria-labelledby="`${id}-title`" :aria-describedby="mode === 'cancel' ? `${id}-prompt` : undefined"
+  <dialog ref="dialog" class="overtime-dialog" :aria-labelledby="`${id}-title`" :aria-describedby="mode === 'cancel' && cancelTimes ? `${id}-prompt` : undefined"
     @cancel.prevent="close">
     <form class="overtime-form" @submit.prevent="submit">
       <header class="overtime-header">
@@ -151,23 +166,28 @@ async function checkAgain() {
           <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="m5 5 10 10M15 5 5 15" /></svg>
         </button>
       </header>
-      <p v-if="mode === 'cancel'" :id="`${id}-prompt`">确定取消今天的加班吗？取消后将恢复正常下班时间。</p>
+      <p v-if="mode === 'cancel' && cancelTimes" :id="`${id}-prompt`">
+        当前已设置加班至 {{ cancelTimes.final }}。<br />
+        确认后，今天的下班时间将恢复为 {{ cancelTimes.normal }}。
+      </p>
       <div v-if="mode === 'edit' && target" class="overtime-time">
         <label :for="`${id}-time`">加班到</label>
-        <input :id="`${id}-time`" ref="timeInput" v-model="time" type="time" class="we-control" step="60" required
+        <input :id="`${id}-time`" ref="timeInput" v-model="time" type="time" lang="zh-CN" class="we-control" step="60" required
           :disabled="saving || stale || recovering" :aria-invalid="validationError || undefined"
-          :aria-describedby="`${id}-hint${validationError ? ` ${id}-error` : ''}`" @input="error = ''; validationError = false" />
+          :aria-describedby="`${id}-hint${validationError ? ` ${id}-error` : ''}`"
+          @click.prevent="openTimePicker" @keydown.enter.prevent="openTimePicker" @keydown.space.prevent="openTimePicker"
+          @input="error = ''; validationError = false" />
         <p :id="`${id}-hint`" class="we-muted">正常下班 {{ target.context.normalEnd.time }}，较早时刻按次日解释。</p>
       </div>
       <p v-if="loading" class="we-muted" role="status">正在读取当前班次…</p>
       <p v-if="stale && !saving && !error" class="overtime-error" role="status">当前班次或配置已变化，请重新打开弹窗。</p>
       <p v-if="error" :id="`${id}-error`" class="overtime-error" role="alert">{{ error }}</p>
       <div class="overtime-actions">
-        <button ref="dismiss" type="button" class="we-button" :disabled="saving" @click="close">{{ mode === 'cancel' ? '继续加班' : '取消' }}</button>
+        <button ref="dismiss" type="button" class="we-button" :disabled="saving" @click="close">{{ mode === 'cancel' ? '保留加班' : '取消' }}</button>
         <button v-if="(recovering && !saving) || mode === 'check'" type="button" class="we-button we-button--primary" :disabled="loading || saving" @click="checkAgain">重试核对</button>
         <button v-else-if="!target && !loading && error" type="button" class="we-button we-button--primary" @click="loadTarget">重新读取</button>
         <button v-else ref="confirm" type="submit" class="we-button we-button--primary" :disabled="!target || stale || loading || saving">
-          {{ saving ? '正在保存…' : mode === 'cancel' ? '确认取消' : '确认加班' }}
+          {{ saving ? '正在保存…' : mode === 'cancel' ? '确认恢复' : '确认加班' }}
         </button>
       </div>
     </form>
@@ -182,8 +202,8 @@ async function checkAgain() {
   inset-inline-start: clamp(10px, 3.25cqi, var(--we-space-6));
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 7px;
+  gap: 4px;
+  padding: 3px 6px;
   border: 1px solid var(--we-card-border, var(--we-border));
   border-radius: 999px;
   background: color-mix(in srgb, var(--we-surface) 95%, transparent);
@@ -198,17 +218,17 @@ async function checkAgain() {
   padding: 0;
   background: none;
 }
-.overtime-icon { width: 30px; height: 30px; }
-.overtime-icon svg { width: 23px; height: 23px; }
+.overtime-icon { width: 26px; height: 26px; }
+.overtime-icon svg { width: 20px; height: 20px; }
 .overtime-home { color: #1470e5; }
 .overtime-home path { fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linejoin: round; }
 .overtime-moon { color: #ffbf24; }
 .overtime-moon path { fill: currentColor; }
 .overtime-moon:hover:not(:disabled), .overtime-close:hover:not(:disabled) { background: var(--we-accent-soft); }
 .overtime-switch {
-  --knob-travel: 17px;
-  width: 43px;
-  height: 26px;
+  --knob-travel: 13px;
+  width: 37px;
+  height: 24px;
   justify-items: start;
   padding-inline: 3px;
   background: #77889e;
@@ -216,8 +236,8 @@ async function checkAgain() {
 }
 .overtime-switch[aria-checked="true"] { background: #0875ed; }
 .overtime-switch span {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 1px 3px rgb(20 48 82 / 20%);
@@ -228,9 +248,12 @@ async function checkAgain() {
 .overtime-pill button:not(:disabled), .overtime-close:not(:disabled) { cursor: pointer; }
 .overtime-dialog {
   position: fixed;
-  inset-block: auto 14px;
+  inset: 0;
+  margin: auto;
   width: min(368px, calc(100% - 32px));
+  height: fit-content;
   max-height: calc(100% - 32px);
+  overflow: auto;
   padding: 0;
   border: 1px solid var(--we-card-border, var(--we-border));
   border-radius: var(--we-radius-card);
@@ -257,18 +280,12 @@ async function checkAgain() {
 }
 .overtime-time label { font-weight: 600; }
 .overtime-time input { width: 100%; min-width: 0; font-variant-numeric: tabular-nums; }
+.overtime-time input:not(:disabled) { cursor: pointer; }
 .overtime-time p { grid-column: 1 / -1; }
 .overtime-error { color: var(--we-danger-text); overflow-wrap: anywhere; }
 .overtime-actions { display: grid; grid-template-columns: 1fr 1.3fr; gap: 10px; }
 .overtime-actions .we-button { border-radius: 999px; min-height: 34px; font-weight: 600; }
 .overtime-actions .we-button:hover:not(:disabled) { filter: brightness(.96); }
-@container (max-width: 440px) {
-  .overtime-pill { gap: 3px; padding: 2px 5px; }
-  .overtime-icon { width: 25px; height: 28px; }
-  .overtime-icon svg { width: 20px; height: 20px; }
-  .overtime-switch { --knob-travel: 13px; width: 37px; height: 24px; }
-  .overtime-switch span { width: 18px; height: 18px; }
-}
 @media (forced-colors: active) {
   .overtime-home, .overtime-moon { color: ButtonText; }
   .overtime-switch { border: 1px solid ButtonText; }
