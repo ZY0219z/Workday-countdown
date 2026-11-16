@@ -40,7 +40,7 @@ async function setup(options:{missing?:boolean;failWrite?:boolean}={}){
   const controller=createSettingsController(api,()=>{});value(await controller.load())
   const close=()=>{controller.dispose();quit.dispose();router.dispose();runtime.dispose()}
   after(close)
-  return {ctx,directory,store,runtime,controller,api,handlers,event,choose:(value:ExitChoice)=>{choice=value},quits:()=>quits,source:(path:string|null)=>{source=path},fail:()=>{failWrite=true}}
+  return {ctx,directory,store,runtime,controller,api,handlers,event,choose:(value:ExitChoice)=>{choice=value},quits:()=>quits,source:(path:string|null)=>{source=path},fail:()=>{failWrite=true},restore:()=>{failWrite=false}}
 }
 test('real missing first session remains missing until explicit UI save, then real Snapshot exists',async()=>{
   const a=await setup({missing:true});assert.equal(a.controller.state.session!.saved,null);assert.equal(a.controller.state.session!.configurationStatus,'missing')
@@ -204,6 +204,141 @@ test('real expected-end save updates Snapshot and progress, does not inherit nex
   const a=await setup();value(a.ctx.clock.setInstant(Date.parse('2026-10-14T18:30:00Z')));value(await a.controller.load());a.controller.editExpectedEnd('20:00');value(await a.controller.flush());assert.equal(await a.controller.save(),true)
   const config=value(a.runtime.readConfig()).config;assert.deepEqual(config.overtime.entries,[{shiftDate:'2026-10-14',minutes:120}]);const snapshot=value(await a.runtime.snapshots.read());assert.equal(snapshot.state,'overtime');assert.equal(snapshot.countdown!.seconds,5400);assert.ok(snapshot.progress!.percent<100)
   value(a.ctx.clock.setInstant(Date.parse('2026-10-15T10:00:00Z')));a.runtime.refresh.wake(true);assert.equal(value(await a.runtime.snapshots.read()).activeShift!.overtimeMinutes,0)
+})
+
+async function quickEdit(controller: ReturnType<typeof createSettingsController>, input: string | null) {
+  const target = value(await controller.readOvertime())
+  return { input, targetKey: target.context.targetKey, expectedRevision: target.revision }
+}
+
+test('quick overtime changes only the selected shift and refreshes the real countdown and progress', async () => {
+  const a = await setup()
+  const editor = structuredClone(a.controller.state.editor)
+  const history = { shiftDate: '2026-10-01', minutes: 80 }
+  editor.overtime.entries = [history]
+  editor.salary.day = 12
+  a.controller.edit(editor)
+  assert.equal(await a.controller.save(), true)
+  value(a.ctx.clock.setInstant(Date.parse('2026-10-14T17:00:00Z')))
+  const before = value(await a.api.snapshot.read())
+  value(await a.controller.saveOvertime(await quickEdit(a.controller, '20:00')))
+  const updated = value(await a.api.snapshot.read())
+  assert.equal(updated.countdown!.seconds, before.countdown!.seconds + 7200)
+  assert.ok(updated.progress!.percent < before.progress!.percent)
+
+  const reopened = createSettingsController(a.api, () => {})
+  after(() => reopened.dispose())
+  value(await reopened.load())
+  const current = value(await reopened.readOvertime()).context
+  assert.equal(current.finalEnd.time, '20:00')
+  assert.equal(current.minutes, 120)
+  value(await reopened.saveOvertime(await quickEdit(reopened, '00:30')))
+  const saved = JSON.parse(await readFile(join(a.directory, 'settings.json'), 'utf8')) as AppConfig
+  assert.deepEqual(saved.overtime.entries, [history, { shiftDate: '2026-10-14', minutes: 390 }])
+  assert.equal(saved.salary.day, 12)
+  const restartedStore = value(createConfigStore({ ...a.ctx, directory: a.directory, appVersion: '2.0.0' }))
+  assert.deepEqual(value(await restartedStore.load()).config?.overtime.entries, saved.overtime.entries)
+  const cancel = await quickEdit(reopened, null)
+  value(await reopened.saveOvertime(cancel))
+  assert.equal(reopened.state.notice, '今天不加班，回去好好休息～')
+  assert.deepEqual(value(await a.api.config.read()).config.overtime.entries.map(entry => ({ ...entry })), [history])
+  const restored = value(await a.api.snapshot.read())
+  assert.equal(restored.countdown!.seconds, before.countdown!.seconds)
+  assert.equal(restored.progress!.percent, before.progress!.percent)
+})
+
+test('quick overtime preserves other drafts and removes only its failed or invalid staged edit', async () => {
+  const a = await setup()
+  const request = await quickEdit(a.controller, '19:00')
+  const editor = structuredClone(a.controller.state.editor)
+  editor.salary.day = 24
+  a.controller.edit(editor)
+  value(await a.controller.flush())
+  rejected(await a.controller.saveOvertime(request), 'UNAVAILABLE')
+  assert.equal(a.controller.state.editor.salary.day, 24)
+  assert.equal(value(a.runtime.readDraft()).dirty, true)
+  assert.equal(await a.controller.discard(), true)
+
+  rejected(await a.controller.saveOvertime({ ...request, input: '04:01' }), 'VALIDATION')
+  assert.equal(value(a.runtime.readDraft()).dirty, false)
+  a.fail()
+  rejected(await a.controller.saveOvertime(request), 'IO_DENIED')
+  assert.equal(a.controller.state.overtimePending, false)
+  assert.equal(value(a.runtime.readDraft()).expectedEndEdit, undefined)
+  assert.deepEqual(value(await a.api.config.read()).config.overtime.entries, [])
+  assert.equal(a.controller.state.notice, '')
+  a.restore()
+  value(await a.controller.saveOvertime(request))
+  assert.equal(value(await a.api.snapshot.read()).activeShift!.overtimeMinutes, 60)
+})
+
+test('quick overtime revision conflict never overwrites the externally saved configuration', async () => {
+  const a = await setup()
+  const request = await quickEdit(a.controller, '19:00')
+  const path = join(a.directory, 'settings.json')
+  const external = JSON.parse(await readFile(path, 'utf8')) as AppConfig
+  external.appearance.accent = 'coral'
+  external.revision++
+  await writeFile(path, JSON.stringify(external))
+  rejected(await a.controller.saveOvertime(request), 'REVISION_CONFLICT')
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), external)
+  assert.equal(value(a.runtime.readDraft()).expectedEndEdit, undefined)
+  assert.equal(a.controller.state.notice, '')
+})
+
+test('quick overtime rejects a changed shift between staging and saving, including rollover into a rest day', async () => {
+  const a = await setup()
+  const request = await quickEdit(a.controller, '20:00')
+  const stage = a.handlers.get(V2_CHANNELS['settingsDraft.setExpectedEnd'])!
+  a.handlers.set(V2_CHANNELS['settingsDraft.setExpectedEnd'], async (...args) => {
+    const result = await stage(...args)
+    value(a.ctx.clock.setInstant(Date.parse('2026-10-17T12:00:00Z')))
+    return result
+  })
+  rejected(await a.controller.saveOvertime(request), 'UNAVAILABLE')
+  assert.equal(value(a.runtime.readDraft()).expectedEndEdit, undefined)
+  rejected(await a.controller.readOvertime(), 'UNAVAILABLE')
+  assert.deepEqual(value(await a.api.config.read()).config.overtime.entries, [])
+})
+
+for (const fault of ['lost save reply', 'draft read unavailable'] as const) {
+  test(`quick overtime acknowledges one actual commit with ${fault}`, async () => {
+    const a = await setup()
+    value(await a.controller.saveOvertime(await quickEdit(a.controller, '19:00')))
+    const cancel = await quickEdit(a.controller, null)
+    const save = a.handlers.get(V2_CHANNELS['config.save'])!
+    let saves = 0
+    a.handlers.set(V2_CHANNELS['config.save'], async (...args) => {
+      const result = await save(...args)
+      saves++
+      if (fault === 'lost save reply') throw Error('transport interrupted after commit')
+      a.handlers.set(V2_CHANNELS['settingsDraft.read'], async () => { throw Error('draft read unavailable') })
+      return result
+    })
+    const revision = value(await a.controller.saveOvertime(cancel))
+    assert.equal(revision, cancel.expectedRevision + 1)
+    assert.equal(a.controller.state.session!.saved!.revision, revision)
+    assert.equal(a.controller.state.noticeKind, 'success')
+    assert.equal(a.controller.state.notice, '今天不加班，回去好好休息～')
+    assert.equal(saves, 1)
+    assert.equal(value(await a.api.snapshot.read()).activeShift!.overtimeMinutes, 0)
+  })
+}
+
+test('quick overtime keeps ownership until a failed draft can be removed before retry', async () => {
+  const a = await setup()
+  const request = await quickEdit(a.controller, '19:00')
+  const discard = a.handlers.get(V2_CHANNELS['settingsDraft.discard'])!
+  a.handlers.set(V2_CHANNELS['settingsDraft.discard'], async () => { throw Error('discard IPC unavailable') })
+  a.fail()
+  rejected(await a.controller.saveOvertime(request), 'UNAVAILABLE')
+  assert.equal(a.controller.state.overtimePending, true)
+  assert.equal(value(a.runtime.readDraft()).expectedEndEdit!.input, '19:00')
+  a.handlers.set(V2_CHANNELS['settingsDraft.discard'], discard)
+  a.restore()
+  value(await a.controller.saveOvertime({ ...request, input: '20:00' }))
+  assert.equal(a.controller.state.overtimePending, false)
+  assert.equal(value(await a.api.snapshot.read()).activeShift!.overtimeMinutes, 120)
 })
 test('history breaks survive unrelated save; cancel clears only current shift and failed write retains inputs',async()=>{
   const a=await setup(),edit=structuredClone(a.controller.state.editor);edit.schedule.breaks=[{startTime:'12:00',endTime:'13:00',startDayOffset:0,endDayOffset:0}];edit.overtime.entries=[{shiftDate:'2026-10-01',minutes:80},{shiftDate:'2026-10-14',minutes:120}];a.controller.edit(edit);assert.equal(await a.controller.save(),true);assert.equal(a.controller.state.expectedEndInput,'20:00')

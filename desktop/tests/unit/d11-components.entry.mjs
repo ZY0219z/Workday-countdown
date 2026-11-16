@@ -40,6 +40,7 @@ export function fixtures(){
     overnight:read('2026-10-16T00:01:00Z',c=>{c.schedule={...c.schedule,startTime:'22:00',endTime:'06:00',crossMidnight:true,breaks:[]}}),
     estimate:read('2027-01-04T12:00:00Z'),
     rollback:read('2026-10-15T15:00:00Z',c=>{c.overtime.entries=[{shiftDate:'2026-10-15',minutes:60}]}),
+    laterOvertime:read('2026-10-15T15:00:00Z',c=>{c.overtime.entries=[{shiftDate:'2026-10-15',minutes:120}]}),
     ambiguity:read('2026-10-15T12:00:00Z',c=>{c.salary.nonWorkingPolicy='delay';c.salary.day=31;c.schedule.workWeek=[1];c.calendar.overrides=Object.fromEntries(Array.from({length:110},(_,i)=>{const date=new Date(Date.UTC(2026,6,1+i)).toISOString().slice(0,10);return [date,'rest']}))})
   }}
 }

@@ -1,13 +1,20 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { DashboardSnapshot } from '../../../shared/contracts'
+import type { DashboardSnapshot, Result } from '../../../shared/contracts'
 import CountdownCard from '../components/CountdownCard.vue'
 import MetricCard from '../components/MetricCard.vue'
 import FishProgress from '../components/FishProgress.vue'
+import OvertimeControl from '../components/OvertimeControl.vue'
 import reef from '../assets/dashboard/reef.svg'
 import { fishCanAnimate } from '../ui/fish-progress'
 import { durationText, wallLabel, qualityText, affectedWarnings } from '../ui/dashboard-display'
-const props=withDefaults(defineProps<{snapshot:DashboardSnapshot|null;motionAllowed?:boolean}>(),{motionAllowed:false})
+import type { OvertimeEdit, OvertimeTarget } from '../ui/settings-controller'
+const props=withDefaults(defineProps<{
+  snapshot:DashboardSnapshot|null
+  motionAllowed?:boolean
+  overtime?:{ready:boolean;recovering:boolean;savedRevision:number;read:()=>Promise<Result<OvertimeTarget>>;save:(edit:OvertimeEdit)=>Promise<Result<number>>}
+}>(),{motionAllowed:false})
+const emit=defineEmits<{'overtime-dialog':[open:boolean]}>()
 const animated=computed(()=>fishCanAnimate(props.snapshot?.state,props.snapshot?.progress?.percent,props.motionAllowed))
 const target=computed(()=>{const s=props.snapshot;if(!s?.countdown)return null;const wall=wallLabel(s.countdown.targetAt,s.timeZoneId);return wall?{kind:s.countdown.target,...wall}:null})
 const salaryDescription=computed(()=>{const salary=props.snapshot?.salary;if(!salary)return '';return `${salary.days===0?'今天计划发薪 · ':''}${salary.actualDate}`})
@@ -18,6 +25,7 @@ const estimate=computed(()=>props.snapshot?.countdown?.quality.approximate?quali
   <section class="dashboard" aria-label="工作日仪表盘">
     <div class="we-surface dashboard-primary">
       <div class="dashboard-atmosphere" aria-hidden="true"><img :src="reef" alt="" /></div>
+      <OvertimeControl v-if="overtime" v-bind="overtime" :snapshot="snapshot" @dialog-change="emit('overtime-dialog',$event)" />
       <CountdownCard hero :state="snapshot?.state || 'incomplete'" :text="durationText(snapshot?.countdown?.seconds)" :target="target" :estimate="estimate" :warning="snapshot ? affectedWarnings(snapshot,'countdown') : '暂时无法计算，请查看设置。'" hint="摸鱼一小步，下班一大步" />
       <section class="dashboard-progress" aria-label="今日工作进度">
         <FishProgress :percent="snapshot?.progress?.percent??null" :animate="animated" />

@@ -4,7 +4,7 @@ import type { CalendarDatasetMetadata, DashboardSnapshot } from '../../shared/co
 import DashboardView from './views/DashboardView.vue'
 import SettingsView from './views/SettingsView.vue'
 import AppTitle from './components/AppTitle.vue'
-import { createSettingsController } from './ui/settings-controller'
+import { createSettingsController, OVERTIME_CANCEL_NOTICE, type OvertimeEdit } from './ui/settings-controller'
 import { useTheme } from './composables/useTheme'
 import { useWindowVisibility } from './composables/useWindowVisibility'
 import { useSnapshotFeed } from './composables/useSnapshotFeed'
@@ -12,6 +12,7 @@ import type { EditorSettings } from './ui/settings-editor'
 
 const api=window.workdayV2,host=ref<HTMLElement|null>(null),settingsOpen=ref(false),loading=ref(true),snapshot=shallowRef<DashboardSnapshot|null>(null),metadata=ref<CalendarDatasetMetadata[]>([])
 const dataBusy=ref(false)
+const overtimeDialog=ref(false), settingsOpening=ref(false)
 const composing=ref(false),quitting=ref(false)
 const validationAttempt=ref(0)
 const error=ref(''),confirmLeave=ref(false),quitAfterLeave=ref(false),dialogRef=ref<HTMLElement|null>(null),leaveOrigin=ref<HTMLElement|null>(null)
@@ -36,9 +37,11 @@ watch(settingsOpen,()=>{const toast=host.value?.querySelector('.app-toast');if(t
 const preferences=computed(()=>settingsOpen.value?state.value.editor.appearance:state.value.session?.saved?.appearance??state.value.editor.appearance)
 const reduceMotion=useTheme(host,preferences),windowVisible=useWindowVisibility(api.window)
 const syncing=computed(()=>state.value.pending>0||state.value.busy||dataBusy.value||loading.value||composing.value)
-const pending=computed(()=>syncing.value||state.value.unsynced)
+const pending=computed(()=>syncing.value||state.value.unsynced||state.value.overtimePending)
 const defaultPending=computed(()=>state.value.session?.defaultPersistence?.status==='pending')
 const canSave=computed(()=>!!state.value.session&&['missing','ready'].includes(state.value.session.configurationStatus??'unloaded'))
+const overtimeReady=computed(()=>!syncing.value&&!settingsOpening.value&&!quitting.value&&!state.value.unsynced&&!state.value.dirty&&
+  !!state.value.session?.saved&&state.value.session.configurationStatus==='ready'&&!defaultPending.value)
 const errorText=computed(()=>{if(error.value)return error.value;const value=state.value.error;if(!value)return ''
   if(value.code==='IO_DENIED')return '无法保存，目录不可写或文件被占用。旧配置和输入保留；请检查权限、关闭占用程序后重试。'
   if(value.code==='IO_BUSY')return '操作仍在处理中或文件被占用，请稍后重试；保存不会被强行中断。'
@@ -46,17 +49,37 @@ const errorText=computed(()=>{if(error.value)return error.value;const value=stat
   return value.code==='REVISION_CONFLICT'?'配置修订冲突（期望 '+value.expectedRevision+'，当前 '+value.actualRevision+'）。输入已保留，未覆盖；请比较来源后重新预览导入，或放弃并重开程序读取磁盘版本。':value.message
 })
 async function load(){const result=await controller.load();if(!result.ok){error.value='IPC 初始化失败，尚未读取 Main 草稿：'+result.error.message;return false}error.value='';const calendars=await api.calendar.readMetadata();if(calendars.ok)metadata.value=calendars.data;return true}
-async function refreshSnapshot(){const result=await api.snapshot.read();snapshot.value=result.ok?result.data:null}
-async function openSettings(){if(pending.value)return;error.value='';controller.clearNotice();const loaded=await controller.load();if(!loaded.ok)error.value='读取设置失败，输入保留：'+loaded.error.message;settingsOpen.value=true}
+async function refreshSnapshot(minRevision?:number){
+  const result=await api.snapshot.read()
+  if(minRevision===undefined){snapshot.value=result.ok?result.data:null;return}
+  if(result.ok&&result.data.configRevision>=minRevision&&result.data.sequence>=(snapshot.value?.sequence??0))snapshot.value=result.data
+}
+async function readOvertime(){
+  const result=await controller.readOvertime()
+  const revision=state.value.session?.saved?.revision??0
+  if(revision>(snapshot.value?.configRevision??0))await refreshSnapshot(revision)
+  return result
+}
+async function saveOvertime(edit:OvertimeEdit){
+  const result=await controller.saveOvertime(edit)
+  if(result.ok)await refreshSnapshot(result.data)
+  return result
+}
+async function openSettings(){
+  if(pending.value||overtimeDialog.value||settingsOpening.value)return
+  settingsOpening.value=true
+  try{error.value='';controller.clearNotice();const loaded=await controller.load();if(!loaded.ok)error.value='读取设置失败，输入保留：'+loaded.error.message;settingsOpen.value=true}
+  finally{settingsOpening.value=false}
+}
 let traySettingsRequested=false
 function openTraySettings(){
   if(!traySettingsRequested)return
   if(settingsOpen.value){traySettingsRequested=false;return}
-  if(pending.value||confirmLeave.value)return
+  if(pending.value||confirmLeave.value||overtimeDialog.value||settingsOpening.value)return
   traySettingsRequested=false;void openSettings()
 }
 const stopTraySettings=api.window.onOpenSettings?.(()=>{traySettingsRequested=true;openTraySettings()})
-watch([pending,settingsOpen,confirmLeave],openTraySettings)
+watch([pending,settingsOpen,confirmLeave,overtimeDialog,settingsOpening],openTraySettings)
 function edit(value:EditorSettings){error.value='';controller.edit(value)}
 async function saved(){if(composing.value){error.value='请先完成输入法组合输入，再保存设置。';return}error.value='';if(await controller.save()){await refreshSnapshot();settingsOpen.value=false}else validationAttempt.value++}
 async function leave(){controller.clearNotice();if(state.value.busy)return;if(composing.value){error.value='请先完成输入法组合输入，再离开设置。';return}error.value='';const synced=await controller.flush();if(!synced.ok){error.value='草稿同步失败，输入保留：'+synced.error.message;if(!state.value.dirty&&!state.value.unsynced)return}if(state.value.dirty||state.value.unsynced){quitAfterLeave.value=false;leaveOrigin.value=document.activeElement as HTMLElement;confirmLeave.value=true;await nextTick();dialogRef.value?.querySelector<HTMLButtonElement>('button')?.focus()}else settingsOpen.value=false}
@@ -110,11 +133,13 @@ onBeforeUnmount(()=>{stopTraySettings?.();controller.dispose();void api.snapshot
           <SettingsView :expected-end="state.expectedEnd" :expected-end-input="state.expectedEndInput" :quit-disabled="syncing||quitting||defaultPending" :model="state.editor" :issues="state.issues" :busy="state.busy||dataBusy||defaultPending" :dirty="state.dirty||state.pending>0" :initialized="!!state.session?.saved" :default-unpersisted="!!state.session?.defaultPersistence" :session-ready="!!state.session" :validation-attempt="validationAttempt" :can-save="canSave" :metadata="metadata" :api="api" @expected-end="value=>{error='';controller.editExpectedEnd(value)}" @change="edit" @save="saved" @invalid="issue=>controller.invalidInput(issue)" @cancel="leave" @quit="quit" @imported="imported" @data-busy="value=>dataBusy=value" />
           <p v-if="state.session?.configurationStatus==='recoverable'" class="app-error">当前只读使用有效备份，请在安全恢复区预览并确认恢复；损坏源文件已保留。</p>
         </section>
-        <DashboardView v-else :snapshot="snapshot" :motion-allowed="windowVisible&&!reduceMotion" />
+        <DashboardView v-else :snapshot="snapshot" :motion-allowed="windowVisible&&!reduceMotion"
+          :overtime="{ready:overtimeReady,recovering:state.overtimePending,savedRevision:state.session?.saved?.revision??0,read:readOvertime,save:saveOvertime}"
+          @overtime-dialog="value=>overtimeDialog=value" />
       </main>
     </div>
     <Transition name="app-toast" @enter="positionToast">
-      <div v-if="state.notice && state.noticeKind" class="app-toast" :class="{'app-toast--error':state.noticeKind==='error'}" :role="state.noticeKind==='error'?'alert':'status'" aria-atomic="true">
+      <div v-if="state.notice && state.noticeKind" class="app-toast" :class="{'app-toast--error':state.noticeKind==='error','app-toast--overtime':state.notice===OVERTIME_CANCEL_NOTICE}" :role="state.noticeKind==='error'?'alert':'status'" aria-atomic="true">
         <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9" /><path v-if="state.noticeKind==='success'" d="m8 12 2.5 2.5L16 9" /><path v-else d="m9 9 6 6m0-6-6 6" /></svg>
         <span>{{ state.notice }}</span>
       </div>
@@ -122,3 +147,14 @@ onBeforeUnmount(()=>{stopTraySettings?.();controller.dispose();void api.snapshot
     <div v-if="confirmLeave" class="app-modal-backdrop"><section ref="dialogRef" class="we-surface app-modal" role="dialog" aria-modal="true" aria-labelledby="leave-title" @keydown="trap"><h2 id="leave-title">设置尚未保存</h2><p>{{ quitAfterLeave?'保存后退出，或明确放弃本次修改。':'保存后返回，或明确放弃本次修改。' }}</p><div class="app-actions"><button type="button" class="we-button we-button--primary" :disabled="state.busy" @click="chooseLeave('save')">保存</button><button type="button" class="we-button" :disabled="state.busy" @click="chooseLeave('discard')">放弃</button><button type="button" class="we-button" :disabled="state.busy" @click="chooseLeave('continue')">继续编辑</button></div><p v-if="errorText" role="alert">{{ errorText }}</p></section></div>
   </div>
 </template>
+<style scoped>
+.app-toast--overtime { max-width: min(310px, calc(100vw - 32px)); }
+@media (max-width: 639px) {
+  .app-toast--overtime {
+    top: auto !important; /* Override the measured top when a wide window is resized. */
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+}
+</style>
