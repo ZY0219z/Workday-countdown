@@ -7,8 +7,8 @@ import vue from '@vitejs/plugin-vue'
 import { chromium, expect } from '@playwright/test'
 import { fixtures } from '../../test-results/d11-ssr/components.mjs'
 
-test('DEV-05 keeps the glass progress readout centered without changing Dashboard proportions or motion', async () => {
-  const directory = resolve('test-results/v213-dev05-progress'), bundle = resolve(directory, 'bundle')
+test('DEV-05 moves the mascot over the centered readout without covering the countdown', async () => {
+  const directory = resolve('test-results/v213-dev05-mascot-jump'), bundle = resolve(directory, 'bundle')
   await mkdir(directory, { recursive: true })
   await build({ configFile: false, plugins: [vue()], logLevel: 'warn', define: { 'process.env.NODE_ENV': '"production"' }, build: {
     outDir: bundle, emptyOutDir: false,
@@ -17,7 +17,7 @@ test('DEV-05 keeps the glass progress readout centered without changing Dashboar
   const files = await readdir(bundle), css = files.find(file => file.endsWith('.css'))
   assert.ok(css)
   const browser = await chromium.launch({ channel: 'msedge', headless: true, chromiumSandbox: true })
-  const checks = [], errors = [], pondSamples = [], f = fixtures()
+  const checks = [], errors = [], pondSamples = [], trajectory = [], f = fixtures()
   let page
   try {
     page = await browser.newPage({ viewport: { width: 720, height: 580 } })
@@ -172,35 +172,43 @@ test('DEV-05 keeps the glass progress readout centered without changing Dashboar
       await expect(page.locator('.we-metric').last()).toContainText('123456789')
       checks.push(`${width}px: long natural-day value remains readable without horizontal overflow`)
     }
-    const progressCases = [0, 10, 44.2, 50, 57.2, 90, 100]
+    const progressCases = [0, 20, 40, 44.2, 50, 57.2, 70, 90, 100]
     const checkPond = async percent => {
       const geometry = await page.evaluate(() => {
         const rect = selector => document.querySelector(selector).getBoundingClientRect().toJSON()
         const readout = document.querySelector('.fish-readout')
-        const track = rect('.fish-track'), fish = rect('.fish-marker'), face = rect('.fish-bubble-face')
+        const track = rect('.fish-track'), fish = rect('.fish-marker'), face = rect('.fish-bubble-face'), mascot = rect('.fish-mascot')
+        const range = document.createRange()
+        range.selectNodeContents(readout.querySelector('.fish-readout-value'))
+        const number = range.getBoundingClientRect().toJSON()
         const x = (track.left + track.right) / 2, y = (track.top + track.bottom) / 2
         let overlapLayers = null
-        if (fish.left < x && x < fish.right) {
-          // Include the decorative readout in the hit stack to inspect paint order at the overlap.
+        const left = Math.max(mascot.left, face.left), right = Math.min(mascot.right, face.right)
+        const top = Math.max(mascot.top, face.top), bottom = Math.min(mascot.bottom, face.bottom)
+        if (right - left > 2 && bottom - top > 2) {
+          // Include the decorative readout in hit testing at the overlap.
           readout.style.pointerEvents = 'auto'
-          const stack = document.elementsFromPoint(x, y)
+          const stack = document.elementsFromPoint((left+right)/2, (top+bottom)/2)
           readout.style.removeProperty('pointer-events')
-          overlapLayers = ['.fish-readout-value', '.fish-marker', '.fish-water'].map(selector => stack.indexOf(document.querySelector(selector)))
+          overlapLayers = ['.fish-readout-value', '.fish-mascot', '.fish-bubble-face'].map(selector => stack.indexOf(document.querySelector(selector)))
         }
         return {
-          track, fish, face, overlapLayers, fill:rect('.fish-fill'), water:rect('.fish-water'), surface:rect('.fish-surface--front'),
+          track, fish, face, mascot, number, overlapLayers, fill:rect('.fish-fill'), water:rect('.fish-water'),surface:rect('.fish-surface--front'),
+          countdown:rect('.we-countdown'), card:rect('.dashboard-primary'), rise:y-(fish.top+fish.bottom)/2,
+          scale:mascot.width/fish.width,
           inner:document.querySelector('.fish-water').clientWidth, label:readout.getBoundingClientRect().toJSON(),
           drops:[...readout.querySelectorAll('.fish-bubble-drops')].map(drop=>drop.getBoundingClientRect().toJSON()),
           offsetX:(face.left+face.right)/2-x, offsetY:(face.top+face.bottom)/2-y,
           opacity:Number(getComputedStyle(readout).opacity), animations:readout.getAnimations().length
         }
       })
-      const {track,fill,fish,water,surface,inner,label,face,drops,offsetX,offsetY,overlapLayers}=geometry
+      const {track,fill,fish,water,surface,inner,label,face,mascot,number,countdown,card,rise,drops,offsetX,offsetY,overlapLayers}=geometry
       assert.ok(Math.abs(fill.width-inner*percent/100)<1,'fill retains the real percentage')
       assert.ok(Math.abs(fish.left-track.left-(track.width-fish.width)*percent/100)<1,'mascot retains the real progress position')
       assert.ok(fish.left>=water.left&&fish.right<=water.right)
-      assert.ok(Math.abs(fish.y+fish.height/2-water.y-water.height/2)<1,'mascot remains vertically centred')
-      assert.ok(fish.top>=water.top&&fish.bottom<=water.bottom,'complete GIF bounds fit inside the smaller tank')
+      assert.ok(Math.abs((mascot.left+mascot.right-fish.left-fish.right)/2)<1,'scaling keeps the original horizontal center')
+      assert.ok(mascot.top>=countdown.bottom&&mascot.bottom<=card.bottom,'mascot clears the countdown and stays within the card')
+      if ([0,90,100].includes(percent)) assert.ok(Math.abs(rise)<1,'mascot swims at its original height away from the readout')
       assert.equal(water.height,60);assert.equal(track.height,60);assert.equal(water.top,track.top)
       assert.ok(Math.abs(offsetX)<=1&&Math.abs(offsetY)<=1,`bubble center deviates from track by (${offsetX}, ${offsetY}) at ${percent}%`)
       assert.equal(geometry.opacity,1,'the readout stays fully visible')
@@ -211,10 +219,12 @@ test('DEV-05 keeps the glass progress readout centered without changing Dashboar
       assert.equal(drops.length,2)
       for(const drop of drops)assert.ok(drop.left>=label.left&&drop.right<=label.right&&drop.top>=label.top&&drop.bottom<=label.bottom,'all drops fit in the measured footprint')
       assert.ok(drops[0].right<=face.left&&drops[1].left>=face.right,'drops stay outside the reading circle')
-      if(percent===50)assert.ok(overlapLayers,'the mascot crosses under the readout')
-      if(overlapLayers){
-        const [valueIndex, fishIndex, waterIndex] = overlapLayers
-        assert.ok(valueIndex>=0&&valueIndex<fishIndex&&fishIndex<waterIndex,'percentage text stays in front of the mascot and water')
+      if (percent===50) {
+        assert.ok(rise>15&&mascot.top<face.top&&mascot.bottom<=number.top,'the lifted mascot is above the number at the midpoint')
+        if (overlapLayers) {
+          const [valueIndex, fishIndex, faceIndex] = overlapLayers
+          assert.ok(valueIndex>=0&&valueIndex<fishIndex&&fishIndex<faceIndex,'the number stays in front, with the mascot visible above the glass fill')
+        }
       }
       assert.ok(Math.abs(surface.width-2*track.width)<1,'wave tiles do not shrink with the fill')
       const readout=page.locator('.fish-readout')
@@ -238,11 +248,31 @@ test('DEV-05 keeps the glass progress readout centered without changing Dashboar
       for (const percent of progressCases) {
         const snapshot = structuredClone(f.snapshots.working); snapshot.progress.percent = percent
         await set({ snapshot }); await fits()
-        const {offsetX,offsetY,overlapLayers}=await checkPond(percent)
-        pondSamples.push({width,percent,offsetX,offsetY,overlapLayers})
+        const {offsetX,offsetY,rise,scale,mascot,countdown,overlapLayers}=await checkPond(percent)
+        pondSamples.push({width,percent,offsetX,offsetY,rise,scale,countdownGap:mascot.top-countdown.bottom,overlapLayers})
         await page.screenshot({ path: resolve(directory, `pond-${width}-${percent}.png`), fullPage: true })
       }
-      checks.push(`${width}px / ${progressCases.join(',')}%: fixed bubble center, original fill and mascot position, text above overlapping mascot, bounded overhang, full-scale waves`)
+      const samples = await page.evaluate(async snapshot => {
+        const track = document.querySelector('.fish-track')
+        const fish = document.querySelector('.fish-marker')
+        const mascot = document.querySelector('.fish-mascot')
+        const countdown = document.querySelector('.we-countdown')
+        const samples = []
+        for (let percent=15;percent<=85;percent++) {
+          await window.__dashboard({snapshot:{...snapshot,progress:{...snapshot.progress,percent}},motionAllowed:false,reduced:true})
+          const tank = track.getBoundingClientRect(), marker = fish.getBoundingClientRect()
+          samples.push({percent,rise:(tank.top+tank.bottom-marker.top-marker.bottom)/2,
+            countdownGap:mascot.getBoundingClientRect().top-countdown.getBoundingClientRect().bottom})
+        }
+        return samples
+      }, f.snapshots.working)
+      const steps = samples.slice(1).map(({percent,rise},i)=>({percent,step:rise-samples[i].rise}))
+      const maxStep = Math.max(...steps.map(({step})=>Math.abs(step)))
+      assert.ok(maxStep<4,`each 1% change has less than 4px vertical travel at ${width}px, got ${maxStep}`)
+      assert.ok(steps.every(({percent,step})=>percent<=50?step>=-.05:step<=.05),'trajectory rises to the midpoint and descends without reversals')
+      assert.ok(samples.every(({countdownGap})=>countdownGap>=0),'the mascot clears countdown text across the whole trajectory')
+      trajectory.push({width,maxStep,samples})
+      checks.push(`${width}px / ${progressCases.join(',')}%: fixed bubble, original horizontal and fill geometry, and continuous jump clear of countdown copy`)
     }
     await page.setViewportSize({ width: 720, height: 580 })
     const flow=structuredClone(f.snapshots.pond);flow.progress.percent=50
@@ -296,8 +326,12 @@ test('DEV-05 keeps the glass progress readout centered without changing Dashboar
       assert.deepEqual(await fixedReadout.boundingBox(),fixedBounds,'the same readout stays in place during crossings and progress jumps')
     }
     await page.setViewportSize({width:720,height:580});await set({snapshot:moving,motionAllowed:true,reduced:false});await checkPond(50)
-    assert.equal(await page.locator('.fish-marker').evaluate(element=>getComputedStyle(element).transitionDuration),'0s') // No delayed position interpolation through the readout.
-    checks.push('central crossing with motion enabled: one visible readout stays fixed through nearby values, progress jumps and resize')
+    assert.equal(await page.locator('.fish-marker').evaluate(element=>getComputedStyle(element).transitionDuration),'0s')
+    await page.emulateMedia({reducedMotion:'reduce'})
+    await set({snapshot:moving,motionAllowed:false,reduced:true});await checkPond(50)
+    await expect(page.locator('.fish-mascot')).toHaveCSS('animation-name','none')
+    await page.emulateMedia({reducedMotion:'no-preference'})
+    checks.push('midpoint remains clear with motion enabled or reduced; the same readout stays fixed through nearby values, progress jumps and resize')
     for (const state of ['working', 'overtime', 'beforeWork', 'break', 'finished', 'rest']) {
       await set({ snapshot: f.snapshots[state], reduced: false, motionAllowed: true })
       await expect(page.locator('.moyu-animated')).toHaveCount(['working', 'overtime'].includes(state) ? 1 : 0)
@@ -426,7 +460,7 @@ test('DEV-05 keeps the glass progress readout centered without changing Dashboar
     await page.screenshot({path:resolve(directory,'bubble-50-360.png'),fullPage:true})
 
     checks.push('real-engine sample with reduced-motion still capture; DPR 1.5 at 480 CSS pixels, no horizontal clipping (Windows DPI still requires manual acceptance)')
-    checks.push(`DPR 1.5 / ${progressCases.join(',')}%: centered bubble above the mascot and original fill`)
+    checks.push(`DPR 1.5 / ${progressCases.join(',')}%: fixed bubble, mascot clears the countdown, and original fill`)
     if(process.env.UI16R_BEFORE_IMAGE){
       const actual=await readFile(resolve(directory,'dashboard-bubble.png')),before=await readFile(resolve(process.env.UI16R_BEFORE_IMAGE))
       await page.setViewportSize({width:1536,height:700})
@@ -438,7 +472,7 @@ test('DEV-05 keeps the glass progress readout centered without changing Dashboar
     if (page) await page.screenshot({ path: resolve(directory, 'failure.png'), fullPage: true }).catch(() => {})
     throw error
   } finally {
-    await writeFile(resolve(directory, 'checks.json'), JSON.stringify({ headless: true, pondSamples, checks, errors }, null, 2))
+    await writeFile(resolve(directory, 'checks.json'), JSON.stringify({ headless: true, pondSamples, trajectory, checks, errors }, null, 2))
     await browser.close()
   }
 })

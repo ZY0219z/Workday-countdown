@@ -3,20 +3,50 @@ import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { fishPosition, progressRatio } from '../ui/fish-progress'
 import MoyuIllustration from './MoyuIllustration.vue'
 const props=defineProps<{percent:number|null;animate:boolean}>()
-const track=ref<HTMLElement|null>(null),fish=ref<HTMLElement|null>(null)
+const track=ref<HTMLElement|null>(null),fish=ref<HTMLElement|null>(null),face=ref<HTMLElement|null>(null)
 const trackWidth=ref(0),fishWidth=ref(52)
+const jumpSpace=ref({fishHeight:0,faceWidth:0,faceHeight:0,above:0,textClearance:0})
 const ratio=computed(()=>progressRatio(props.percent))
 const x=computed(()=>fishPosition(props.percent,trackWidth.value,fishWidth.value)??0)
+const jump=computed(()=>{
+  const {fishHeight,faceWidth,faceHeight,above,textClearance}=jumpSpace.value
+  if(!fishHeight||!faceWidth)return {rise:0,scale:1}
+  const reach=(fishWidth.value+faceWidth)/2+Math.min(fishWidth.value,(trackWidth.value-fishWidth.value)/10)
+  const distance=Math.abs(x.value+fishWidth.value/2-trackWidth.value/2)
+  const t=Math.min(1,distance/reach)
+  const ease=t*t*(3-2*t)
+  const heightRatio=1-ease*ease
+  // Keep the glass rim and number visible even when the space above the glass is shallow.
+  const peakScale=Math.min(1,Math.max(.4,(above-textClearance)/fishHeight))
+  const halfHeight=fishHeight*peakScale/2
+  const peakRise=Math.max(0,Math.min(above-halfHeight,faceHeight/2+halfHeight+2))
+  return {rise:peakRise*heightRatio,scale:1-(1-peakScale)*heightRatio}
+})
 // Two identical 600-unit tiles: moving a full tile right makes the loop endpoints identical.
 const wave='M0 12 C50 6 100 6 150 12 S250 18 300 12 S400 6 450 12 S550 18 600 12 S700 6 750 12 S850 18 900 12 S1000 6 1050 12 S1150 18 1200 12'
 let observer:ResizeObserver|undefined,stopObserving:(()=>void)|undefined
 onMounted(()=>{
+  const card=()=>track.value?.closest('.dashboard-primary')
+  const countdown=()=>card()?.querySelector('.we-countdown')
   const measure=()=>{
     trackWidth.value=track.value?.clientWidth??0
     fishWidth.value=fish.value?.offsetWidth??52
+    const water=track.value?.getBoundingClientRect()
+    const copy=countdown()?.getBoundingClientRect()
+    const text=face.value?.parentElement?.querySelector('.fish-readout-value')
+    jumpSpace.value={
+      fishHeight:fish.value?.offsetHeight??0,faceWidth:face.value?.offsetWidth??0,faceHeight:face.value?.offsetHeight??0,
+      // Leave room for the existing 1.5px bob and the hint or warning at the bottom of the countdown.
+      above:water&&copy?water.top+water.height/2-copy.bottom-3:0,
+      textClearance:text?parseFloat(getComputedStyle(text).lineHeight)/2+4:0
+    }
   }
   observer=new ResizeObserver(measure)
-  stopObserving=watch([track,fish],()=>{observer!.disconnect();for(const element of [track.value,fish.value])if(element)observer!.observe(element);measure()},{immediate:true,flush:'post'})
+  stopObserving=watch([track,fish,face],()=>{
+    observer!.disconnect()
+    for(const element of [track.value,fish.value,face.value,card(),countdown()])if(element)observer!.observe(element)
+    measure()
+  },{immediate:true,flush:'post'})
 })
 onBeforeUnmount(()=>{stopObserving?.();observer?.disconnect()})
 </script>
@@ -30,9 +60,9 @@ onBeforeUnmount(()=>{stopObserving?.();observer?.disconnect()})
           <svg class="fish-bubbles" viewBox="0 0 600 52" preserveAspectRatio="none"><circle cx="42" cy="30" r="2.5" /><circle cx="154" cy="20" r="1.6" /><circle cx="278" cy="32" r="3" /><circle cx="405" cy="33" r="2" /><circle cx="520" cy="23" r="2" /></svg>
         </div>
       </div>
-      <span ref="fish" class="fish-marker" :style="{transform:`translateX(${x}px)`}" aria-hidden="true"><span class="fish-mascot" :class="{'fish-mascot--floating':animate}"><MoyuIllustration :playing="animate" /></span></span>
+      <span ref="fish" class="fish-marker" :style="{transform:`translate(${x}px,${-jump.rise}px)`}" aria-hidden="true"><span class="fish-mascot" :class="{'fish-mascot--floating':animate}" :style="{scale:jump.scale}"><MoyuIllustration :playing="animate" /></span></span>
       <span class="fish-readout" aria-hidden="true">
-        <span class="fish-bubble-face"></span>
+        <span ref="face" class="fish-bubble-face"></span>
         <svg class="fish-bubble-glass" viewBox="0 0 100 68" aria-hidden="true">
           <circle class="fish-bubble-rim" cx="50" cy="34" r="32.5" />
           <circle class="fish-bubble-inner" cx="50" cy="34" r="30.5" />
@@ -63,9 +93,9 @@ onBeforeUnmount(()=>{stopObserving?.();observer?.disconnect()})
 .fish-track--flowing .fish-surface{animation-play-state:running;}
 .fish-bubbles{position:absolute;top:18px;left:0;width:100cqw;height:32px;fill:color-mix(in srgb,var(--we-surface) 12%,transparent);stroke:color-mix(in srgb,var(--we-surface) 45%,transparent);stroke-width:1;}
 .fish-marker{position:absolute;top:50%;left:0;translate:0 -50%;display:block;width:52px;max-width:100%;aspect-ratio:226/217;z-index:2;}
-.fish-readout{position:absolute;top:50%;left:50%;translate:-50% -50%;pointer-events:none;z-index:3;width:100px;height:68px;color:var(--we-clock,var(--we-text));font:700 16px/1 var(--we-font-numeric);font-variant-numeric:tabular-nums;white-space:nowrap;--bubble-edge:color-mix(in srgb,var(--we-water-top,var(--we-accent)) 78%,var(--fish-water-color));--bubble-light:color-mix(in srgb,var(--we-surface) 92%,white);}
-.fish-bubble-face{position:absolute;inset:0 16px;border-radius:50%;background:radial-gradient(ellipse at 33% 24%,color-mix(in srgb,var(--bubble-light) 92%,transparent),transparent 58%),linear-gradient(145deg,color-mix(in srgb,var(--we-water-top,var(--we-accent-soft)) 32%,var(--we-surface)),color-mix(in srgb,var(--we-water-top,var(--we-accent-soft)) 70%,transparent));box-shadow:inset -4px -5px 9px color-mix(in srgb,var(--bubble-edge) 30%,transparent),0 2px 5px color-mix(in srgb,var(--fish-water-color) 20%,transparent);}
-.fish-bubble-glass{position:absolute;inset:0;display:block;width:100%;height:100%;fill:none;stroke-linecap:round;stroke-linejoin:round;}
+.fish-readout{position:absolute;inset:0;margin:auto;pointer-events:none;width:100px;height:68px;color:var(--we-clock,var(--we-text));font:700 16px/1 var(--we-font-numeric);font-variant-numeric:tabular-nums;white-space:nowrap;--bubble-edge:color-mix(in srgb,var(--we-water-top,var(--we-accent)) 78%,var(--fish-water-color));--bubble-light:color-mix(in srgb,var(--we-surface) 92%,white);}
+.fish-bubble-face{position:absolute;z-index:1;inset:0 16px;border-radius:50%;background:radial-gradient(ellipse at 33% 24%,color-mix(in srgb,var(--bubble-light) 92%,transparent),transparent 58%),linear-gradient(145deg,color-mix(in srgb,var(--we-water-top,var(--we-accent-soft)) 32%,var(--we-surface)),color-mix(in srgb,var(--we-water-top,var(--we-accent-soft)) 70%,transparent));box-shadow:inset -4px -5px 9px color-mix(in srgb,var(--bubble-edge) 30%,transparent),0 2px 5px color-mix(in srgb,var(--fish-water-color) 20%,transparent);}
+.fish-bubble-glass{position:absolute;z-index:3;inset:0;display:block;width:100%;height:100%;fill:none;stroke-linecap:round;stroke-linejoin:round;}
 .fish-bubble-rim{stroke:var(--bubble-edge);stroke-width:2;}
 .fish-bubble-inner{stroke:var(--bubble-light);stroke-width:1.3;opacity:.9;}
 .fish-bubble-shade{stroke:var(--fish-water-color);stroke-width:1.4;opacity:.5;}
@@ -76,7 +106,7 @@ onBeforeUnmount(()=>{stopObserving?.();observer?.disconnect()})
 [data-accent="ocean"] .fish-bubble-drops{fill:#84d8f6;}
 [data-theme="dark"] .fish-readout{--bubble-edge:var(--we-water-top);}
 [data-theme="dark"] .fish-bubble-drops{fill:color-mix(in srgb,var(--we-water-top) 75%,var(--we-surface));}
-.fish-readout-value{position:absolute;inset:0 16px;display:grid;place-items:center;}
+.fish-readout-value{position:absolute;z-index:3;inset:0 16px;display:grid;place-items:center;}
 .fish-mascot{display:block;width:100%;}
 .fish-mascot :deep(img),.fish-mascot :deep(canvas),.fish-idle-mascot :deep(canvas){display:block;width:100%;height:auto;}
 .fish-mascot--floating{animation:fish-bob 3s ease-in-out infinite;}
