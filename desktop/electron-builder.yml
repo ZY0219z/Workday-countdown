@@ -9,6 +9,10 @@ files:
 asar: true
 afterPack: scripts/after-pack.cjs
 electronDist: node_modules/electron/dist
+electronLanguages:
+  - en-US
+  - zh-CN
+  - zh-TW
 npmRebuild: false
 win:
   icon: packaging/Workday-Escape-icon-approved.ico
