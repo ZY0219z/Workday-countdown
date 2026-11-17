@@ -111,10 +111,10 @@ test('UI-13 uses two gated water layers, one stable readout and no Hero unit lab
 })
 
 
-test('UI-14 removes endpoint layout and keeps one accessible progress with a single active capsule',async()=>{
+test('Dashboard keeps one accessible progress and one percentage readout',async()=>{
   const html=await render(f.snapshots.working)
   assert.ok(!html.includes('fish-endpoints'))
   assert.equal((html.match(/<progress /g)||[]).length,1)
-  assert.equal((html.match(/data-active="true"/g)||[]).length,1)
+  assert.equal((html.match(/class="fish-readout"/g)||[]).length,1)
   assert.ok(html.includes('aria-label="有效工作进度"'))
 })

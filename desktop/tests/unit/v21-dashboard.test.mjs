@@ -7,8 +7,8 @@ import vue from '@vitejs/plugin-vue'
 import { chromium, expect } from '@playwright/test'
 import { fixtures } from '../../test-results/d11-ssr/components.mjs'
 
-test('UI-16R glass bubble and drops preserve approved Dashboard proportions and motion', async () => {
-  const directory = resolve('test-results/v21-ui16r/dashboard'), bundle = resolve(directory, 'bundle')
+test('DEV-05 keeps the glass progress readout centered without changing Dashboard proportions or motion', async () => {
+  const directory = resolve('test-results/v213-dev05-progress'), bundle = resolve(directory, 'bundle')
   await mkdir(directory, { recursive: true })
   await build({ configFile: false, plugins: [vue()], logLevel: 'warn', define: { 'process.env.NODE_ENV': '"production"' }, build: {
     outDir: bundle, emptyOutDir: false,
@@ -17,7 +17,7 @@ test('UI-16R glass bubble and drops preserve approved Dashboard proportions and 
   const files = await readdir(bundle), css = files.find(file => file.endsWith('.css'))
   assert.ok(css)
   const browser = await chromium.launch({ channel: 'msedge', headless: true, chromiumSandbox: true })
-  const checks = [], errors = [], f = fixtures()
+  const checks = [], errors = [], pondSamples = [], f = fixtures()
   let page
   try {
     page = await browser.newPage({ viewport: { width: 720, height: 580 } })
@@ -78,9 +78,10 @@ test('UI-16R glass bubble and drops preserve approved Dashboard proportions and 
       const geometry = await page.evaluate(() => {
         const rect = selector => document.querySelector(selector).getBoundingClientRect()
         const parts = [...document.querySelectorAll('.we-time-part')].map(element => element.getBoundingClientRect())
-        const hero = rect('.we-countdown'), track = rect('.fish-track'), label = rect('.fish-readout-pill[data-active="true"]')
+        const hero = rect('.we-countdown'), track = rect('.fish-track'), label = rect('.fish-readout')
         return { timerCenter: (parts[0].left + parts.at(-1).right) / 2, heroCenter: hero.x + hero.width / 2,
-          trackCenter: track.x + track.width / 2, labelCenter: label.x + label.width / 2, labelWidth:label.width,fish:rect('.fish-marker').toJSON(),label:label.toJSON(),
+          offsetX: (label.left + label.right - track.left - track.right) / 2,
+          offsetY: (label.top + label.bottom - track.top - track.bottom) / 2,
           font: parseFloat(getComputedStyle(document.querySelector('.we-countdown-value')).fontSize), weight: getComputedStyle(document.querySelector('.we-countdown-value')).fontWeight, height: document.documentElement.scrollHeight }
       })
       await page.screenshot({ path: resolve(directory, `dashboard-${accent}-${theme}.png`), fullPage: true })
@@ -89,9 +90,7 @@ test('UI-16R glass bubble and drops preserve approved Dashboard proportions and 
       await expect(page.locator('.we-time-label')).toHaveCount(0)
       assert.notEqual(await page.locator('.we-time-group').first().evaluate(element => getComputedStyle(element).color), await page.locator('.we-time-group--seconds').evaluate(element => getComputedStyle(element).color))
       assert.ok(Math.abs(geometry.timerCenter - geometry.heroCenter) <= 1)
-      const centreLeft=geometry.trackCenter-geometry.labelWidth/2
-      if(geometry.fish.right+8<=centreLeft||geometry.fish.left-8>=centreLeft+geometry.labelWidth)assert.ok(Math.abs(geometry.labelCenter-geometry.trackCenter)<=1)
-      else assert.ok(geometry.fish.right+7.9<=geometry.label.left||geometry.fish.left-7.9>=geometry.label.right,'theme sample avoids the mascot including the new droplets')
+      assert.ok(Math.abs(geometry.offsetX)<=1&&Math.abs(geometry.offsetY)<=1,'theme sample stays centered in the track')
       assert.ok(geometry.height <= 580, JSON.stringify(geometry))
       checks.push(`${accent}/${theme}: approved clock hierarchy, tinted cards, accessible progress and default fit`)
     }
@@ -173,40 +172,55 @@ test('UI-16R glass bubble and drops preserve approved Dashboard proportions and 
       await expect(page.locator('.we-metric').last()).toContainText('123456789')
       checks.push(`${width}px: long natural-day value remains readable without horizontal overflow`)
     }
-    const progressCases = [0, 1, 19.6, 27.6, 50, 78, 87.2, 99.9, 100]
+    const progressCases = [0, 10, 44.2, 50, 57.2, 90, 100]
     const checkPond = async percent => {
       const geometry = await page.evaluate(() => {
         const rect = selector => document.querySelector(selector).getBoundingClientRect().toJSON()
-        const labels=[...document.querySelectorAll('.fish-readout-pill')].map(element=>({...element.getBoundingClientRect().toJSON(),opacity:Number(getComputedStyle(element).opacity),active:element.dataset.active==='true',face:element.querySelector('.fish-bubble-face').getBoundingClientRect().toJSON(),drops:[...element.querySelectorAll('.fish-bubble-drops')].map(drop=>drop.getBoundingClientRect().toJSON())}))
-        return {track:rect('.fish-track'),fill:rect('.fish-fill'),fish:rect('.fish-marker'),water:rect('.fish-water'),surface:rect('.fish-surface--front'),inner:document.querySelector('.fish-water').clientWidth,labels}
+        const readout = document.querySelector('.fish-readout')
+        const track = rect('.fish-track'), fish = rect('.fish-marker'), face = rect('.fish-bubble-face')
+        const x = (track.left + track.right) / 2, y = (track.top + track.bottom) / 2
+        let overlapLayers = null
+        if (fish.left < x && x < fish.right) {
+          // Include the decorative readout in the hit stack to inspect paint order at the overlap.
+          readout.style.pointerEvents = 'auto'
+          const stack = document.elementsFromPoint(x, y)
+          readout.style.removeProperty('pointer-events')
+          overlapLayers = ['.fish-readout-value', '.fish-marker', '.fish-water'].map(selector => stack.indexOf(document.querySelector(selector)))
+        }
+        return {
+          track, fish, face, overlapLayers, fill:rect('.fish-fill'), water:rect('.fish-water'), surface:rect('.fish-surface--front'),
+          inner:document.querySelector('.fish-water').clientWidth, label:readout.getBoundingClientRect().toJSON(),
+          drops:[...readout.querySelectorAll('.fish-bubble-drops')].map(drop=>drop.getBoundingClientRect().toJSON()),
+          offsetX:(face.left+face.right)/2-x, offsetY:(face.top+face.bottom)/2-y,
+          opacity:Number(getComputedStyle(readout).opacity), animations:readout.getAnimations().length
+        }
       })
-      const {track,fill,fish,water,surface,inner,labels}=geometry
+      const {track,fill,fish,water,surface,inner,label,face,drops,offsetX,offsetY,overlapLayers}=geometry
       assert.ok(Math.abs(fill.width-inner*percent/100)<1,'fill retains the real percentage')
       assert.ok(Math.abs(fish.left-track.left-(track.width-fish.width)*percent/100)<1,'mascot retains the real progress position')
       assert.ok(fish.left>=water.left&&fish.right<=water.right)
       assert.ok(Math.abs(fish.y+fish.height/2-water.y-water.height/2)<1,'mascot remains vertically centred')
       assert.ok(fish.top>=water.top&&fish.bottom<=water.bottom,'complete GIF bounds fit inside the smaller tank')
       assert.equal(water.height,60);assert.equal(track.height,60);assert.equal(water.top,track.top)
-      assert.equal(labels.filter(label=>label.active).length,1)
-      assert.ok(labels.reduce((sum,label)=>sum+label.opacity,0)>=.99,'percentage never disappears during a handoff')
-      for(const label of labels.filter(label=>label.opacity>.01||label.active)){
-        assert.ok(label.left>=water.left+1&&label.right<=water.right-1&&label.top>=water.top-4.1&&label.bottom<=water.bottom+4.1,'bubble stays horizontally inside the tank with at most 4px vertical overhang')
-        assert.ok(Math.abs(label.y+label.height/2-water.y-water.height/2)<1,'bubble remains vertically centred')
-        assert.equal(label.width,100,'measured footprint includes both side drops')
-        assert.equal(label.face.width,68);assert.equal(label.face.height,68,'glass body stays circular without increasing the component height')
-        assert.ok(Math.abs(label.face.x+label.face.width/2-label.x-label.width/2)<.1,'glass circle shares the readout centre')
-        assert.equal(label.drops.length,2)
-        for(const drop of label.drops)assert.ok(drop.left>=label.left&&drop.right<=label.right&&drop.top>=label.top&&drop.bottom<=label.bottom,'all drops fit in the measured footprint')
-        assert.ok(label.drops[0].right<=label.face.left&&label.drops[1].left>=label.face.right,'drops stay outside the reading circle')
-        assert.ok(fish.right+7.9<=label.left||fish.left-7.9>=label.right,'glass and both drops stay clear of the mascot')
-        const centre=water.x+water.width/2,centreLeft=centre-label.width/2
-        if(fish.right+9<=centreLeft||fish.left-9>=centreLeft+label.width)assert.ok(Math.abs(label.x+label.width/2-centre)<1,'safe normal position stays at exact centre')
-        if(Math.abs(label.x+label.width/2-centre)>1)assert.ok(Math.abs(label.left-fish.right-8)<1||Math.abs(fish.left-label.right-8)<1,'avoidance uses the nearest clear position beside the mascot')
+      assert.ok(Math.abs(offsetX)<=1&&Math.abs(offsetY)<=1,`bubble center deviates from track by (${offsetX}, ${offsetY}) at ${percent}%`)
+      assert.equal(geometry.opacity,1,'the readout stays fully visible')
+      assert.equal(geometry.animations,0,'progress updates do not animate the readout')
+      assert.ok(label.left>=water.left+1&&label.right<=water.right-1&&label.top>=water.top-4.1&&label.bottom<=water.bottom+4.1,'bubble stays horizontally inside the tank with at most 4px vertical overhang')
+      assert.equal(label.width,100,'measured footprint includes both side drops')
+      assert.equal(face.width,68);assert.equal(face.height,68,'glass body stays circular without increasing the component height')
+      assert.equal(drops.length,2)
+      for(const drop of drops)assert.ok(drop.left>=label.left&&drop.right<=label.right&&drop.top>=label.top&&drop.bottom<=label.bottom,'all drops fit in the measured footprint')
+      assert.ok(drops[0].right<=face.left&&drops[1].left>=face.right,'drops stay outside the reading circle')
+      if(percent===50)assert.ok(overlapLayers,'the mascot crosses under the readout')
+      if(overlapLayers){
+        const [valueIndex, fishIndex, waterIndex] = overlapLayers
+        assert.ok(valueIndex>=0&&valueIndex<fishIndex&&fishIndex<waterIndex,'percentage text stays in front of the mascot and water')
       }
       assert.ok(Math.abs(surface.width-2*track.width)<1,'wave tiles do not shrink with the fill')
-      const active=page.locator('.fish-readout-pill[data-active="true"]')
-      await expect(active).toHaveText(`${percent}%`)
-      assert.ok(await active.evaluate(element=>{
+      const readout=page.locator('.fish-readout')
+      await expect(readout).toHaveCount(1)
+      await expect(readout).toHaveText(`${percent}%`)
+      assert.ok(await readout.evaluate(element=>{
         const box=element.querySelector('.fish-bubble-face').getBoundingClientRect(),range=document.createRange();range.selectNodeContents(element.querySelector('.fish-readout-value'))
         const text=range.getBoundingClientRect()
         return text.width<=box.width-10&&Math.abs(text.x+text.width/2-box.x-box.width/2)<1&&Math.abs(text.y+text.height/2-box.y-box.height/2)<3
@@ -223,10 +237,12 @@ test('UI-16R glass bubble and drops preserve approved Dashboard proportions and 
       await page.setViewportSize({ width, height: 580 })
       for (const percent of progressCases) {
         const snapshot = structuredClone(f.snapshots.working); snapshot.progress.percent = percent
-        await set({ snapshot }); await fits(); await checkPond(percent)
+        await set({ snapshot }); await fits()
+        const {offsetX,offsetY,overlapLayers}=await checkPond(percent)
+        pondSamples.push({width,percent,offsetX,offsetY,overlapLayers})
         await page.screenshot({ path: resolve(directory, `pond-${width}-${percent}.png`), fullPage: true })
       }
-      checks.push(`${width}px / 0,1,19.6,27.6,50,78,87.2,99.9,100%: true fill/position, vertical centre, bounded mascot, circular bubble with bounded overhang and horizontal avoidance and no overlap, full-scale waves`)
+      checks.push(`${width}px / ${progressCases.join(',')}%: fixed bubble center, original fill and mascot position, text above overlapping mascot, bounded overhang, full-scale waves`)
     }
     await page.setViewportSize({ width: 720, height: 580 })
     const flow=structuredClone(f.snapshots.pond);flow.progress.percent=50
@@ -271,21 +287,17 @@ test('UI-16R glass bubble and drops preserve approved Dashboard proportions and 
     checks.push('real-time water frames change; paused pixels/time stay identical; resume retains phase; both repeated layers cross loop seam without a visible jump; fill and mascot position unchanged')
     await page.setViewportSize({width:360,height:580})
     const moving=structuredClone(f.snapshots.working)
-    moving.progress.percent=45;await set({snapshot:moving,motionAllowed:true,reduced:false})
-    moving.progress.percent=55;await set({snapshot:moving,motionAllowed:true,reduced:false})
-    for(const delay of [0,40,80,170]){
-      if(delay)await page.waitForTimeout(delay)
-      await checkPond(55)
-    }
-    const stableSide=await page.locator('.fish-readout-pill[data-active="true"]').evaluate(element=>element===element.parentElement.firstElementChild?'left':'right')
-    for(const percent of [49.9,50.1,49.8,50.2]){
+    moving.progress.percent=44.2;await set({snapshot:moving,motionAllowed:true,reduced:false})
+    const fixedReadout=await page.locator('.fish-readout').elementHandle()
+    const fixedBounds=await fixedReadout.boundingBox()
+    assert.ok(fixedBounds)
+    for(const percent of [49.9,50,50.1,57.2,100,0,50]){
       moving.progress.percent=percent;await set({snapshot:moving,motionAllowed:true,reduced:false});await checkPond(percent)
-      assert.equal(await page.locator('.fish-readout-pill[data-active="true"]').evaluate(element=>element===element.parentElement.firstElementChild?'left':'right'),stableSide,'small midpoint jitter must not flip reading sides')
+      assert.deepEqual(await fixedReadout.boundingBox(),fixedBounds,'the same readout stays in place during crossings and progress jumps')
     }
-    for(const percent of [100,0,50]){moving.progress.percent=percent;await set({snapshot:moving,motionAllowed:true,reduced:false});await checkPond(percent)}
     await page.setViewportSize({width:720,height:580});await set({snapshot:moving,motionAllowed:true,reduced:false});await checkPond(50)
     assert.equal(await page.locator('.fish-marker').evaluate(element=>getComputedStyle(element).transitionDuration),'0s') // No delayed position interpolation through the readout.
-    checks.push('central crossing: both handoff copies remain in-tank and clear of the mascot, combined visibility stays >=1, midpoint hysteresis prevents left/right jitter; progress jumps and resize stay synchronous')
+    checks.push('central crossing with motion enabled: one visible readout stays fixed through nearby values, progress jumps and resize')
     for (const state of ['working', 'overtime', 'beforeWork', 'break', 'finished', 'rest']) {
       await set({ snapshot: f.snapshots[state], reduced: false, motionAllowed: true })
       await expect(page.locator('.moyu-animated')).toHaveCount(['working', 'overtime'].includes(state) ? 1 : 0)
@@ -381,7 +393,7 @@ test('UI-16R glass bubble and drops preserve approved Dashboard proportions and 
     const desktopLayouts=layouts.filter(row=>row.width===720)
     assert.ok(desktopLayouts.every(row=>Math.abs(row.primary.height-desktopLayouts[0].primary.height)<.1),'a taller window must not stretch the primary card')
     await expect(page.locator('.app-title image,.app-title img,.app-title rect,.app-title foreignObject')).toHaveCount(0)
-    checks.push('UI-16R: approved title/primary/clock/cards retain geometry; 68px glass circle with two side splashes uses a measured 100px footprint; all artwork stays clear of the mascot without increasing component height; shift/overtime auxiliary line absent')
+    checks.push('UI-16R: approved title/primary/clock/cards retain geometry; the 68px glass circle and its two side splashes fit the original 100px footprint and component height; shift/overtime auxiliary line absent')
     await page.close()
     page = await browser.newPage({ viewport: { width: 480, height: 387 }, deviceScaleFactor: 1.5 })
     page.on('pageerror', error => errors.push(error.message))
@@ -407,14 +419,14 @@ test('UI-16R glass bubble and drops preserve approved Dashboard proportions and 
     const bubbleSample=structuredClone(reference);bubbleSample.progress.percent=87.2
     await set({snapshot:bubbleSample});await checkPond(87.2)
     await page.screenshot({path:resolve(directory,'dashboard-bubble.png'),fullPage:true})
-    await page.locator('.fish-readout-pill[data-active="true"]').screenshot({path:resolve(directory,'bubble-zoom-dpr150.png')})
-    await writeFile(resolve(directory,'bubble-geometry.json'),JSON.stringify(await page.locator('.fish-readout-pill[data-active="true"]').boundingBox()))
+    await page.locator('.fish-readout').screenshot({path:resolve(directory,'bubble-zoom-dpr150.png')})
+    await writeFile(resolve(directory,'bubble-geometry.json'),JSON.stringify(await page.locator('.fish-readout').boundingBox()))
     await page.setViewportSize({width:360,height:580});bubbleSample.progress.percent=50
     await set({snapshot:bubbleSample});await checkPond(50)
     await page.screenshot({path:resolve(directory,'bubble-50-360.png'),fullPage:true})
 
     checks.push('real-engine sample with reduced-motion still capture; DPR 1.5 at 480 CSS pixels, no horizontal clipping (Windows DPI still requires manual acceptance)')
-    checks.push('DPR 1.5 / 0,1,19.6,27.6,50,78,87.2,99.9,100%: mascot centre and no overlap')
+    checks.push(`DPR 1.5 / ${progressCases.join(',')}%: centered bubble above the mascot and original fill`)
     if(process.env.UI16R_BEFORE_IMAGE){
       const actual=await readFile(resolve(directory,'dashboard-bubble.png')),before=await readFile(resolve(process.env.UI16R_BEFORE_IMAGE))
       await page.setViewportSize({width:1536,height:700})
@@ -426,7 +438,7 @@ test('UI-16R glass bubble and drops preserve approved Dashboard proportions and 
     if (page) await page.screenshot({ path: resolve(directory, 'failure.png'), fullPage: true }).catch(() => {})
     throw error
   } finally {
-    await writeFile(resolve(directory, 'checks.json'), JSON.stringify({ headless: true, checks, errors }, null, 2))
+    await writeFile(resolve(directory, 'checks.json'), JSON.stringify({ headless: true, pondSamples, checks, errors }, null, 2))
     await browser.close()
   }
 })
