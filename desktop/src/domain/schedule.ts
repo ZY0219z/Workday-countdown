@@ -1,5 +1,5 @@
 import type { BusinessState, ContractError, DashboardSnapshot, LocalDate, LocalTime, Result, ScheduleConfig, ShiftSnapshot, SnapshotWarning } from '../shared/contracts'
-import { editableValidators, dateFormat } from '../shared/config-schema'
+import { editableValidators, dateFormat, MAX_OVERTIME_MINUTES } from '../shared/config-schema'
 import { issue, success, v, validateStructure, validationFailure } from '../shared/validation'
 import { addDays, fromDayOrdinal, MAX_DAY_ORDINAL, normalizeLocalDate, toDayOrdinal } from './local-date'
 import { MILLISECONDS_PER_DAY, MILLISECONDS_PER_MINUTE, minutesSinceMidnight, parseLocalTime, validateInstant, type Instant } from './local-time'
@@ -9,9 +9,9 @@ import type { LocalTimeResolution, TimeZoneAdapter } from './time-zone'
 import { calendarWarnings, exactDateQuality } from './calculation-quality'
 import { setOvertimeForShift, validateOvertime, type OvertimeConfig } from './overtime'
 
-export const MAX_SHIFT_MILLISECONDS = 34 * 60 * MILLISECONDS_PER_MINUTE
-// With D03 offsets <24h, 34 elapsed hours can cross at most four Civil labels.
-export const NEIGHBOUR_RADIUS = 4
+export const MAX_SHIFT_MILLISECONDS = MILLISECONDS_PER_DAY + MAX_OVERTIME_MINUTES * MILLISECONDS_PER_MINUTE
+// Include the full shift plus both endpoint offsets when inspecting civil dates.
+export const NEIGHBOUR_RADIUS = Math.ceil((MAX_SHIFT_MILLISECONDS + 2 * MILLISECONDS_PER_DAY) / MILLISECONDS_PER_DAY)
 export interface ScheduleContext { calendar: Calendar; timeZoneId: string; zones: TimeZoneAdapter }
 export interface TimeInterval { startsAt: Instant; endsAt: Instant }
 export interface ResolvedShift extends ShiftSnapshot {
@@ -108,7 +108,8 @@ function session(scheduleInput: unknown, overtimeInput: unknown, context: Schedu
       const first = boundary(date.data, config.startTime)
       if (!first.ok) return first
       const starts = first.data.kind === 'unique' ? [first.data.instant] : first.data.candidates
-      if (starts.length && (Math.min(...starts) >= filter.end || Math.max(...starts) + MAX_SHIFT_MILLISECONDS <= filter.start)) return success({ status: 'irrelevant' })
+      const maximumDuration = MILLISECONDS_PER_DAY + (records.get(date.data) ?? 0) * MILLISECONDS_PER_MINUTE
+      if (starts.length && (Math.min(...starts) >= filter.end || Math.max(...starts) + maximumDuration <= filter.start)) return success({ status: 'irrelevant' })
     }
     const endDate = addDays(date.data, config.crossMidnight ? 1 : 0)
     if (!endDate.ok) return endDate
@@ -206,7 +207,7 @@ export function summarizeResolvedShift(shift:ResolvedShift,instant:Instant,timeZ
 function mayAffect(pending: PendingShift, start: number, end: number): boolean {
   if (pending.possibleEnds.length && Math.max(...pending.possibleEnds) <= start) return false
   if (pending.possibleStarts.length && Math.min(...pending.possibleStarts) >= end) return false
-  if (!pending.possibleEnds.length && pending.possibleStarts.length && Math.max(...pending.possibleStarts) + MAX_SHIFT_MILLISECONDS <= start) return false
+  if (!pending.possibleEnds.length && pending.possibleStarts.length && Math.max(...pending.possibleStarts) + MILLISECONDS_PER_DAY + pending.overtimeMinutes * MILLISECONDS_PER_MINUTE <= start) return false
   return true
 }
 export function calculateScheduleAt(schedule: unknown, overtime: unknown, instant: Instant, context: ScheduleContext): Result<ScheduleSelection> {
@@ -265,7 +266,7 @@ function checkConflicts(created: ScheduleSession, shiftDate: LocalDate): Result<
       const neighbour = created.build(date, { start: target.data.shift.startsAt, end: target.data.shift.finalEndsAt })
       if (!neighbour.ok) return neighbour
       if (neighbour.data.status === 'ready') {
-        if (target.data.shift.startsAt < neighbour.data.shift.finalEndsAt && neighbour.data.shift.startsAt < target.data.shift.finalEndsAt) return invalid('$.shiftDate', `候选班次与${date}班次重叠，原数据保留。`, 'DUPLICATE')
+        if (target.data.shift.startsAt < neighbour.data.shift.finalEndsAt && neighbour.data.shift.startsAt < target.data.shift.finalEndsAt) return invalid('$.shiftDate', '加班时间与相邻工作班次重叠，请重新选择。', 'DUPLICATE')
       } else if ((neighbour.data.status === 'ambiguous' || neighbour.data.status === 'invalid') && mayAffect(neighbour.data, target.data.shift.startsAt, target.data.shift.finalEndsAt)) {
         return neighbour.data.status === 'invalid' ? { ok: false, error: neighbour.data.error } : invalid('$.shiftDate', '邻班边界存在DST歧义，无法确认无冲突。', 'FORMAT')
       }

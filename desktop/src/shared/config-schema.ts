@@ -9,6 +9,9 @@ export const timeFormat = v.string(LOCAL_TIME_PATTERN, 5)
 export const timestampFormat = v.string(/^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d\.\d{3}Z$/, 24)
 export const revisionFormat = v.number(0, Number.MAX_SAFE_INTEGER)
 export const sha256Format = v.string(/^[a-f0-9]{64}$/, 64)
+// A selected HH:mm is less than one civil day after normal finish. D03 permits
+// offsets strictly inside +/-24h, so elapsed time is strictly less than 72h.
+export const MAX_OVERTIME_MINUTES = 3 * 24 * 60 - 1
 const year = v.number(1, 9999)
 const appVersion = v.string(/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?(?:\+[A-Za-z0-9.-]+)?$/, 128)
 export const calendarMetadataValidator = v.object<CalendarDatasetMetadata>({
@@ -41,7 +44,7 @@ export const editableValidators = {
   overtime: v.object<AppConfig['overtime']>({
     // Zero remains a valid stored setting. No filtering/purging of history here.
     entries: v.array(v.object<AppConfig['overtime']['entries'][number]>({
-      shiftDate: dateFormat, minutes: v.number(0, 600)
+      shiftDate: dateFormat, minutes: v.number(0, MAX_OVERTIME_MINUTES)
     }), 0, 100_000, entry => entry.shiftDate)
   }),
   calendar: v.object<AppConfig['calendar']>({

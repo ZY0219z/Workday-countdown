@@ -56,8 +56,8 @@ const cancelTimes = computed(() => {
   const { shiftDate, normalEnd, finalEnd } = context
   const crossesDate = normalEnd.date !== shiftDate || finalEnd.date !== shiftDate
   return {
-    normal: crossesDate ? `${normalEnd.date} ${normalEnd.time}` : normalEnd.time,
-    final: crossesDate ? `${finalEnd.date} ${finalEnd.time}` : finalEnd.time
+    date: crossesDate ? finalEnd.date : null,
+    time: finalEnd.time
   }
 })
 
@@ -245,10 +245,14 @@ async function checkAgain() {
           <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="m5 5 10 10M15 5 5 15" /></svg>
         </button>
       </header>
-      <p v-if="mode === 'cancel' && cancelTimes" :id="`${id}-prompt`">
-        当前计划加班至 {{ cancelTimes.final }}<br />
-        是否可以准点下班？
-      </p>
+      <div v-if="mode === 'cancel' && cancelTimes" :id="`${id}-prompt`" class="overtime-cancel">
+        <div class="overtime-cancel-card">
+          <svg class="overtime-cancel-moon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M10.9 2.2a9.8 9.8 0 1 0 10.9 13.3c-7.4 2.9-14.3-4.4-10.9-13.3ZM17.5 2l1.2 2.8L21.5 6l-2.8 1.2L17.5 10l-1.2-2.8L13.5 6l2.8-1.2ZM21.3 9l.8 1.7 1.7.8-1.7.8-.8 1.7-.8-1.7-1.7-.8 1.7-.8Z" /></svg>
+          <span class="overtime-cancel-label">当前计划加班至</span>
+          <span class="overtime-cancel-time"><span v-if="cancelTimes.date" class="overtime-cancel-date">{{ cancelTimes.date }} </span><strong>{{ cancelTimes.time }}</strong></span>
+        </div>
+        <div class="overtime-cancel-question"><span class="overtime-cancel-question-content"><UiIcon name="clock" /><span>是否可以准点下班？</span></span></div>
+      </div>
       <div v-if="mode === 'edit' && target" class="overtime-time">
         <span :id="`${id}-time-label`" class="overtime-time-label">加班至</span>
         <button ref="timeTrigger" type="button" class="we-control overtime-time-trigger" :disabled="pickerDisabled"
@@ -440,6 +444,18 @@ async function checkAgain() {
   font-weight: 600;
 }
 .overtime-time p { grid-column: 1 / -1; }
+.overtime-cancel { display: grid; gap: 10px; }
+.overtime-cancel-card { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 8px; border-radius: 12px; background: var(--we-accent-soft); }
+.overtime-cancel-moon { width: 18px; height: 18px; fill: #ffbf24; }
+.overtime-cancel-label { color: var(--we-muted); font-size: 13px; white-space: nowrap; }
+.overtime-cancel-time { display: grid; justify-items: end; color: var(--we-clock, var(--we-text)); font-family: var(--we-font-numeric); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.overtime-cancel-time strong { font-size: 19px; line-height: 1.2; }
+.overtime-cancel-date { font-size: 11px; line-height: 1.3; }
+.overtime-cancel-question, .overtime-cancel-question-content { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.overtime-cancel-question { color: var(--we-clock, var(--we-text)); }
+.overtime-cancel-question::before, .overtime-cancel-question::after { content: ""; flex: 1; min-width: 0; height: 1px; background: var(--we-border); }
+.overtime-cancel-question-content { display: inline-flex; flex: none; gap: 6px; font-weight: 500; line-height: 1.4; white-space: nowrap; }
+.overtime-cancel-question-content svg { width: 16px; height: 16px; color: var(--we-accent); }
 .overtime-error { color: var(--we-danger-text); overflow-wrap: anywhere; }
 .overtime-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .overtime-actions .we-button { border-radius: 999px; min-height: 34px; font-weight: 600; }

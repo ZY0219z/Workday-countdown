@@ -6,7 +6,7 @@ import { createCalendar, validateDateOverrides } from '../../domain/calendar'
 import { MAX_DAY_ORDINAL, fromDayOrdinal, normalizeLocalDate, toDayOrdinal } from '../../domain/local-date'
 import { nominalSalaryDate } from '../../domain/salary'
 import { validateOvertime } from '../../domain/overtime'
-import { calculateScheduleAt, resolveShift, validateSchedule, validateScheduleForDates, validateShiftConflicts } from '../../domain/schedule'
+import { calculateScheduleAt, resolveShift, validateSchedule, validateScheduleForDates, validateShiftConflicts, NEIGHBOUR_RADIUS } from '../../domain/schedule'
 import type { Clock } from '../../domain/clock'
 import type { TimeZoneAdapter } from '../../domain/time-zone'
 import type { CalendarStore } from './calendar-store'
@@ -72,7 +72,7 @@ function* validationSteps(input: unknown, previous: AppConfig | null, context: C
     const addAround = (ordinal: number) => {
       // Expired history must not be reinterpreted as currently active. D06's
       // instant-aware selection above checks all possible prior active dates.
-      for (let date = Math.max(today.data, ordinal - 4); date <= Math.min(MAX_DAY_ORDINAL, ordinal + 4); date++) scope.add(date)
+      for (let date = Math.max(today.data, ordinal - NEIGHBOUR_RADIUS); date <= Math.min(MAX_DAY_ORDINAL, ordinal + NEIGHBOUR_RADIUS); date++) scope.add(date)
     }
     addAround(today.data)
     if (active.data.shift && active.data.shift.startsAt <= now.data.instant && active.data.shift.finalEndsAt > now.data.instant) {
@@ -115,7 +115,7 @@ function* validationSteps(input: unknown, previous: AppConfig | null, context: C
       const ordinal = toDayOrdinal(entry.shiftDate)
       if (!ordinal.ok) return ordinal
       if (allowImportedHistory && ordinal.data < today.data) {
-        if (ordinal.data < today.data - 4) continue
+        if (ordinal.data < today.data - NEIGHBOUR_RADIUS) continue
         const shift = resolveShift(settings.schedule, settings.overtime, entry.shiftDate, shiftContext)
         if (shift.ok && (shift.data.status === 'noShift' || (shift.data.status === 'ready' && shift.data.shift.finalEndsAt <= now.data.instant))) continue
       }

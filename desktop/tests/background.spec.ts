@@ -14,6 +14,7 @@ import type { AppConfig, Result, MainWindowApi } from '../src/shared/contracts'
 import type { ExitChoice } from '../src/main/lifecycle/quit-coordinator'
 import {MAIN_WINDOW_DEFAULT_SIZE,MAIN_WINDOW_MINIMUM_SIZE,MINI_WINDOW_DEFAULT_SIZE} from '../src/main/windows/window-bounds'
 import { V2_CHANNELS } from '../src/shared/ipc'
+import { addDays } from '../src/domain/local-date'
 type TestApp=App & {__workdayD08Test:{background:boolean;mini:{bounds():import('../src/shared/contracts').WindowBounds|null;prepare():Promise<Result<null>>;stageBounds(bounds:import('../src/shared/contracts').WindowBounds):Result<null>};snapshotSubscribers():number;windows:{beginQuit():void};quit:{requestQuit():Promise<Result<null>>};chooseExit(choice:ExitChoice|null):void;selectFile(kind:'import'|'export',name:string):void;interactiveAttempts():string[];tray:{close():Promise<Result<null>>;menu():Promise<Result<null>>;chooseHide(value:boolean|null):void;settings():Result<null>;items():Array<{label?:string;type?:string;enabled?:boolean}>;click(label:string):void;available():boolean;icon():{empty:boolean;size:{width:number;height:number}}}}}
 // Native-hidden integration stimulates real DOM handlers. Pixel hit-testing and
 // stable rendering frames are verified by real Headless clicks, not by showing
@@ -94,6 +95,126 @@ async function captureHiddenPage(output: string, name: string) {
   expect(png).not.toBe('')
   writeFileSync(join(output, `${name}.png`), Buffer.from(png, 'base64'))
 }
+
+for (const nextRest of [false,true]) test(`DEV-01 overnight IPC with next day ${nextRest?'rest':'working'}`, async () => {
+  const config=fixture()
+  const workDate=new Date().toLocaleDateString('sv-SE')
+  const nextDate=value(addDays(workDate,1))
+  config.schedule.startTime='08:30'
+  config.schedule.endTime='14:15'
+  config.calendar.overrides[workDate]='work'
+  config.calendar.overrides[nextDate]=nextRest?'rest':'work'
+  config.overtime.entries=[{shiftDate:'2026-10-01',minutes:600}]
+  config.appearance.reduceMotion=true
+  seed(config)
+  let page=await launch(true,undefined,true)
+  await application!.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.setBackgroundThrottling(false))
+  const output=resolve('test-results/v213-overtime-overnight-electron')
+  mkdirSync(output,{recursive:true})
+  const dialog=()=>page.getByRole('dialog')
+  const toggle=()=>page.getByRole('switch',{name:'今日加班'})
+  const read=async()=>value(await page.evaluate(()=>window.workdayV2.config.read())).config
+  const pick=async(hour:string,minute:string)=>{
+    await activate(dialog().getByRole('button',{name:/^加班至/}))
+    await activate(dialog().getByRole('listbox',{name:'小时'}).getByRole('option',{name:hour,exact:true}))
+    await activate(dialog().getByRole('listbox',{name:'分钟'}).getByRole('option',{name:minute,exact:true}))
+    await activate(dialog().getByRole('heading'))
+  }
+  const openTime=async(hour:string,minute:string)=>{
+    await activate(toggle())
+    await pick(hour,minute)
+    await activate(dialog().getByRole('button',{name:'保存',exact:true}))
+  }
+  const restore=async()=>{
+    await activate(toggle())
+    await activate(dialog().getByRole('button',{name:'到点就跑'}))
+    await expect(toggle()).toHaveAttribute('aria-checked','false')
+  }
+  const checkCancel=async(name:string)=>{
+    const layout=await dialog().evaluate(element=>{
+      const rect=(selector:string)=>element.querySelector(selector)!.getBoundingClientRect().toJSON()
+      const question=element.querySelector('.overtime-cancel-question')!
+      const before=getComputedStyle(question,'::before'),after=getComputedStyle(question,'::after')
+      return {frame:element.getBoundingClientRect().toJSON(),moon:rect('.overtime-cancel-moon'),label:rect('.overtime-cancel-label'),time:rect('.overtime-cancel-time'),clock:rect('.overtime-cancel-question-content svg'),text:rect('.overtime-cancel-question-content span'),question:question.getBoundingClientRect().toJSON(),lineWidths:[parseFloat(before.width),parseFloat(after.width)],lineHeights:[before.height,after.height],buttons:[...element.querySelectorAll('.overtime-actions button')].map(button=>button.getBoundingClientRect().width),width:document.documentElement.clientWidth,height:document.documentElement.clientHeight,overflow:element.scrollWidth>element.clientWidth}
+    })
+    const center=(rect:{top:number;height:number})=>rect.top+rect.height/2
+    expect(layout.frame.width).toBe(300)
+    expect(Math.abs(layout.frame.left+layout.frame.width/2-layout.width/2)).toBeLessThanOrEqual(1)
+    expect(Math.abs(layout.frame.top+layout.frame.height/2-layout.height/2)).toBeLessThanOrEqual(1)
+    expect(Math.abs(center(layout.moon)-center(layout.label))).toBeLessThanOrEqual(1)
+    expect(Math.abs(center(layout.time)-center(layout.label))).toBeLessThanOrEqual(1)
+    expect(Math.abs(center(layout.clock)-center(layout.text))).toBeLessThanOrEqual(1)
+    expect(Math.abs(center(layout.clock)-center(layout.question))).toBeLessThanOrEqual(1)
+    expect(Math.abs(layout.lineWidths[0]-layout.lineWidths[1])).toBeLessThanOrEqual(1)
+    expect(layout.lineWidths.every(width=>width>0)).toBe(true)
+    expect(layout.lineHeights).toEqual(['1px','1px'])
+    expect(Math.abs(layout.buttons[0]-layout.buttons[1])).toBeLessThanOrEqual(1)
+    expect(layout.overflow).toBe(false)
+    writeFileSync(join(output,`${name}-geometry.json`),JSON.stringify(layout,null,2))
+    await captureHiddenPage(output,name)
+  }
+  if(nextRest){
+    await openTime('10','15')
+    await expect(toggle()).toHaveAttribute('aria-checked','true')
+    expect((await read()).overtime.entries).toEqual([...config.overtime.entries,{shiftDate:workDate,minutes:1200}])
+    await activate(toggle())
+    await expect(dialog().locator('.overtime-cancel-date')).toHaveText(nextDate)
+    await checkCancel('cancel-overnight')
+    await page.emulateMedia({colorScheme:'dark'})
+    await checkCancel('cancel-overnight-dark')
+    await application!.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1.5))
+    await checkCancel('cancel-overnight-150')
+    await application!.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1))
+    await activate(dialog().getByRole('button',{name:'依旧加班'}))
+    const saved=await read()
+    const closed=application!.waitForEvent('close')
+    value(await page.evaluate(()=>window.workdayV2.app.quit()))
+    await closed
+    application=undefined
+    page=await launch(true,undefined,true)
+    expect((await read()).overtime.entries).toEqual(saved.overtime.entries)
+    await restore()
+    expect((await read()).overtime.entries).toEqual(config.overtime.entries)
+  } else {
+    const before=readFileSync(formal(),'utf8')
+    await openTime('10','15')
+    await expect(dialog().getByRole('alert')).toHaveText('加班时间与相邻工作班次重叠，请重新选择。')
+    await expect(dialog().getByRole('button',{name:'加班至 10:15'})).toBeVisible()
+    await captureHiddenPage(output,'conflict-error')
+    expect(readFileSync(formal(),'utf8')).toBe(before)
+    expect(value(await page.evaluate(()=>window.workdayV2.settingsDraft.read())).dirty).toBe(false)
+    await expect(toggle()).toHaveAttribute('aria-checked','false')
+    await expect(page.locator('.app-toast')).toHaveCount(0)
+    await pick('21','15')
+    await activate(dialog().getByRole('button',{name:'保存',exact:true}))
+    await expect(toggle()).toHaveAttribute('aria-checked','true')
+    await activate(toggle())
+    await checkCancel('cancel-same-day')
+    await activate(dialog().getByRole('button',{name:'依旧加班'}))
+    await expect(toggle()).toHaveAttribute('aria-checked','true')
+    await restore()
+    for(const [hour,minutes] of [['00',600],['01',660]] as const){
+      await openTime(hour,'15')
+      await expect(toggle()).toHaveAttribute('aria-checked','true')
+      expect((await read()).overtime.entries.find(entry=>entry.shiftDate===workDate)?.minutes).toBe(minutes)
+      await restore()
+    }
+    const session=value(await page.evaluate(()=>window.workdayV2.settingsDraft.read()))
+    const stale=await page.evaluate(revision=>window.workdayV2.settingsDraft.setExpectedEnd({expectedRevision:revision,targetKey:'outdated-shift',input:'21:15'}),session.expectedRevision)
+    expect(stale).toMatchObject({ok:false,error:{code:'UNAVAILABLE',message:'当前班次已变化，请重新设置加班时间。'}})
+    expect((await read()).overtime.entries).toEqual(config.overtime.entries)
+    const beforeRange=readFileSync(formal(),'utf8')
+    const range=await page.evaluate(async shiftDate=>{
+      const draft=await window.workdayV2.settingsDraft.read()
+      if(!draft.ok)return draft
+      const settings={...draft.data.draft,overtime:{entries:[{shiftDate,minutes:4320}]}} as unknown as import('../src/shared/contracts').EditableConfig
+      return window.workdayV2.config.save({expectedRevision:draft.data.expectedRevision,settings})
+    },workDate)
+    expect(range).toMatchObject({ok:false,error:{code:'VALIDATION',message:'加班时长超出可保存范围，请重新选择。'}})
+    expect(readFileSync(formal(),'utf8')).toBe(beforeRange)
+  }
+  await hidden()
+})
 
 test('DEV-01 final dialogs keep their geometry while the Electron picker floats above them', async () => {
   const config = fixture()

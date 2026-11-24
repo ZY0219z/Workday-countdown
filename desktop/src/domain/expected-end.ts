@@ -1,5 +1,6 @@
 import type { EditableConfig, Result } from '../shared/contracts'
 import type { ClockReading } from './clock'
+import { MAX_OVERTIME_MINUTES } from '../shared/config-schema'
 import { issue, success, validationFailure } from '../shared/validation'
 import { addDays } from './local-date'
 import { minutesSinceMidnight, MILLISECONDS_PER_MINUTE } from './local-time'
@@ -36,6 +37,6 @@ export function expectedEndOvertime(settings:EditableConfig,shift:ResolvedShift,
   if(!resolved.ok)return resolved
   if(resolved.data.kind!=='unique')return invalid('预计结束时刻存在DST重复或缺失，不能自动选择。请填写可明确解析的时间。')
   const amount=(resolved.data.instant-shift.normalEndsAt)/MILLISECONDS_PER_MINUTE
-  if(!Number.isSafeInteger(amount)||amount<0||amount>600)return invalid('预计下班须在正常下班之后，额外时长为0–600整分钟；较早时刻按次日解释。')
+  if(!Number.isSafeInteger(amount)||amount<0||amount>MAX_OVERTIME_MINUTES)return invalid('加班结束时间无法在当前时区按整分钟保存，请重新选择。')
   return setOvertimeForShift(settings.overtime,shift.shiftDate,amount,guard)
 }

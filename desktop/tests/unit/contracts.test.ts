@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { CONFIG_SCHEMA_VERSION, CONTRACT_VERSION, ERROR_CODES } from '../../src/shared/contracts'
 import type { AppConfig, ContractRequests, ContractResponses, DashboardSnapshot, MiniWindowApi, Result } from '../../src/shared/contracts'
-import { createAppConfig, validateAppConfig, validateDraftFields } from '../../src/shared/config-schema'
+import { createAppConfig, validateAppConfig, validateDraftFields, MAX_OVERTIME_MINUTES } from '../../src/shared/config-schema'
 import { isCapabilityAllowed, validateContractRequest, checkExpectedRevision, WINDOW_CAPABILITIES } from '../../src/shared/capabilities'
 import { createSettingsDraft, updateSettingsDraft, prepareDraftSave, beginDraftSave, finishDraftSave } from '../../src/shared/settings-draft'
 import { MAX_DTO_BYTES, validateJsonDto } from '../../src/shared/validation'
@@ -98,7 +98,8 @@ test('work week elements, nonempty length and duplicates', () => {
   unwrap(validateAppConfig(change('schedule.workWeek', [6, 7])))
 })
 test('overtime integer bounds, unique shift dates and preserved history/zero', () => {
-  for (const minutes of [-1, 601, 2.5, '80', true, NaN, Infinity]) reject(validateAppConfig(change('overtime.entries', [{ shiftDate: '2025-01-01', minutes }])))
+  for (const minutes of [-1, MAX_OVERTIME_MINUTES + 1, 2.5, '80', true, NaN, Infinity]) reject(validateAppConfig(change('overtime.entries', [{ shiftDate: '2025-01-01', minutes }])))
+  for (const minutes of [601,1200,1499,MAX_OVERTIME_MINUTES]) unwrap(validateAppConfig(change('overtime.entries', [{ shiftDate: '2025-01-01', minutes }])))
   const value = unwrap(validateAppConfig(change('overtime.entries', [{ shiftDate: '2024-01-01', minutes: 0 }, { shiftDate: '2025-01-01', minutes: 600 }])))
   assert.equal(value.overtime.entries.length, 2)
   assert.equal(value.overtime.entries[0].minutes, 0)

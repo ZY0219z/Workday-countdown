@@ -15,7 +15,7 @@ import { createMigrationFiles, knownMigrationCandidates, type MigrationFiles } f
 import { createMigrationService } from '../../src/main/services/migration-service'
 import { createSettingsDraft, updateSettingsDraft, beginDraftSave, finishDraftSave } from '../../src/shared/settings-draft'
 import { validateContractRequest } from '../../src/shared/capabilities'
-import { createAppConfig } from '../../src/shared/config-schema'
+import { createAppConfig, MAX_OVERTIME_MINUTES } from '../../src/shared/config-schema'
 import { createCalendar } from '../../src/domain/calendar'
 import { context, initial, value, rejected, nativeZones } from './config-fixtures'
 
@@ -215,10 +215,24 @@ test('calendar metadata is generated only from the host trusted registry', async
 })
 test('changed overtime requires valid shift even for zero and past dates', async t => {
   const app=await setup(t)
-  for(const [date,minutes]of [['2026-10-18',80],['2026-10-18',0],['2024-02-04',80],['2026-10-14',601]]as const){
+  for(const [date,minutes]of [['2026-10-18',80],['2026-10-18',0],['2024-02-04',80],['2026-10-14',MAX_OVERTIME_MINUTES+1]]as const){
     // Enabled years initially empty: 2024-02-04 is a weekly Sunday here.
     rejected(await app.store.save(await request(app.store,s=>{s.overtime.entries.push({shiftDate:date,minutes})})))
   }
+})
+
+test('legacy undated long overtime imports with an explicit shift date and survives reload',async t=>{
+  const app=await sourceSetup(t,'python-v1',JSON.stringify({overtime_minutes:1200}))
+  value(await app.store.save(await request(app.store,settings=>{
+    settings.schedule.endTime='14:15'
+    settings.calendar.overrides['2026-10-15']='rest'
+  })))
+  const preview=value(await app.service.preview({sourceKind:'python-v1'}))
+  assert.equal(preview.undatedOvertimeMinutes,1200)
+  const saved=value(await app.service.apply(application(preview,['overtime.entries'],'2026-10-14')))
+  assert.deepEqual(saved.config.overtime.entries,[{shiftDate:'2026-10-14',minutes:1200}])
+  const reloaded=value(createConfigStore(app.options))
+  assert.deepEqual(value(await reloaded.load()).config?.overtime.entries,saved.config.overtime.entries)
 })
 test('future far-date overtime, neighbouring overlaps and changed calendar overrides are checked', async t => {
   const app=await setup(t)

@@ -22,7 +22,7 @@ import { createOperationBarrier } from '../../src/main/lifecycle/operation-barri
 import { createQuitCoordinator } from '../../src/main/lifecycle/quit-coordinator'
 import { createIpcRouter,type IpcEvent } from '../../src/main/ipc/router'
 import { createV2Bridge } from '../../src/shared/bridge'
-import { V2_CHANNELS, SNAPSHOT_PUSH } from '../../src/shared/ipc'
+import { V2_CHANNELS, SNAPSHOT_PUSH, safeResult } from '../../src/shared/ipc'
 
 const roots:string[]=[]
 after(async()=>{for(const path of roots){assert.ok(path.startsWith(join(tmpdir(),'workday-d09-')));await rm(path,{recursive:true,force:true})}})
@@ -132,6 +132,23 @@ test('router validates actual role/frame/url and request, subscriptions revoke i
   value(await call('snapshot.subscribe'));value(await call('snapshot.subscribe'));assert.equal(a.runtime.refresh.subscriberCount(),1);value(await call('snapshot.unsubscribe'));value(await call('snapshot.unsubscribe'));assert.equal(a.runtime.refresh.subscriberCount(),0);release();rejected(await call('snapshot.read'),'FORBIDDEN');router.dispose();assert.equal(handlers.size,0);assert.ok(pushed>=0)
 })
 test('IPC strips exception detail and never claims unimplemented imports succeed',async()=>{const a=await runtimeFixture(),handlers=new Map<string,(e:IpcEvent,i:unknown)=>Promise<unknown>>();const router=createIpcRouter({handle:(c,h)=>handlers.set(c,h),removeHandler:c=>{handlers.delete(c)}},a.runtime,{window(){throw Error('C:\\Users\\secret token stack')},quit:async()=>success(null)});const sender={},frame={};router.register('main',{sender,frame:()=>frame,url:()=>'/trusted',destroyed:()=>false,visible:()=>false,push(){}},'/trusted');const e={sender,senderFrame:frame};const result=await handlers.get(V2_CHANNELS['window.perform'])!(e,{action:'showMain'});assert.ok(!JSON.stringify(result).includes('secret'));value(validateJsonDto(result));rejected(await handlers.get(V2_CHANNELS['calendar.previewImport'])!(e,null) as Result<unknown>,'UNAVAILABLE');router.dispose()})
+
+test('IPC exposes only allowlisted static overtime messages and redacts all other validation details',()=>{
+  const message='加班时间与相邻工作班次重叠，请重新选择。'
+  const result=safeResult({ok:false,error:{code:'VALIDATION',message:'private path',issues:[{field:'$.shiftDate',reason:'DUPLICATE',message}]}})
+  rejected(result)
+  if(!result.ok&&result.error.code==='VALIDATION')assert.equal(result.error.message,message)
+  for(const [field,text] of [['$.shiftDate','C:\\private\\settings.json stack'],['$.expectedEndTime','unknown internal exception'],['$.salary.day',message]]) {
+    const redacted=safeResult({ok:false,error:{code:'VALIDATION',message:'private path',issues:[{field,reason:'FORMAT',message:text}]}})
+    if(!redacted.ok&&redacted.error.code==='VALIDATION')assert.equal(redacted.error.issues[0].message,'字段校验失败。')
+    assert.ok(!JSON.stringify(redacted).includes('private'))
+  }
+  const changed=safeResult({ok:false,error:{code:'UNAVAILABLE',message:'当前班次或时区已变化，未应用旧输入；请放弃旧草稿后重新填写。'}})
+  if(!changed.ok)assert.equal(changed.error.message,'当前班次已变化，请重新设置加班时间。')
+  const range=safeResult({ok:false,error:{code:'VALIDATION',message:'private path',issues:[{field:'$.overtime.entries[0].minutes',reason:'RANGE',message:'private range details'}]}})
+  if(!range.ok)assert.equal(range.error.message,'加班时长超出可保存范围，请重新选择。')
+  assert.ok(!JSON.stringify(range).includes('private'))
+})
 test('Preload fixed bridge mini surface, local subscriptions, transport failure DTO and no raw event',async()=>{
   const invocations:string[]=[];let listener:((v:unknown)=>void)|null=null,removed=0
   const transport={async invoke(channel:string){invocations.push(channel);return {ok:true,data:null}},listen(channel:string,callback:(v:unknown)=>void){assert.equal(channel,SNAPSHOT_PUSH);listener=callback;return()=>{removed++;listener=null}}}

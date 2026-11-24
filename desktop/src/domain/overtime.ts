@@ -1,5 +1,5 @@
 import type { AppConfig, LocalDate, Result } from '../shared/contracts'
-import { editableValidators } from '../shared/config-schema'
+import { editableValidators, MAX_OVERTIME_MINUTES } from '../shared/config-schema'
 import { issue, success, v, validateStructure, validationFailure } from '../shared/validation'
 import { normalizeLocalDate } from './local-date'
 
@@ -23,7 +23,7 @@ export function overtimeForDate(input: unknown, shiftDate: LocalDate): Result<nu
 }
 // Caller must supply the schedule conflict guard; there is no unchecked default.
 export function setOvertimeForShift(input: unknown, shiftDate: LocalDate, minutes: number, guard: OvertimeGuard): Result<OvertimeConfig> {
-  const checked = validateOvertime(input), date = normalizeLocalDate(shiftDate), amount = validateStructure(minutes, v.number(0, 600))
+  const checked = validateOvertime(input), date = normalizeLocalDate(shiftDate), amount = validateStructure(minutes, v.number(0, MAX_OVERTIME_MINUTES))
   if (!checked.ok) return checked
   if (!date.ok) return date
   if (!amount.ok) return amount

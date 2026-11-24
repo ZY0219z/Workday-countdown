@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { AppConfig, ConfigSnapshot, ContractRequests, EditableConfig, ImportField, ImportPreview, JsonValue, MigrationSource, Result, ValidationIssue } from '../../shared/contracts'
 import { IMPORT_FIELDS } from '../../shared/contracts'
-import { validateAppConfig, editableValidators } from '../../shared/config-schema'
+import { validateAppConfig, editableValidators, MAX_OVERTIME_MINUTES } from '../../shared/config-schema'
 import { validateContractRequest, checkExpectedRevision } from '../../shared/capabilities'
 import { issue, success, v, validateJsonDto, validateStructure, validationFailure, MAX_DTO_BYTES } from '../../shared/validation'
 import { normalizeLocalDate } from '../../domain/local-date'
@@ -81,7 +81,7 @@ function mapSource(text: string, kind: MigrationSource): Result<Mapping> {
     if (Object.hasOwn(source, 'start_date')) offer('employee.startDate', source.start_date, normalizeLocalDate(source.start_date))
     if (Object.hasOwn(source, 'salary_day')) offer('salary.day', source.salary_day, validateStructure(source.salary_day, v.number(1, 31)))
     if (Object.hasOwn(source, 'overtime_minutes')) {
-      const amount = validateStructure(source.overtime_minutes, v.number(0, 600))
+      const amount = validateStructure(source.overtime_minutes, v.number(0, MAX_OVERTIME_MINUTES))
       if (amount.ok) {
         result.undated = amount.data
         offer('overtime.entries', [], amount)

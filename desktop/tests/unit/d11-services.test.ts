@@ -14,7 +14,7 @@ import {createIpcRouter,type IpcEvent} from '../../src/main/ipc/router'
 import {createV2Bridge} from '../../src/shared/bridge'
 import {V2_CHANNELS} from '../../src/shared/ipc'
 import type {Result,ContractRequests,AppConfig} from '../../src/shared/contracts'
-import {createDefaultAppConfig} from '../../src/shared/config-schema'
+import {createDefaultAppConfig,MAX_OVERTIME_MINUTES} from '../../src/shared/config-schema'
 import {createCalendar} from '../../src/domain/calendar'
 import {calculateNextSalary} from '../../src/domain/salary'
 import {validateConfigSettings,validateConfigSettingsAsync,editableConfig} from '../../src/main/services/config-validation'
@@ -58,7 +58,7 @@ test('real UI controller, fixed IPC and ConfigStore save; metadata comes from tr
 test('actual semantic date/shift/overtime errors preserve disk and entered draft',async()=>{
   const a=await setup(),original=await readFile(join(a.directory,'settings.json'),'utf8')
   for(const bad of ['time','overtime','break'] as const){await a.controller.discard();const edit=structuredClone(a.controller.state.editor)
-    if(bad==='time')edit.schedule.endTime='08:00';if(bad==='overtime')edit.overtime.entries=[{shiftDate:'2026-10-14',minutes:601}];if(bad==='break')edit.schedule.breaks=[{startTime:'08:00',endTime:'09:00',startDayOffset:0,endDayOffset:0}]
+    if(bad==='time')edit.schedule.endTime='08:00';if(bad==='overtime')edit.overtime.entries=[{shiftDate:'2026-10-14',minutes:MAX_OVERTIME_MINUTES+1}];if(bad==='break')edit.schedule.breaks=[{startTime:'08:00',endTime:'09:00',startDayOffset:0,endDayOffset:0}]
     a.controller.edit(edit);assert.equal(await a.controller.save(),false);assert.equal(a.controller.state.dirty,true);assert.equal(await readFile(join(a.directory,'settings.json'),'utf8'),original)
   }
 })
@@ -168,7 +168,7 @@ for(const [input,minutes]of [['18:00',0],['19:00',60],['20:00',120],['00:30',390
   const a=targetFixture(),shift=value(a.shift),result=value(expectedEndOvertime(a.settings,shift,input,a.scheduleContext))
   assert.deepEqual(result.entries,[{shiftDate:'2026-10-14',minutes}]);assert.deepEqual(a.settings.overtime.entries,[])
 })
-for(const input of ['04:01','24:00','08:60','19:',''])test(`invalid expected end ${JSON.stringify(input)} never changes overtime`,()=>{
+for(const input of ['24:00','08:60','19:',''])test(`invalid expected end ${JSON.stringify(input)} never changes overtime`,()=>{
   const a=targetFixture();rejected(expectedEndOvertime(a.settings,value(a.shift),input,a.scheduleContext));assert.deepEqual(a.settings.overtime.entries,[])
 })
 for(const [at,date]of [['2026-10-14T07:00:00Z','2026-10-14'],['2026-10-14T20:30:00Z','2026-10-14']] as const)test(`target is identifiable before work or after normal finish at ${at}`,()=>{
@@ -186,6 +186,66 @@ for(const [at,input]of [['2026-11-01T04:10:00Z','01:30'],['2026-03-08T06:10:00Z'
 test('expected end still rejects overlap with the next regular shift',()=>{
   const a=targetFixture('2026-10-14T10:00:00Z','UTC',s=>{s.schedule.startTime='00:30'})
   rejected(expectedEndOvertime(a.settings,value(a.shift),'01:00',a.scheduleContext))
+})
+
+for(const nextRest of [false,true]) for(const [input,minutes] of [['21:15',420],['00:15',600],['01:15',660],['10:15',1200],['14:15',0]] as const) {
+  test(`14:15 normal finish to ${input}, following day ${nextRest?'rest':'working'}`,()=>{
+    const a=targetFixture('2026-10-14T10:00:00Z','UTC',settings=>{
+      settings.schedule.endTime='14:15'
+      settings.calendar.overrides['2026-10-15']=nextRest?'rest':'work'
+    })
+    const result=expectedEndOvertime(a.settings,value(a.shift),input,a.scheduleContext)
+    if(!nextRest&&input==='10:15') {
+      rejected(result)
+      if(!result.ok&&result.error.code==='VALIDATION') assert.match(result.error.issues[0].message,/相邻工作班次重叠/)
+    } else assert.equal(value(result).entries[0].minutes,minutes)
+    assert.deepEqual(a.settings.overtime.entries,[])
+  })
+}
+for(const [date,next] of [['2026-10-31','2026-11-01'],['2026-12-31','2027-01-01']] as const) {
+  test(`20-hour overtime crosses ${date} into ${next}`,()=>{
+    const a=targetFixture(`${date}T10:00:00Z`,'UTC',settings=>{
+      settings.schedule.endTime='14:15'
+      settings.calendar.overrides[date]='work'
+      settings.calendar.overrides[next]='rest'
+    })
+    const candidate=value(expectedEndOvertime(a.settings,value(a.shift),'10:15',a.scheduleContext))
+    assert.deepEqual(candidate.entries,[{shiftDate:date,minutes:1200}])
+  })
+}
+for(const [date,next,minutes] of [['2026-10-31','2026-11-01',1499],['2026-03-07','2026-03-08',1379]] as const) {
+  test(`next-day 14:14 uses actual DST duration after ${date}`,()=>{
+    const a=targetFixture(`${date}T15:00:00Z`,'America/New_York',settings=>{
+      settings.schedule.endTime='14:15'
+      settings.calendar.overrides[date]='work'
+      settings.calendar.overrides[next]='rest'
+    })
+    assert.equal(value(expectedEndOvertime(a.settings,value(a.shift),'14:14',a.scheduleContext)).entries[0].minutes,minutes)
+  })
+}
+
+test('long overtime persists, reloads on its original shift, and cancellation preserves old history',async()=>{
+  const a=await setup()
+  const editor=structuredClone(a.controller.state.editor)
+  editor.schedule.endTime='14:15'
+  editor.calendar.overrides['2026-10-15']='rest'
+  editor.overtime.entries=[{shiftDate:'2026-10-01',minutes:600}]
+  a.controller.edit(editor)
+  assert.equal(await a.controller.save(),true)
+  value(await a.controller.saveOvertime(await quickEdit(a.controller,'10:15')))
+  const config=value(await a.api.config.read()).config
+  assert.deepEqual(config.overtime.entries.map(entry=>({...entry})),[{shiftDate:'2026-10-01',minutes:600},{shiftDate:'2026-10-14',minutes:1200}])
+  const restarted=value(createConfigStore({...a.ctx,directory:a.directory,appVersion:'2.1.2'}))
+  assert.deepEqual(value(await restarted.load()).config?.overtime.entries,config.overtime.entries.map(entry=>({...entry})))
+  value(a.ctx.clock.setInstant(Date.parse('2026-10-15T09:00:00Z')))
+  a.runtime.refresh.wake(true)
+  const snapshot=value(await a.api.snapshot.read())
+  assert.equal(snapshot.state,'overtime')
+  assert.equal(snapshot.activeShift!.shiftDate,'2026-10-14')
+  assert.equal(snapshot.countdown!.seconds,75*60)
+  assert.ok(snapshot.progress!.percent>0&&snapshot.progress!.percent<100)
+  value(await a.controller.saveOvertime(await quickEdit(a.controller,null)))
+  assert.deepEqual(value(await a.api.config.read()).config.overtime.entries.map(entry=>({...entry})),[{shiftDate:'2026-10-01',minutes:600}])
 })
 test('cancel current overtime preserves all other dated history and future records',()=>{
   const a=targetFixture('2026-10-14T10:00:00Z','UTC',s=>{s.overtime.entries=[{shiftDate:'2026-10-01',minutes:80},{shiftDate:'2026-10-14',minutes:120},{shiftDate:'2026-10-15',minutes:60}]})
@@ -259,7 +319,7 @@ test('quick overtime preserves other drafts and removes only its failed or inval
   assert.equal(value(a.runtime.readDraft()).dirty, true)
   assert.equal(await a.controller.discard(), true)
 
-  rejected(await a.controller.saveOvertime({ ...request, input: '04:01' }), 'VALIDATION')
+  rejected(await a.controller.saveOvertime({ ...request, input: '09:01' }), 'VALIDATION')
   assert.equal(value(a.runtime.readDraft()).dirty, false)
   a.fail()
   rejected(await a.controller.saveOvertime(request), 'IO_DENIED')

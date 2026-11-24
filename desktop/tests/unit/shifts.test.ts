@@ -8,8 +8,9 @@ import { createIntlTimeZoneAdapter } from '../../src/adapters/intl-time-zone'
 import { loadBundledCalendarStore } from '../../src/main/services/calendar-store'
 import { clearOvertimeForShift, overtimeForDate, setOvertimeForShift, validateOvertime, type OvertimeConfig } from '../../src/domain/overtime'
 import { calculateScheduleAt, calculateScheduleWithClock, classifyShift, resolveShift, updateOvertime,
-  validateSchedule, validateScheduleForDates, validateShiftConflicts, type ResolvedShift, type ScheduleContext } from '../../src/domain/schedule'
+  validateSchedule, validateScheduleForDates, validateShiftConflicts, NEIGHBOUR_RADIUS, MAX_SHIFT_MILLISECONDS, type ResolvedShift, type ScheduleContext } from '../../src/domain/schedule'
 import { calculateProgress } from '../../src/domain/progress'
+import { MAX_OVERTIME_MINUTES } from '../../src/shared/config-schema'
 
 function value<T>(result: Result<T>): T {
   assert.equal(result.ok, true, JSON.stringify(result))
@@ -79,7 +80,7 @@ test('user rest/work overrides determine shift existence',()=>{
   assert.equal(value(resolveShift(regular(),none(),'2026-10-13',context(regular(),{'2026-10-13':'rest'}))).status,'noShift')
   assert.equal(value(resolveShift(regular(),none(),'2026-10-18',context(regular(),{'2026-10-18':'work'}))).status,'ready')
 })
-test('maximum 34-hour shift survives two midnight boundaries',()=>{
+test('a 34-hour shift survives two midnight boundaries',()=>{
   const config={...regular(),startTime:'20:00',endTime:'20:00',crossMidnight:true}
   const ctx=context(config,{'2026-10-14':'rest'}),entries=ot(600)
   const resolved=shift(config,entries,'2026-10-13',ctx)
@@ -87,7 +88,20 @@ test('maximum 34-hour shift survives two midnight boundaries',()=>{
   assert.equal(validateShiftConflicts(config,entries,'2026-10-13',ctx).ok,true)
   const current=selected('2026-10-15T00:01:00Z',config,entries,ctx)
   assert.equal(current.shift?.shiftDate,'2026-10-13');assert.equal(current.state,'overtime');assert.equal(current.countdown?.seconds,5*3600+59*60)
-  assert.ok(current.checkedShiftDates.length<=9)
+  assert.ok(current.checkedShiftDates.length<=2*NEIGHBOUR_RADIUS+1)
+})
+
+test('nearly 48-hour shift remains active past the former 34-hour query bound',()=>{
+  const config={...regular(),startTime:'14:15',endTime:'14:15',crossMidnight:true}
+  const ctx=context(config,{'2026-10-14':'rest','2026-10-15':'rest'}),entries=ot(1439)
+  const result=value(validateShiftConflicts(config,entries,'2026-10-13',ctx))
+  assert.equal(result.finalEndsAt-result.startsAt,47*3600000+59*60000)
+  assert.ok(result.finalEndsAt-result.startsAt<=MAX_SHIFT_MILLISECONDS)
+  const current=selected('2026-10-15T10:00:00Z',config,entries,ctx)
+  assert.equal(current.state,'overtime')
+  assert.equal(current.shift?.shiftDate,'2026-10-13')
+  assert.equal(current.countdown?.seconds,4*3600+14*60)
+  assert.ok(current.checkedShiftDates.length<=2*NEIGHBOUR_RADIUS+1)
 })
 test('unexplained two active shifts are rejected rather than picked',()=>{
   const config={...regular(),startTime:'20:00',endTime:'20:00',crossMidnight:true}
@@ -128,14 +142,14 @@ test('break day offset type/range and unknown fields use D02 structure rules',()
   rejected(validateSchedule(JSON.parse('{"workWeek":[1],"startTime":"09:00","endTime":"18:00","crossMidnight":false,"breaks":[],"__proto__":{}}')))
 })
 test('overtime 0/1/600 keep only their own date and are validated',()=>{
-  for(const minutes of [0,1,600]){
+  for(const minutes of [0,1,600,1200,MAX_OVERTIME_MINUTES]){
     assert.equal(value(overtimeForDate(ot(minutes),'2026-10-13')),minutes)
     assert.equal(value(overtimeForDate(ot(minutes),'2026-10-14')),0)
     assert.equal(shift(regular(),ot(minutes)).finalEndsAt,epoch('2026-10-13T18:00:00Z')+minutes*60000)
   }
 })
 test('overtime wrong minutes/date/duplicate and dangerous keys rejected',()=>{
-  for(const minutes of [-1,601,1.5,'60'])rejected(validateOvertime({entries:[{shiftDate:'2026-10-13',minutes}]}))
+  for(const minutes of [-1,MAX_OVERTIME_MINUTES+1,1.5,'60'])rejected(validateOvertime({entries:[{shiftDate:'2026-10-13',minutes}]}))
   rejected(validateOvertime({entries:[{shiftDate:'2026-02-29',minutes:0}]}))
   rejected(validateOvertime({entries:[{shiftDate:'2026-10-13',minutes:0},{shiftDate:'2026-10-13',minutes:1}]}))
   rejected(validateOvertime(JSON.parse('{"entries":[],"constructor":{}}')))
@@ -280,7 +294,7 @@ test('unique DST endpoints use actual three/five-hour durations, not wall hours'
   assert.equal(spring.totalWorkMilliseconds,3*3600000);assert.equal(fall.totalWorkMilliseconds,5*3600000)
   assert.ok(Math.abs(progress(spring,'2026-03-08T06:00:00Z').percent-100/3)<1e-9)
 })
-test('resolved base over 24 actual hours is rejected instead of breaking 34-hour bound',()=>{
+test('resolved base over 24 actual hours is rejected',()=>{
   const config={...regular(),startTime:'00:00',endTime:'00:00',crossMidnight:true},ctx=context(config,{'2026-11-01':'work'},'America/New_York')
   rejected(resolveShift(config,none(),'2026-11-01',ctx))
 })
@@ -339,6 +353,13 @@ test('expired DST gap does not invalidate a later ordinary shift',()=>{
   const config={...regular(),workWeek:[1,2,3,4,5,6,7] as ScheduleConfig['workWeek'],startTime:'02:30',endTime:'04:00'},ctx=context(config,{},'America/New_York')
   const result=value(calculateScheduleAt(config,none(),epoch('2026-03-10T16:00:00Z'),ctx))
   assert.equal(result.state,'finished');assert.equal(result.shift?.shiftDate,'2026-03-10')
+})
+
+test('expanded search excludes an expired DST end gap using that shift actual overtime',()=>{
+  const config={...regular(),workWeek:[1,2,3,4,5,6,7] as ScheduleConfig['workWeek'],startTime:'00:00',endTime:'02:30'},ctx=context(config,{},'America/New_York')
+  const result=value(calculateScheduleAt(config,none(),epoch('2026-03-10T16:00:00Z'),ctx))
+  assert.equal(result.state,'finished')
+  assert.equal(result.shift?.shiftDate,'2026-03-10')
 })
 test('frozen shift quality remains separate from mutable returned progress metadata',()=>{
   const resolved=shift(),amount=progress(resolved,'2026-10-13T13:00:00Z')
