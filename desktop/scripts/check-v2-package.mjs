@@ -20,7 +20,7 @@ function files(directory, prefix = '') {
 }
 
 const sourcePackage = JSON.parse(readFileSync('package.json', 'utf8'))
-const expectedVersion = '2.1.2'
+const expectedVersion = '2.1.3'
 assert.equal(sourcePackage.version, expectedVersion)
 const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'))
 assert.equal(lock.version, expectedVersion)
@@ -108,4 +108,4 @@ for (const [file, machine] of [[exe, 0x14c], [join(payload, 'Workday Escape.exe'
   const offset = binary.indexOf(Buffer.from('<requestedExecutionLevel'))
   assert.ok(offset >= 0 && /level=["']asInvoker["']/.test(binary.toString('utf8', offset, offset + 200)), 'Executable must not request administrator privileges')
 }
-console.log(JSON.stringify({ scope: 'V2.1.2 static package only; EXE NOT RUN', version: metadata.version, exe, exeBytes, exeMiB: exeBytes / 1024 ** 2, sha256: hash(readFileSync(exe)), asarSha256: hash(readFileSync(archive)), payloadFiles: stagedFiles.length, embeddedFiles, calendar2027Sha256: calendar2027.integrity.sha256, originalAssetsUnchanged: true, dashboardSvgsAndWaveVerified: true, securityGuardsPresent: true, runtimeResourcesMatchInstalledElectron: true, architecture: 'Windows x64 payload / x86 Portable launcher', executionLevel: 'asInvoker', externalRuntimeDependencies: [] }, null, 2))
+console.log(JSON.stringify({ scope: 'V2.1.3 static package only; EXE NOT RUN', version: metadata.version, exe, exeBytes, exeMiB: exeBytes / 1024 ** 2, sha256: hash(readFileSync(exe)), asarSha256: hash(readFileSync(archive)), payloadFiles: stagedFiles.length, embeddedFiles, calendar2027Sha256: calendar2027.integrity.sha256, originalAssetsUnchanged: true, dashboardSvgsAndWaveVerified: true, securityGuardsPresent: true, runtimeResourcesMatchInstalledElectron: true, architecture: 'Windows x64 payload / x86 Portable launcher', executionLevel: 'asInvoker', externalRuntimeDependencies: [] }, null, 2))

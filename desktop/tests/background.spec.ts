@@ -515,10 +515,11 @@ test('first launch shows default dashboard, persists safely, restarts and preser
   await settings(page)
   await expect(page.getByLabel('上班时间',{exact:true})).toHaveValue('08:30');await expect(page.getByLabel('下班时间',{exact:true})).toHaveValue('18:00')
   await expect(page.getByLabel('入职日期',{exact:true})).toHaveValue('2025-07-17');await expect(page.getByLabel('每月发薪日',{exact:true})).toHaveValue('10')
-  await expect(page.locator('details.settings-more')).not.toHaveAttribute('open','')
+  await expect(page.locator('details.settings-more')).toHaveCount(0)
   const saved=readFileSync(formal(),'utf8');expect(JSON.parse(saved).salary).toEqual({day:10,nonWorkingPolicy:'delay',missingDayPolicy:'monthEnd',showPaydayAsToday:true})
+  expect(JSON.parse(saved).appVersion).toBe(JSON.parse(readFileSync('package.json','utf8')).version)
   expect(readFileSync(join(profile,'settings.json'),'utf8')).toBe(sentinel)
-  const child=application!.process(),closed=application!.waitForEvent('close');await activate(page.getByRole('button',{name:'退出程序',exact:true}));await closed;await expect.poll(()=>child.exitCode).toBe(0);application=undefined
+  const child=application!.process(),closed=application!.waitForEvent('close');value(await page.evaluate(()=>window.workdayV2.app.quit()));await closed;await expect.poll(()=>child.exitCode).toBe(0);application=undefined
   const reopened=await launch(false);await settings(reopened);await expect(reopened.getByLabel('上班时间',{exact:true})).toHaveValue('08:30');expect(readFileSync(formal(),'utf8')).toBe(saved)
   writeFileSync('test-results/d11-ux-electron-startup.json',JSON.stringify({firstDashboardMs,persistedFromLaunchMs,hidden:true},null,2))
 })
