@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, useId } from 'vue'
+import { computed, nextTick, ref, useId, watch } from 'vue'
 import type { ContractError, DashboardSnapshot, Result } from '../../../shared/contracts'
 import type { OvertimeEdit, OvertimeTarget } from '../ui/settings-controller'
 import UiIcon from './UiIcon.vue'
@@ -49,7 +49,7 @@ const stale = computed(() => target.value !== null && shiftIdentity.value !== op
 const pickerDisabled = computed(() => saving.value || stale.value || props.recovering)
 const pickerVisible = computed(() => pickerOpen.value && !pickerDisabled.value)
 const selectedTime = computed(() => ({ hour: time.value.slice(0, 2), minute: time.value.slice(3) }))
-const title = computed(() => mode.value === 'cancel' ? '恢复正常下班时间' : mode.value === 'check' ? '核对加班保存状态' : '加班设置')
+const title = computed(() => mode.value === 'cancel' ? '加班取消' : mode.value === 'check' ? '核对加班保存状态' : '加班设置')
 const cancelTimes = computed(() => {
   const context = target.value?.context
   if (!context) return null
@@ -61,6 +61,8 @@ const cancelTimes = computed(() => {
   }
 })
 
+watch(pickerDisabled, disabled => { if (disabled) closePicker(false) })
+
 function showError(value: ContractError) {
   validationError.value = value.code === 'VALIDATION'
   if (value.code === 'VALIDATION') error.value = value.issues.find(item => item.field === '$.expectedEndTime')?.message ?? value.message
@@ -70,7 +72,7 @@ function showError(value: ContractError) {
 
 function close() {
   if (saving.value || !dialog.value?.open) return
-  pickerOpen.value = false
+  closePicker(false)
   dialog.value.close()
   emit('dialog-change', false)
   void nextTick(restoreFocus)
@@ -81,9 +83,10 @@ function restoreFocus() {
   control?.focus()
 }
 
-function closePicker() {
+function closePicker(restore = true) {
+  if (timePicker.value?.matches(':popover-open')) timePicker.value.hidePopover()
   pickerOpen.value = false
-  timeTrigger.value?.focus()
+  if (restore) timeTrigger.value?.focus({ preventScroll: true })
 }
 
 function handleEscape() {
@@ -93,7 +96,7 @@ function handleEscape() {
 
 function dismissPickerOutside(event: MouseEvent) {
   const clicked = event.target as Node
-  if (pickerOpen.value && !timeTrigger.value?.contains(clicked) && !timePicker.value?.contains(clicked)) pickerOpen.value = false
+  if (pickerOpen.value && !timeTrigger.value?.contains(clicked) && !timePicker.value?.contains(clicked)) closePicker(false)
 }
 
 function revealTimeOption(list: HTMLElement, center = false) {
@@ -106,14 +109,19 @@ function revealTimeOption(list: HTMLElement, center = false) {
   else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight
 }
 
-async function togglePicker() {
+async function togglePicker(event: MouseEvent) {
   if (pickerDisabled.value) return
   if (pickerVisible.value) { closePicker(); return }
+  timePicker.value?.showPopover()
   pickerOpen.value = true
   await nextTick()
   const lists = timePicker.value?.querySelectorAll<HTMLElement>('[role="listbox"]')
   lists?.forEach(list => revealTimeOption(list, true))
-  lists?.[0]?.focus({ preventScroll: true })
+  if (event.detail === 0) lists?.[0]?.focus({ preventScroll: true })
+}
+
+function pickerToggled(event: ToggleEvent) {
+  pickerOpen.value = event.newState === 'open'
 }
 
 function selectTime(part: 'hour' | 'minute', value: string) {
@@ -188,7 +196,7 @@ async function submit() {
   if (!target.value || stale.value || props.recovering || loading.value || saving.value) return
   const context = target.value.context
   const input = mode.value === 'cancel' ? null : time.value
-  pickerOpen.value = false
+  closePicker(false)
   error.value = ''
   validationError.value = false
   if (input === context.normalEnd.time) {
@@ -238,18 +246,20 @@ async function checkAgain() {
         </button>
       </header>
       <p v-if="mode === 'cancel' && cancelTimes" :id="`${id}-prompt`">
-        当前已设置加班至 {{ cancelTimes.final }}。<br />
-        确认后，今天的下班时间将恢复为 {{ cancelTimes.normal }}。
+        当前计划加班至 {{ cancelTimes.final }}<br />
+        是否可以准点下班？
       </p>
       <div v-if="mode === 'edit' && target" class="overtime-time">
-        <span :id="`${id}-time-label`" class="overtime-time-label">加班到</span>
+        <span :id="`${id}-time-label`" class="overtime-time-label">加班至</span>
         <button ref="timeTrigger" type="button" class="we-control overtime-time-trigger" :disabled="pickerDisabled"
+          :style="{ 'anchor-name': `--overtime-${id}` }"
           :aria-labelledby="`${id}-time-label ${id}-time-value`" :aria-expanded="pickerVisible"
           :aria-controls="pickerVisible ? `${id}-picker` : undefined" :aria-invalid="validationError || undefined"
           :aria-describedby="`${id}-hint${validationError ? ` ${id}-error` : ''}`" @click="togglePicker">
           <span :id="`${id}-time-value`">{{ time }}</span><UiIcon name="clock" />
         </button>
-        <div v-if="pickerVisible" :id="`${id}-picker`" ref="timePicker" class="overtime-time-picker">
+        <div :id="`${id}-picker`" ref="timePicker" popover="auto" class="overtime-time-picker"
+          :style="{ 'position-anchor': `--overtime-${id}` }" @toggle="pickerToggled" @keydown.esc.stop.prevent="closePicker()">
           <div v-for="column in timeColumns" :key="column.part">
             <div :id="`${id}-${column.part}-label`" class="overtime-column-label">{{ column.label }}</div>
             <div role="listbox" tabindex="0" class="overtime-time-options" :aria-labelledby="`${id}-${column.part}-label`"
@@ -259,17 +269,17 @@ async function checkAgain() {
             </div>
           </div>
         </div>
-        <p :id="`${id}-hint`" class="we-muted">正常下班 {{ target.context.normalEnd.time }}，较早时刻按次日解释。</p>
+        <p :id="`${id}-hint`" class="we-muted">正常下班时间：{{ cancelTimes?.normal }}<br />较早时刻按次日解释</p>
       </div>
       <p v-if="loading" class="we-muted" role="status">正在读取当前班次…</p>
       <p v-if="stale && !saving && !error" class="overtime-error" role="status">当前班次或配置已变化，请重新打开弹窗。</p>
       <p v-if="error" :id="`${id}-error`" class="overtime-error" role="alert">{{ error }}</p>
       <div class="overtime-actions">
-        <button ref="dismiss" type="button" class="we-button" :disabled="saving" @click="close">{{ mode === 'cancel' ? '保留加班' : '取消' }}</button>
+        <button ref="dismiss" type="button" class="we-button" :disabled="saving" @click="close">{{ mode === 'cancel' ? '依旧加班' : '取消' }}</button>
         <button v-if="(recovering && !saving) || mode === 'check'" type="button" class="we-button we-button--primary" :disabled="loading || saving" @click="checkAgain">重试核对</button>
         <button v-else-if="!target && !loading && error" type="button" class="we-button we-button--primary" @click="loadTarget">重新读取</button>
         <button v-else ref="confirm" type="submit" class="we-button we-button--primary" :disabled="!target || stale || loading || saving">
-          {{ saving ? '正在保存…' : mode === 'cancel' ? '确认恢复' : '确认加班' }}
+          {{ saving ? '正在保存…' : mode === 'cancel' ? '到点就跑' : '保存' }}
         </button>
       </div>
     </form>
@@ -332,7 +342,7 @@ async function checkAgain() {
   position: fixed;
   inset: 0;
   margin: auto;
-  width: min(368px, calc(100% - 32px));
+  width: min(300px, calc(100% - 24px));
   height: fit-content;
   max-height: calc(100% - 32px);
   overflow: auto;
@@ -345,7 +355,7 @@ async function checkAgain() {
 }
 .overtime-dialog:where([data-theme="dark"] *) { color-scheme: dark; }
 .overtime-dialog::backdrop { background: rgb(12 35 67 / 25%); }
-.overtime-form { display: grid; gap: 9px; padding: 12px 18px 14px; }
+.overtime-form { display: grid; gap: 8px; padding: 10px 14px 12px; }
 .overtime-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--we-clock, var(--we-text)); }
 .overtime-header h2 { font-size: 20px; line-height: 1.4; font-weight: 700; }
 .overtime-close { color: var(--we-muted); width: 30px; height: 30px; }
@@ -353,25 +363,23 @@ async function checkAgain() {
 .overtime-close path { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 .overtime-time {
   --overtime-picker-blue: #1e55a2;
-  --overtime-picker-selected: #dceafd;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 4px 12px;
+  gap: 6px 10px;
   align-items: center;
   border-radius: 12px;
   background: var(--we-accent-soft);
-  padding: 7px 10px;
+  padding: 7px 8px;
 }
 .overtime-time:where([data-theme="dark"] *) {
   --overtime-picker-blue: #9dc8ff;
-  --overtime-picker-selected: #25436b;
 }
 .overtime-time-label { font-weight: 600; }
 .overtime-time-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
-  justify-self: start;
+  justify-self: end;
   inline-size: 152px;
   max-inline-size: 100%;
   gap: 8px;
@@ -380,53 +388,60 @@ async function checkAgain() {
 }
 .overtime-time-trigger:not(:disabled) { cursor: pointer; }
 .overtime-time-trigger svg { flex: none; width: 17px; height: 17px; color: var(--overtime-picker-blue); }
-.overtime-time-trigger:hover:not(:disabled), .overtime-time-trigger[aria-expanded="true"] { border-color: var(--overtime-picker-blue); }
-.overtime-time .overtime-time-trigger:focus-visible {
-  outline: 2px solid var(--overtime-picker-blue);
-  outline-offset: -2px;
-}
-.overtime-time-options:focus-visible {
-  outline: 1px solid var(--overtime-picker-blue);
+.overtime-time-trigger:hover:not(:disabled) { border-color: var(--overtime-picker-blue); }
+.overtime-dialog button:focus-visible, .overtime-time-options:focus-visible {
+  outline: 1px solid var(--overtime-picker-blue, var(--we-accent));
   outline-offset: 2px;
 }
+.overtime-dialog .overtime-time-trigger:focus-visible, .overtime-time-options:focus-visible { outline-offset: -1px; }
+.overtime-dialog button:focus:not(:focus-visible), .overtime-time-options:focus:not(:focus-visible) { outline: none; }
 .overtime-time-picker {
-  grid-column: 1 / -1;
-  display: grid;
+  position: fixed;
+  inset: auto;
+  top: calc(anchor(bottom) + 6px);
+  left: anchor(left);
+  inline-size: anchor-size(width);
+  max-inline-size: calc(100dvw - 16px);
+  max-block-size: calc(100dvh - 16px);
+  position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  margin-block: 5px 3px;
-  padding: 6px;
+  margin: 0;
+  padding: 8px;
   border: 1px solid var(--we-border);
   border-radius: 10px;
   background: var(--we-surface);
+  color: var(--we-text);
+  box-shadow: var(--we-shadow);
 }
-.overtime-column-label { padding-bottom: 3px; text-align: center; color: var(--we-muted); font-size: var(--we-text-small); }
+.overtime-time-picker:popover-open { display: grid; }
+.overtime-column-label { padding-bottom: 4px; text-align: center; color: var(--we-muted); font-size: var(--we-text-small); }
 .overtime-time-options {
   position: relative;
-  block-size: clamp(56px, calc(100dvh - 260px), 140px);
+  block-size: min(126px, 30dvh);
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--we-border) transparent;
+  border: 1px solid var(--we-border);
   border-radius: 6px;
+  font-size: 14px;
 }
 .overtime-time-options [role="option"] {
-  min-block-size: 28px;
-  padding: 3px 6px;
-  border-radius: 5px;
+  padding: 3px 4px;
   text-align: center;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
 .overtime-time-options [role="option"]:hover { background: var(--we-subtle); }
 .overtime-time-options [role="option"][aria-selected="true"] {
-  color: var(--overtime-picker-blue);
-  background: var(--overtime-picker-selected);
+  color: var(--we-text);
+  background: var(--we-accent-soft);
   font-weight: 600;
 }
 .overtime-time p { grid-column: 1 / -1; }
 .overtime-error { color: var(--we-danger-text); overflow-wrap: anywhere; }
-.overtime-actions { display: grid; grid-template-columns: 1fr 1.3fr; gap: 10px; }
+.overtime-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .overtime-actions .we-button { border-radius: 999px; min-height: 34px; font-weight: 600; }
 .overtime-actions .we-button:hover:not(:disabled) { filter: brightness(.96); }
 @media (forced-colors: active) {

@@ -95,7 +95,7 @@ async function captureHiddenPage(output: string, name: string) {
   writeFileSync(join(output, `${name}.png`), Buffer.from(png, 'base64'))
 }
 
-test('DEV-01 round 3 captures the actual Electron time picker and success toast', async () => {
+test('DEV-01 final dialogs keep their geometry while the Electron picker floats above them', async () => {
   const config = fixture()
   const workDate = new Date().toLocaleDateString('sv-SE')
   config.calendar.overrides[workDate] = 'work'
@@ -103,35 +103,48 @@ test('DEV-01 round 3 captures the actual Electron time picker and success toast'
   seed(config)
   const page = await launch(true, undefined, true)
   await application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setBackgroundThrottling(false))
-  const output = resolve('test-results/v213-overtime-round3-electron')
+  const output = resolve('test-results/v213-overtime-final-electron')
   mkdirSync(output, { recursive: true })
   const capture = (name: string) => captureHiddenPage(output, name)
+  const dialogLayout = () => page.locator('.overtime-dialog, .overtime-dialog .overtime-form, .overtime-dialog .overtime-time p, .overtime-dialog .overtime-actions')
+    .evaluateAll(elements => elements.map(element => element.getBoundingClientRect().toJSON()))
+  const pickerGeometry: unknown[] = []
+  let closedLayout: Awaited<ReturnType<typeof dialogLayout>> = []
   const assertPickerFits = async () => {
     const layout = await page.locator('.overtime-dialog').evaluate(dialog => {
       const root = document.documentElement
       return {
         frame: dialog.getBoundingClientRect().toJSON(),
         picker: dialog.querySelector('.overtime-time-picker')!.getBoundingClientRect().toJSON(),
-        actions: dialog.querySelector('.overtime-actions')!.getBoundingClientRect().toJSON(),
+        trigger: dialog.querySelector('.overtime-time-trigger')!.getBoundingClientRect().toJSON(),
         width: root.clientWidth,
         height: root.clientHeight
       }
     })
-    const { frame, picker, actions, width, height } = layout
+    const { frame, picker, trigger, width, height } = layout
     expect(Math.abs((frame.left + frame.right) / 2 - width / 2), JSON.stringify(layout)).toBeLessThanOrEqual(1)
     expect(Math.abs((frame.top + frame.bottom) / 2 - height / 2), JSON.stringify(layout)).toBeLessThanOrEqual(1)
-    expect(picker.left >= frame.left && picker.right <= frame.right && picker.bottom < actions.top &&
-      actions.bottom <= frame.bottom && frame.bottom <= height, JSON.stringify(layout)).toBe(true)
+    expect(picker.left >= 0 && picker.right <= width && picker.top >= 0 && picker.bottom <= height, JSON.stringify(layout)).toBe(true)
+    expect(Math.abs(picker.width-trigger.width)).toBeLessThanOrEqual(1)
+    expect(await dialogLayout()).toEqual(closedLayout)
+    expect(await page.locator('.overtime-time-picker').evaluate(element=>element.matches(':popover-open'))).toBe(true)
+    expect(await page.locator('.overtime-time-picker').evaluate(element=>{
+      const box=element.getBoundingClientRect()
+      return element.contains(document.elementFromPoint(box.left+box.width/2,box.bottom-3))
+    })).toBe(true)
+    pickerGeometry.push(layout)
   }
   const toggle = page.getByRole('switch', { name: '今日加班' })
   const dialog = page.getByRole('dialog')
-  const time = dialog.getByRole('button', { name: /^加班到/ })
+  const time = dialog.getByRole('button', { name: /^加班至/ })
   const hours = dialog.getByRole('listbox', { name: '小时' })
   const minutes = dialog.getByRole('listbox', { name: '分钟' })
   await page.emulateMedia({ colorScheme: 'light' })
   await activate(toggle)
-  await expect(time).toHaveAccessibleName('加班到 18:00')
+  await expect(time).toHaveAccessibleName('加班至 18:00')
   await expect(time).toHaveCSS('width', '152px')
+  await expect(dialog).toHaveCSS('width','300px')
+  closedLayout=await dialogLayout()
   await capture('time-compact')
   await activate(time)
   await expect(hours.getByRole('option', { selected: true })).toBeInViewport()
@@ -139,26 +152,29 @@ test('DEV-01 round 3 captures the actual Electron time picker and success toast'
   await capture('time-picker')
   await activate(hours.getByRole('option', { name: '19', exact: true }))
   await activate(minutes.getByRole('option', { name: '30', exact: true }))
-  await expect(time).toHaveAccessibleName('加班到 19:30')
+  await expect(time).toHaveAccessibleName('加班至 19:30')
   await activate(dialog.getByRole('heading'))
   await expect(hours).toHaveCount(0)
   await capture('time-selected')
 
   await application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1.5))
   await expect.poll(() => page.evaluate(() => devicePixelRatio)).toBeCloseTo(1.5, 1)
+  closedLayout=await dialogLayout()
   await activate(time)
   await expect(minutes.getByRole('option', { selected: true })).toBeInViewport()
   await assertPickerFits()
   await capture('time-picker-150')
   await application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1))
 
-  await activate(dialog.getByRole('button', { name: '确认加班' }))
+  await activate(dialog.getByRole('button', { name: '保存' }))
   await expect(toggle).toHaveAttribute('aria-checked', 'true')
   const saved = value(await page.evaluate(() => window.workdayV2.config.read())).config
   expect(saved.overtime.entries).toEqual([{ shiftDate: workDate, minutes: 90 }])
   await activate(toggle)
-  await expect(dialog).toHaveAccessibleName('恢复正常下班时间')
-  await activate(dialog.getByRole('button', { name: '确认恢复' }))
+  await expect(dialog).toHaveAccessibleName('加班取消')
+  await expect(dialog).toHaveCSS('width','300px')
+  await capture('cancel-dialog')
+  await activate(dialog.getByRole('button', { name: '到点就跑' }))
   await expect(toggle).toHaveAttribute('aria-checked', 'false')
   const toast = page.getByRole('status').filter({ hasText: '今天不加班，回去好好休息～' })
   await expect(toast).toHaveCSS('background-color', 'rgb(230, 246, 236)')
@@ -167,6 +183,7 @@ test('DEV-01 round 3 captures the actual Electron time picker and success toast'
   await expect(toast).toHaveCSS('background-color', 'rgb(206, 232, 214)')
   await capture('cancel-success-dark')
   expect(value(await page.evaluate(() => window.workdayV2.config.read())).config.overtime.entries).toEqual([])
+  writeFileSync(join(output,'picker-geometry.json'),JSON.stringify(pickerGeometry,null,2))
   await hidden()
 })
 
@@ -649,7 +666,7 @@ test('V2.1.3 DEV-02 settings choose, save and restart with overtime history inta
   expect(saved.employee.startDate).toBe('2025-07-20')
   expect(saved.overtime).toEqual(config.overtime)
   await activate(page.getByRole('button', { name: '修改加班时间' }))
-  await expect(page.getByRole('dialog').getByRole('button', { name: '加班到 20:15' })).toBeVisible()
+  await expect(page.getByRole('dialog').getByRole('button', { name: '加班至 20:15' })).toBeVisible()
   await activate(page.getByRole('dialog').getByRole('button', { name: '关闭' }))
   await hidden()
 
