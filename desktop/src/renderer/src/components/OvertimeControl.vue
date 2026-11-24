@@ -269,7 +269,7 @@ async function checkAgain() {
             </div>
           </div>
         </div>
-        <p :id="`${id}-hint`" class="we-muted">正常下班时间：{{ cancelTimes?.normal }}<br />较早时刻按次日解释</p>
+        <p :id="`${id}-hint`" class="we-muted">正常下班时间：{{ target.context.normalEnd.time }}</p>
       </div>
       <p v-if="loading" class="we-muted" role="status">正在读取当前班次…</p>
       <p v-if="stale && !saving && !error" class="overtime-error" role="status">当前班次或配置已变化，请重新打开弹窗。</p>
