@@ -1,6 +1,6 @@
 # Workday Escape 开发者文档
 
-桌面版使用 **Vue 3、TypeScript 和 Electron**。当前正式版本为 **v2.1.2**。下载与使用请看 [项目首页](../README.md)。[GitHub Release](https://github.com/ZY0219z/Workday-countdown/releases/tag/v2.1.2)
+桌面版使用 **Vue 3、TypeScript 和 Electron**。当前正式版本为 **v2.1.3**。下载与使用请看 [项目首页](../README.md)。[GitHub Release](https://github.com/ZY0219z/Workday-countdown/releases/tag/v2.1.3)
 
 ## 开发环境与启动
 
@@ -39,11 +39,12 @@ IPC 校验已登记窗口、当前主 Frame、精确页面 URL 和窗口角色�
 从 `desktop/` 运行构建命令，每次选择一个新的输出目录，保留历史候选。
 
 ```powershell
-npm run package:win -- --config.directories.output=release/local-v212-example
+npm run package:win -- --config.directories.output=release/local-v213-example
 ```
 
-该命令使用 electron-builder 生成 Windows x64 Portable `Workday Escape.exe`。`--publish never` 使构建与发布分开。交付 ZIP `Workday-Escape-v2.1.2-Portable.zip` 的根目录只有这个 EXE，`win-unpacked/` 等构建产物用于本地核验。
+该命令使用 electron-builder 生成 Windows x64 Portable `Workday Escape.exe`。`--publish never` 使构建与发布分开。交付 ZIP `Workday-Escape-v2.1.3-Portable.zip` 的根目录只有这个 EXE，`win-unpacked/` 等构建产物用于本地核验。语言资源仅保留 `en-US`、`zh-CN`、`zh-TW`，沿用默认压缩。
 
+- [V2.1.3 开发、验收及正式发布记录](../docs/version/V2.1.3/V2.1.3_TASKS.md)
 - [V2.1.2 年度维护及封版验收记录](../docs/version/V2.1.2/V2.1.2_TASKS.md)
 - [V2.1.2 2027 年日历核验](../docs/version/V2.1.2/D04_CALENDAR_VERIFICATION.md#year2027)
 - [V2.1.1 构建、产物身份及验收记录](../docs/version/V2.1.1/V2.1.1_TASKS.md)
